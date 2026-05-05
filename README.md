@@ -80,6 +80,11 @@ Flags:
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
   **Not a safe-harbor guarantee** — review before sharing.
+- `--plink-sex` — interpret the sex column with PLINK's encoding
+  (`1 = male, 2 = female`) instead of the script default
+  (`0 = female, 1 = male`).
+- `--zero-as-missing` — treat `0` in `mother`/`father` columns as
+  missing (PLINK fam convention).
 
 ### Validate a pedigree
 
@@ -101,15 +106,91 @@ etc.) cause the fixed TSV to be skipped — fix the source data first.
 
 ## Input format
 
-TSV with at minimum the columns `id`, `sex`, `mother`, `father`
-(column names overridable via `--id-col` / `--sex-col` /
-`--mother-col` / `--father-col`).
+TSV (tab-separated; `.tsv` or `.tsv.gz`) with at minimum the columns
+`id`, `sex`, `mother`, `father` — header row required. Column names
+are overridable via `--id-col` / `--sex-col` / `--mother-col` /
+`--father-col`.
 
-- `id`: non-negative integer, unique per row.
-- `sex`: `M`/`F` or `1`/`0` (1 = male, 0 = female).
-- `mother`, `father`: parent IDs; `-1` for unknown/founder.
+- `id`: non-negative integer, unique per row. **Strings (e.g.
+  `"P001"`) are not accepted** — see "Preparing your data" below.
+- `sex`: `M`/`F` (any case), `Male`/`Female`, or `0`/`1` with **0 =
+  female, 1 = male**. ⚠️ **This is the opposite of PLINK's
+  convention** (PLINK uses `1 = male, 2 = female`). For PLINK-encoded
+  data pass `--plink-sex`.
+- `mother`, `father`: parent IDs; `-1` for unknown/founder. The
+  tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any
+  case) are also recognised as missing. To treat literal `0` as
+  missing (PLINK fam convention), pass `--zero-as-missing`.
 
-Half-founders (one parent `-1`, the other a valid ID) are accepted.
+Half-founders (one parent missing, the other a valid ID) are
+accepted.
+
+## Preparing your data
+
+Most real-world pedigree files need a small preprocessing step to fit
+the input format. Common cases:
+
+### PLINK `.fam` files
+
+A PLINK `.fam` file is whitespace-separated, has six columns
+(`FID IID PAT MAT SEX PHENO`), no header, uses `0` for missing
+parents, and encodes sex as `1 = male, 2 = female`. To run pedsum on
+it directly:
+
+```bash
+# Add a header, convert spaces → tabs:
+{ printf 'FID\tIID\tPAT\tMAT\tSEX\tPHENO\n'; tr -s ' ' '\t' < cohort.fam; } > cohort.tsv
+
+python pedigree_summary.py summarize \
+    --in cohort.tsv --out cohort \
+    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX \
+    --plink-sex --zero-as-missing
+```
+
+### CSV (comma-separated)
+
+```bash
+tr ',' '\t' < input.csv > input.tsv
+```
+
+(or `python -c "import pandas as pd; pd.read_csv('input.csv').to_csv('input.tsv', sep='\t', index=False)"` if quoted commas matter.)
+
+### String IDs (`"P001"`, `"FAM01-003"`, …)
+
+The relationship enumerator requires integer IDs. Map them to ints
+once and keep a lookup table:
+
+```python
+import pandas as pd
+df = pd.read_csv("clinical.tsv", sep="\t", dtype=str)
+all_ids = pd.unique(df[["id", "mother", "father"]].values.ravel())
+all_ids = all_ids[all_ids != "-1"]
+lut = {sid: i for i, sid in enumerate(sorted(all_ids))}
+for col in ("id", "mother", "father"):
+    df[col] = df[col].map(lambda x: lut.get(x, -1)).astype(int)
+df.to_csv("clinical_int.tsv", sep="\t", index=False)
+pd.Series(lut).to_csv("id_lookup.tsv", sep="\t")
+```
+
+### Excel (`.xlsx`)
+
+Open in Excel/LibreOffice and "Save As" → tab-delimited, or:
+
+```python
+import pandas as pd
+pd.read_excel("input.xlsx").to_csv("input.tsv", sep="\t", index=False)
+```
+
+## Troubleshooting
+
+| Error | Likely cause | Fix |
+|---|---|---|
+| `input appears to be CSV` | comma-separated input | convert as above |
+| `column 'id' must be integer-valued` | string/alphanumeric IDs | map to ints |
+| `sex column has N invalid value(s)` showing `'2'` | PLINK 1/2 encoding | add `--plink-sex` |
+| `id=0 referenced as mother/father` | file uses `0` for missing | add `--zero-as-missing` |
+| `column 'mother' must be integer-valued` showing `NA` or non-finite | non-standard missing token | replace with `-1`, `NA`, blank, or `.` |
+| `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |
 
 ### Topological depth (`ped_depth`)
 

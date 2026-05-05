@@ -31,7 +31,12 @@ pedigrees.
 annotated TSV, drops min/max from distributions, nulls counts and
 strata below cell-size 5). Not a safe-harbor guarantee.
 
-Sex encoding: 0=female, 1=male (matches simace).
+Sex encoding: by default 0=female, 1=male; M/F (any case) and
+Male/Female are also accepted. Pass ``--plink-sex`` for PLINK's
+1=male, 2=female encoding. Missing parents: ``-1`` (default), or any
+of ``NA``, ``NaN``, ``N/A``, ``.``, ``?``, blank, ``None``, ``null``
+case-insensitively. Pass ``--zero-as-missing`` to treat ``0`` as
+missing (PLINK fam convention).
 
 Usage:
     python pedigree_summary.py summarize --in PED.tsv --out BASENAME [options]
@@ -61,7 +66,7 @@ import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import yaml
 
-VERSION = "0.2"
+VERSION = "0.3"
 SEX_FEMALE = 0
 SEX_MALE = 1
 INBRED_TOL = 1e-9
@@ -400,11 +405,34 @@ def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray,
 # ---------------------------------------------------------------------------
 
 
-def _decode_sex(series: pd.Series) -> np.ndarray:
+_PARENT_MISSING_TOKENS: frozenset[str] = frozenset({
+    "", "NA", "NAN", "N/A", ".", "?", "NONE", "NULL",
+})
+
+
+def _decode_sex(series: pd.Series, plink: bool = False) -> np.ndarray:
+    """Parse a sex column. Accepts M/F (any case) and Male/Female by default.
+
+    Numeric encoding: 0=female, 1=male (matches the script's internal
+    convention). When ``plink=True``, numeric encoding is 1=male, 2=female
+    (PLINK convention).
+    """
     str_vals = series.astype(str).str.strip()
+    upper = str_vals.str.upper()
     out = np.full(len(str_vals), -1, dtype=np.int8)
-    out[(str_vals == "F") | (str_vals == "0")] = SEX_FEMALE
-    out[(str_vals == "M") | (str_vals == "1")] = SEX_MALE
+    female_words = (upper == "F") | (upper == "FEMALE")
+    male_words = (upper == "M") | (upper == "MALE")
+    if plink:
+        out[female_words | (str_vals == "2")] = SEX_FEMALE
+        out[male_words | (str_vals == "1")] = SEX_MALE
+        allowed = "M/F (any case), Male/Female, or 1/2 (1=male, 2=female; PLINK convention)."
+    else:
+        out[female_words | (str_vals == "0")] = SEX_FEMALE
+        out[male_words | (str_vals == "1")] = SEX_MALE
+        allowed = (
+            "M/F (any case), Male/Female, or 0/1 (0=female, 1=male). "
+            "Pass --plink-sex if your file uses 1=male, 2=female."
+        )
     bad = out == -1
     if bad.any():
         bad_rows = np.where(bad)[0][:5]
@@ -412,7 +440,7 @@ def _decode_sex(series: pd.Series) -> np.ndarray:
         raise PedigreeError(
             f"sex column has {int(bad.sum())} invalid value(s); "
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
-            "Allowed: M/F or 0/1 (0=female, 1=male; matches simace)."
+            f"Allowed: {allowed}"
         )
     return out
 
@@ -424,12 +452,53 @@ def _as_int_col(series: pd.Series, name: str) -> np.ndarray:
         raise PedigreeError(f"column {name!r} must be integer-valued; failed to parse: {e}") from None
 
 
+def _maybe_warn_csv(df: pd.DataFrame) -> None:
+    """Raise a clear error when the file looks like CSV but was read as TSV.
+
+    Detected by a single column whose name contains commas (TSV reader
+    treats the entire comma-joined header as one column).
+    """
+    if len(df.columns) == 1 and "," in str(df.columns[0]):
+        raise PedigreeError(
+            f"input appears to be CSV (single column {df.columns[0]!r}); "
+            "this script reads TSV (tab-separated). Convert with: "
+            "tr ',' '\\t' < input.csv > input.tsv"
+        )
+
+
+def _as_parent_int_col(
+    series: pd.Series, name: str, zero_as_missing: bool = False,
+) -> np.ndarray:
+    """Parse a parent-ID column, with NA-like tokens (and optionally 0) → -1.
+
+    Recognised missing tokens (case-insensitive): empty string, NA, NaN,
+    N/A, ".", "?", None, null. With ``zero_as_missing=True``, the literal
+    integer 0 is also remapped to -1 (PLINK fam convention).
+    """
+    filled = series.where(series.notna(), "-1")
+    str_vals = filled.astype(str).str.strip()
+    missing_mask = str_vals.str.upper().isin(_PARENT_MISSING_TOKENS)
+    cleaned = str_vals.where(~missing_mask, "-1")
+    try:
+        arr = pd.to_numeric(cleaned, errors="raise").astype(np.int64).to_numpy(copy=True)
+    except (ValueError, TypeError) as e:
+        raise PedigreeError(
+            f"column {name!r} must be integer-valued (with -1, NA, blank, "
+            f"or empty for unknown); failed to parse: {e}"
+        ) from None
+    if zero_as_missing:
+        arr[arr == 0] = -1
+    return arr
+
+
 def load_and_validate(
     path: Path,
     id_col: str = "id",
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
+    plink_sex: bool = False,
+    zero_as_missing: bool = False,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
 
@@ -444,6 +513,7 @@ def load_and_validate(
     t0 = time.perf_counter()
     df = pd.read_csv(path, sep="\t", dtype=str)
     logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
+    _maybe_warn_csv(df)
 
     needed = {id_col, sex_col, mother_col, father_col}
     miss_cols = needed - set(df.columns)
@@ -457,9 +527,9 @@ def load_and_validate(
     _raise_first(_check_empty_pedigree(len(df)))
 
     ids = _as_int_col(df[id_col], id_col)
-    mothers = _as_int_col(df[mother_col], mother_col)
-    fathers = _as_int_col(df[father_col], father_col)
-    sex = _decode_sex(df[sex_col])
+    mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
+    fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
+    sex = _decode_sex(df[sex_col], plink=plink_sex)
 
     n = len(ids)
 
@@ -543,6 +613,8 @@ def validate_pedigree(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
+    plink_sex: bool = False,
+    zero_as_missing: bool = False,
 ) -> tuple[int, list[CheckResult], list[Finding], dict]:
     """Run every integrity check accumulating.
 
@@ -555,6 +627,7 @@ def validate_pedigree(
         raise PedigreeError(f"input file not found: {path}")
 
     df = pd.read_csv(path, sep="\t", dtype=str)
+    _maybe_warn_csv(df)
     n = len(df)
     findings: list[Finding] = []
     results: dict[str, CheckResult] = {
@@ -589,9 +662,9 @@ def validate_pedigree(
         count=len(empty_findings),
     )
 
-    def _coerce_int(col_name: str, label: str) -> np.ndarray | None:
+    def _coerce_int(col_name: str, label: str, parser=_as_int_col) -> np.ndarray | None:
         try:
-            arr = _as_int_col(df[col_name], col_name)
+            arr = parser(df[col_name], col_name)
             results[label] = CheckResult(name=label, status="PASS")
         except PedigreeError as e:
             findings.append(Finding(check=label, detail=str(e)))
@@ -599,12 +672,15 @@ def validate_pedigree(
             return None
         return arr
 
+    def _parent_parser(s: pd.Series, name: str) -> np.ndarray:
+        return _as_parent_int_col(s, name, zero_as_missing=zero_as_missing)
+
     ids = _coerce_int(id_col, "id_dtype")
-    mothers = _coerce_int(mother_col, "mother_dtype")
-    fathers = _coerce_int(father_col, "father_dtype")
+    mothers = _coerce_int(mother_col, "mother_dtype", _parent_parser)
+    fathers = _coerce_int(father_col, "father_dtype", _parent_parser)
     sex: np.ndarray | None = None
     try:
-        sex = _decode_sex(df[sex_col])
+        sex = _decode_sex(df[sex_col], plink=plink_sex)
         results["sex_tokens"] = CheckResult(name="sex_tokens", status="PASS")
     except PedigreeError as e:
         findings.append(Finding(check="sex_tokens", detail=str(e)))
@@ -2346,6 +2422,19 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_format_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--plink-sex", action="store_true",
+        help="interpret the sex column with the PLINK convention (1=male, "
+        "2=female) instead of the default 0=female, 1=male",
+    )
+    p.add_argument(
+        "--zero-as-missing", action="store_true",
+        help="treat 0 in mother/father columns as missing (PLINK fam "
+        "convention). NA/blank/N/A/./? are always treated as missing.",
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = _FullHelpParser(
         prog="pedigree_summary.py",
@@ -2353,6 +2442,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Pedigree summary CLI. Self-contained: depends only on "
             "numpy, scipy, pandas, pyyaml."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {VERSION}",
     )
     sub = parser.add_subparsers(dest="subcommand", parser_class=_FullHelpParser)
 
@@ -2375,16 +2467,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p_sum.add_argument(
         "--sex-col", default="sex", metavar="NAME",
-        help="column name for sex; accepts M/F or 0/1 with 0=female, "
-        "1=male (default: %(default)s)",
+        help="column name for sex; accepts M/F (any case), Male/Female, or "
+        "0/1 (default: %(default)s; 0=female, 1=male). See --plink-sex.",
     )
     p_sum.add_argument(
         "--mother-col", default="mother", metavar="NAME",
-        help="column name for mother ID; -1 for unknown (default: %(default)s)",
+        help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_sum.add_argument(
         "--father-col", default="father", metavar="NAME",
-        help="column name for father ID; -1 for unknown (default: %(default)s)",
+        help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_sum.add_argument(
         "--inbreeding",
@@ -2399,6 +2491,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "annotated TSV, drop min/max from distributions, and null any "
         "count or stratum below cell-size 5. Not a safe-harbor guarantee.",
     )
+    _add_format_args(p_sum)
     _add_logging_args(p_sum)
 
     p_val = sub.add_parser("validate", help="run all integrity checks accumulating; report issues")
@@ -2420,17 +2513,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p_val.add_argument(
         "--mother-col", default="mother", metavar="NAME",
-        help="column name for mother ID; -1 for unknown (default: %(default)s)",
+        help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_val.add_argument(
         "--father-col", default="father", metavar="NAME",
-        help="column name for father ID; -1 for unknown (default: %(default)s)",
+        help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_val.add_argument(
         "--no-sex-check", action="store_true",
         help="bypass the sex-conflict check on missing parents; auto-added "
         "founders default to sex=F when the role is ambiguous (default: off)",
     )
+    _add_format_args(p_val)
     _add_logging_args(p_val)
 
     args = parser.parse_args(argv)
@@ -2458,6 +2552,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             sex_col=args.sex_col,
             mother_col=args.mother_col,
             father_col=args.father_col,
+            plink_sex=args.plink_sex,
+            zero_as_missing=args.zero_as_missing,
         )
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
@@ -2542,6 +2638,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             sex_col=args.sex_col,
             mother_col=args.mother_col,
             father_col=args.father_col,
+            plink_sex=args.plink_sex,
+            zero_as_missing=args.zero_as_missing,
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
