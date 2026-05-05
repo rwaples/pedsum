@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Sample run outputs (don't commit pedigree data or summaries)
+*.summary.yaml
+*.summary.pedigree.tsv
+*.summary.individual.tsv
+*.annotated.tsv.gz
+*.validate.log
+*.validate.tsv.gz
