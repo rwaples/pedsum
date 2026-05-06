@@ -5,14 +5,14 @@ machine-readable summaries: size, structure, family-size distribution,
 relationship-pair counts (23 named codes through degree 5 plus
 `by_degree` rollup), and per-individual statistics.
 
-The relationship-pair enumerator is a vendored copy of
-`simace.core.pedigree_graph` so the script ships as a single file with
-no `simace` dependency at runtime.
+Both relationship-pair engines (matrix and an experimental BFS path)
+delegate to the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph)
+package — pedsum is a thin CLI wrapper plus pedigree validation, family-size
+distribution, and per-individual outputs.
 
 ## Install
 
-Python ≥ 3.10 required (uses `functools.cached_property`, modern
-type-hint syntax, `datetime.UTC`). Activate your env
+Python ≥ 3.13 required (matches `pedigree-graph`). Activate your env
 (`conda activate myenv` or `source venv/bin/activate`) and install
 dependencies:
 
@@ -20,13 +20,18 @@ dependencies:
 
 ```bash
 conda install -c conda-forge numpy scipy pandas pyyaml
+pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.2.0"
 ```
 
 **pip:**
 
 ```bash
 pip install numpy scipy pandas pyyaml
+pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.2.0"
 ```
+
+(`pedigree-graph` brings in `numba` transitively for the BFS engine's
+parallel kernel.)
 
 Optional: install `pigz` for ~3× faster `.tsv.gz` writes (the script
 falls back to gzip-1 when absent):
@@ -85,6 +90,12 @@ Flags:
   (`0 = female, 1 = male`).
 - `--zero-as-missing` — treat `0` in `mother`/`father` columns as
   missing (PLINK fam convention).
+- `--engine {auto,matrix,bfs}` — relationship-pair enumeration engine.
+  `auto` (default) picks `bfs` when `n` is at or above the threshold,
+  otherwise `matrix`. The `bfs` engine is **experimental** — see
+  "Choosing an engine" below.
+- `--bfs-threshold N` — auto-select threshold for the bfs engine
+  (default: 5,000,000).
 
 ### Validate a pedigree
 
@@ -254,10 +265,25 @@ Floats are rounded to 4 decimal places.
 
 ## Notes
 
-- This is a snapshot. The relationship enumerator was vendored from
-  `simace.core.pedigree_graph`; if the upstream algorithm is updated
-  for correctness, refresh Section 3a of `pedigree_summary.py`.
+- Both engines delegate to the `pedigree-graph` package; bug fixes
+  there propagate automatically on `pip install -U`.
 - For pedigrees with sparse/non-contiguous IDs the script
   internally compacts to dense `0..n-1` before enumeration, so the
-  vendored matrix-power machinery never allocates `max(id)+1`-sized
-  arrays.
+  underlying machinery never allocates `max(id)+1`-sized arrays.
+- **Choosing an engine**:
+    - The `matrix` engine (default for n < 5M) uses sparse matrix
+      powers `A^k`. Fastest when its intermediate sparse products fit
+      in RAM.
+    - The `bfs` engine is **experimental** — auto-selected for
+      n ≥ 5M. It uses boolean (set-union) sparse matmul plus a parallel
+      numba kernel. Its scalability advantage at very large pedigrees
+      (where the matrix engine OOMs) is unverified — at n=2M the
+      matrix engine actually wins head-to-head (see
+      `STATUS.md`). The engine may change or be removed in any
+      `pedigree-graph` minor release; both pedsum's CLI warning and
+      the package's `FutureWarning` fire on selection.
+    - Both engines emit identical counts on non-inbred pedigrees. On
+      inbred pedigrees they disagree on cousin-style codes (`1C1R`,
+      `H1C1R`, `1C2R`, `2C`): matrix counts *paths* (multiplicity),
+      bfs counts *distinct shared ancestors*. The YAML
+      `pairs_engine` field records which engine produced each summary.
