@@ -1014,9 +1014,12 @@ def compute_aggregate_sections(
         "frac_terminal": float(no_children.sum()) / n,
         "offspring": _numeric_distribution(idf["n_offspring"]),
         "mates": _numeric_distribution(idf["n_mates"]),
-        "ancestors": _numeric_distribution(idf["n_ancestors"]),
         "descendants": _numeric_distribution(idf["n_descendants"]),
     }
+    if include_inbreeding:
+        lineage["ancestors"] = _numeric_distribution(idf["n_ancestors"])
+    else:
+        lineage["ancestors"] = None
 
     n_founders = int(founders.sum())
     founders_with_desc = int((descendant_counts > 0).sum()) if n_founders else 0
@@ -1082,10 +1085,11 @@ def compute_aggregate_sections(
             "offspring": _numeric_distribution(sub["n_offspring"]),
             "offspring_dist": _offspring_dist(sub["n_offspring"].to_numpy(), len(sub)),
             "mates": _numeric_distribution(sub["n_mates"]),
-            "mean_ancestors": float(sub["n_ancestors"].mean()),
+            "mean_ancestors": None,
             "mean_descendants": float(sub["n_descendants"].mean()),
         }
         if include_inbreeding:
+            row["mean_ancestors"] = float(sub["n_ancestors"].mean())
             row["mean_F"] = float(sub["F"].mean())
             row["max_F"] = float(sub["F"].max())
             row["n_inbred"] = int((sub["F"] > INBRED_TOL).sum())
@@ -1844,7 +1848,7 @@ def _build_individual_data(
     n = len(idf)
     distributions: dict[str, dict] = {}
     for col in _NUMERIC_COLS:
-        if col == "F" and not include_inbreeding:
+        if col in {"F", "n_ancestors"} and not include_inbreeding:
             continue
         if col not in idf.columns:
             continue

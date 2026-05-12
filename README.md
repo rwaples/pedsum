@@ -254,8 +254,8 @@ The `summary.yaml` contains:
   distributions, and within-generation related-pair density. These
   pair-list-derived fields are exact for the matrix engine and marked
   unavailable for the experimental BFS engine.
-- `lineage` — reproductive, terminal, ancestor, and descendant
-  distributions.
+- `lineage` — reproductive, terminal, and descendant distributions;
+  ancestor distributions are populated only with `--inbreeding`.
 - `founder_contribution` — founder descendant-path contribution and
   effective founder count.
 - `founder_generation` — active founder lines and effective founder

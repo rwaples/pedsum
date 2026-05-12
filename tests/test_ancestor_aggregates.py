@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pedigree_summary import (  # noqa: E402
+    SEX_FEMALE,
+    SEX_MALE,
+    _build_individual_data,
+    compute_aggregate_sections,
+)
+
+
+def _individual_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "sex": [SEX_MALE, SEX_FEMALE, SEX_MALE],
+            "mother": [-1, -1, 2],
+            "father": [-1, -1, 1],
+            "ped_depth": [0, 0, 1],
+            "is_founder": [True, True, False],
+            "F": [0.0, 0.0, 0.25],
+            "n_full_sibs": [0, 0, 0],
+            "n_mat_half_sibs": [0, 0, 0],
+            "n_pat_half_sibs": [0, 0, 0],
+            "n_offspring": [1, 1, 0],
+            "n_mates": [1, 1, 0],
+            "component_id": [0, 0, 0],
+            "n_grandparents": [0, 0, 2],
+            "n_grandchildren": [1, 1, 0],
+            "n_uncles_aunts": [0, 0, 0],
+            "n_first_cousins": [0, 0, 0],
+            "n_ancestors": np.array([0, 0, 2], dtype=np.int32),
+            "n_descendants": np.array([1, 1, 0], dtype=np.int32),
+        }
+    )
+
+
+def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
+    idf = _individual_df()
+
+    aggregates = compute_aggregate_sections(idf, include_inbreeding=False)
+
+    assert aggregates["lineage"]["ancestors"] is None
+    assert all(row["mean_ancestors"] is None for row in aggregates["generation_summary"])
+
+
+def test_default_individual_data_omits_ancestor_distribution() -> None:
+    idf = _individual_df()
+
+    out = _build_individual_data(
+        idf,
+        Path("ped.tsv"),
+        "pedigree_summary.py summarize --in ped.tsv --out out",
+        include_inbreeding=False,
+    )
+
+    assert "F" not in out["distributions"]
+    assert "n_ancestors" not in out["distributions"]
+
+
+def test_inbreeding_mode_reports_ancestor_stats() -> None:
+    idf = _individual_df()
+
+    aggregates = compute_aggregate_sections(idf, include_inbreeding=True)
+    out = _build_individual_data(
+        idf,
+        Path("ped.tsv"),
+        "pedigree_summary.py summarize --in ped.tsv --out out --inbreeding",
+        include_inbreeding=True,
+    )
+
+    assert aggregates["lineage"]["ancestors"]["max"] == 2
+    gen1 = next(row for row in aggregates["generation_summary"] if row["gen"] == 1)
+    assert gen1["mean_ancestors"] == 2.0
+    assert out["distributions"]["n_ancestors"]["max"] == 2
