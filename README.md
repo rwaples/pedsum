@@ -3,7 +3,9 @@
 A single-file Python CLI for validating pedigrees and producing
 machine-readable summaries: size, structure, family-size distribution,
 relationship-pair counts (23 named codes through degree 5 plus
-`by_degree` rollup), and per-individual statistics.
+`by_degree` rollup), mating-pair structure, founder contribution,
+component/lineage/sex/generation aggregates, and per-individual
+statistics.
 
 Both relationship-pair engines (matrix and an experimental BFS path)
 delegate to the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph)
@@ -73,7 +75,7 @@ Writes:
 | File | Contents |
 |---|---|
 | `BASENAME.summary.yaml` | combined pedigree + individual summary |
-| `BASENAME.summary.pedigree.tsv` | long-form pedigree-level summary |
+| `BASENAME.summary.pedigree.tsv` | long-form pedigree-level summary: size/link structure, family sizes, mating pairs, lineage, founder contribution, components, sex/generation aggregates, relationship-pair counts, and optional inbreeding |
 | `BASENAME.summary.individual.tsv` | long-form per-individual distribution |
 | `BASENAME.annotated.tsv.gz` | input pedigree + per-individual columns *(suppressed under `--safe-attempt`)* |
 
@@ -244,7 +246,25 @@ id	sex	mother	father
 The `summary.yaml` contains:
 
 - `size_structure` — counts, generation depth, connected components.
-- `family_size` — sibship size distribution and offspring/mate counts.
+- `family_size` — sibship and per-person offspring distributions.
+- `mating_pairs` — mating-pair counts, children-per-pair distribution,
+  mate-count distributions, and effective pair count.
+- `relationship_summary` — unique related/unrelated pair counts,
+  related-pair density, closest-degree and relatives-by-degree
+  distributions, and within-generation related-pair density. These
+  pair-list-derived fields are exact for the matrix engine and marked
+  unavailable for the experimental BFS engine.
+- `lineage` — reproductive, terminal, ancestor, and descendant
+  distributions.
+- `founder_contribution` — founder descendant-path contribution and
+  effective founder count.
+- `founder_generation` — active founder lines and effective founder
+  contribution by generation, plus simple bottleneck minima. This
+  section is skipped on very large founder × individual products to
+  avoid memory blow-ups.
+- `components`, `sex_summary`, `generation_summary` — aggregate
+  component, sex-stratified, and depth-stratified summaries, including
+  generation-level offspring and mate-count distributions.
 - `pairs` — 23 named relationship codes (MZ, MO, FO, FS, MHS, PHS, GP,
   Av, GGP, HAv, GAv, 1C, GGGP, HGAv, GGAv, H1C, 1C1R, G3GP, HGGAv,
   G3Av, H1C1R, 1C2R, 2C) plus `PO = MO + FO` and `by_degree[0..5]`
@@ -252,7 +272,6 @@ The `summary.yaml` contains:
 - `inbreeding` — distribution of F (only when `--inbreeding`).
 - `individual.distributions` — mean/std/quartiles/`nz` (non-zero
   count) for each per-individual numeric column.
-- `individual.f_by_generation` — mean and max F per generation.
 
 Floats are rounded to 4 decimal places.
 
