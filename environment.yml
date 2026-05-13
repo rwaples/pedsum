@@ -11,4 +11,4 @@ dependencies:
   - ruff
   - pip
   - pip:
-      - pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.2.0
+      - pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.0

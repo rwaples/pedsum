@@ -56,3 +56,33 @@ repo) and now belong to the package:
 These items live in this STATUS.md only as a paper trail — open the
 matching issues / TODOs in the `pedigree-graph` repo when you act on
 them.
+
+## Resolved in pedsum 0.4 (pedigree-graph v0.5.0 consolidation)
+
+- Pedsum's recursive memoized kinship `compute_inbreeding` (and the
+  helper `_merge_sorted_rows`) deleted; F is now sourced from
+  `pedigree_graph.PedigreeGraph.compute_inbreeding()` (Meuwissen-Luo).
+- Pedsum's `compute_descendants` (path-count BFS) and
+  `compute_generations` (Kahn) deleted; both moved upstream to
+  `PedigreeGraph.compute_n_descendants()` and `PedigreeGraph.generation`
+  respectively.
+- The `n_ancestors` column is now sourced from
+  `PedigreeGraph.compute_n_ancestors()` (distinct-count, sparse
+  transitive closure).
+- `PedigreeGraph` is built once in `_run_summarize` and threaded through
+  every primitive that needs it (relationship pairs, F, lineage
+  counts, Ne), rather than each engine constructing its own.
+- `--effective-size`, `--ne-coancestry`, `--ne-threads N` flags added
+  for pedigree-based Ne estimation.
+
+## Open follow-up against pedigree-graph
+
+1. **`PedigreeGraph.compute_n_ancestors` scalability.** The current
+   implementation is a sparse boolean transitive closure of the parent
+   graph (`_lineage_kernel._compute_n_ancestors`).  Memory scales with
+   `sum_i n_ancestors[i]`, so very deep / very wide pedigrees may hit
+   RAM limits — at N=100K, G=10 with random mating it runs in 2.2 s and
+   peak RSS ~0.5 GB; extrapolating to N=10M with saturated ancestry
+   exceeds commodity hardware.  A retirement-style DP (analogous to the
+   F kernel's row-retirement) would bound peak memory to the live
+   frontier; deferred until a user hits the wall.

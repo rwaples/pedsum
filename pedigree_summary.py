@@ -67,7 +67,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 
 _BFS_AUTO_THRESHOLD = 5_000_000
 
-VERSION = "0.3"
+VERSION = "0.4"
 SEX_FEMALE = 0
 SEX_MALE = 1
 INBRED_TOL = 1e-9
@@ -546,6 +546,7 @@ def load_and_validate(
         _check_self_loops(ids, mothers, fathers),
         _check_parents_distinct(ids, mothers, fathers),
         _check_sex_role_consistency(mothers, fathers, sex, id_index),
+        _check_topological_row_order(ids, mothers, fathers, id_index),
     ):
         if findings:
             raise PedigreeError(_summarize_findings(findings))
@@ -556,51 +557,14 @@ def load_and_validate(
     m_row, mask_m = _parent_rows(mothers, id_index)
     f_row, mask_f = _parent_rows(fathers, id_index)
     children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
-    out["ped_depth"] = compute_generations(out, mask_m, mask_f, children_csr)
+    # Note: ``ped_depth`` is populated by the caller (``_run_summarize``)
+    # immediately after ``PedigreeGraph`` construction, using
+    # ``pg.generation``.  Every downstream summary reads ``ped_depth``,
+    # so callers building a df from ``load_and_validate`` must set the
+    # column before invoking any summary function.
 
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
     return out, children_csr
-
-
-# ---------------------------------------------------------------------------
-# Topological generation (Kahn) — also detects cycles
-# ---------------------------------------------------------------------------
-
-
-def compute_generations(
-    df: pd.DataFrame,
-    mask_m: np.ndarray,
-    mask_f: np.ndarray,
-    children: sp.csr_matrix | None,
-) -> np.ndarray:
-    """Topological depth per row via Kahn's algorithm; raises on cycles."""
-    n = len(df)
-    indeg = mask_m.astype(np.int32) + mask_f.astype(np.int32)
-    gen = np.zeros(n, dtype=np.int32)
-
-    frontier = np.where(indeg == 0)[0]
-    processed = len(frontier)
-    while len(frontier) > 0 and children is not None:
-        sub = children[frontier]
-        kids = sub.indices
-        if len(kids) == 0:
-            break
-        parents_per_edge = np.repeat(frontier, np.diff(sub.indptr))
-        np.maximum.at(gen, kids, gen[parents_per_edge] + 1)
-        np.subtract.at(indeg, kids, 1)
-        unique_kids = np.unique(kids)
-        frontier = unique_kids[indeg[unique_kids] == 0]
-        processed += len(frontier)
-
-    if processed != n:
-        unresolved = np.where(indeg > 0)[0]
-        sample_ids = df["id"].iloc[unresolved[:5]].tolist()
-        raise PedigreeError(
-            f"pedigree contains a cycle: {len(unresolved)} individual(s) could not "
-            f"be topologically ordered (e.g. ids {sample_ids})"
-        )
-
-    return gen
 
 
 # ---------------------------------------------------------------------------
@@ -1185,6 +1149,7 @@ def count_relationship_pairs(
     engine: str = "auto",
     threshold: int = _BFS_AUTO_THRESHOLD,
     include_pair_lists: bool = False,
+    pg: PedigreeGraph | None = None,
 ) -> dict:
     """Dispatch to the matrix or BFS relationship-pair enumerator.
 
@@ -1198,13 +1163,22 @@ def count_relationship_pairs(
     Assumes every non-``-1`` parent ID appears in ``df['id']``; this is
     enforced by ``load_and_validate``'s ``parent_refs_present_*`` checks
     and lets the internal ID-compaction ``reindex`` skip NaN handling.
+
+    When ``pg`` is supplied the wrapper reuses it instead of building a
+    fresh compacted PedigreeGraph; saves one compaction pass when the
+    caller already needed a graph for other primitives (F, lineage,
+    effective size).
     """
     chosen = _select_engine(len(df), engine, threshold)
     logger.info("relationship engine: %s (n=%d)", chosen, len(df))
     if chosen == "bfs":
-        out = _count_pairs_bfs(df)
+        out = _count_pairs_bfs(df, pg=pg)
     else:
-        out = _count_pairs_matrix_with_lists(df) if include_pair_lists else _count_pairs_matrix(df)
+        out = (
+            _count_pairs_matrix_with_lists(df, pg=pg)
+            if include_pair_lists
+            else _count_pairs_matrix(df, pg=pg)
+        )
     out["_engine"] = chosen
     return out
 
@@ -1224,21 +1198,24 @@ def _select_engine(n: int, requested: str, threshold: int) -> str:
     return chosen
 
 
-def _count_pairs_matrix(df: pd.DataFrame) -> dict:
+def _count_pairs_matrix(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """Sparse matrix-power enumerator (default engine for n < threshold).
 
     Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``;
-    this wrapper compacts IDs to ``0..n-1`` first because ``PedigreeGraph``
-    allocates an ``id_to_row`` table sized to ``max(id)+1``.
+    when ``pg`` is None this wrapper compacts IDs to ``0..n-1`` first
+    because ``PedigreeGraph`` allocates an ``id_to_row`` table sized to
+    ``max(id)+1``.
     """
-    pg = _build_compacted_graph(df)
+    if pg is None:
+        pg = _build_pedigree_graph(df)
     named = pg.count_pairs(max_degree=5)
     return _augment_pair_counts(named)
 
 
-def _count_pairs_matrix_with_lists(df: pd.DataFrame) -> dict:
+def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """Sparse matrix enumerator that retains pair lists for richer summaries."""
-    pg = _build_compacted_graph(df)
+    if pg is None:
+        pg = _build_pedigree_graph(df)
     pair_lists = pg.extract_pairs(max_degree=5)
     named = {code: len(a) for code, (a, _) in pair_lists.items()}
     out = _augment_pair_counts(named)
@@ -1246,14 +1223,15 @@ def _count_pairs_matrix_with_lists(df: pd.DataFrame) -> dict:
     return out
 
 
-def _count_pairs_bfs(df: pd.DataFrame) -> dict:
+def _count_pairs_bfs(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """BFS / boolean-matmul / numba enumerator (experimental).
 
     Thin wrapper around :func:`pedigree_graph.experimental.count_pairs_bfs`.
     See that function's docstring for the inbred-pedigree caveat
     (distinct-shared-ancestor counting vs path-multiplicity).
     """
-    pg = _build_compacted_graph(df)
+    if pg is None:
+        pg = _build_pedigree_graph(df)
     named = count_pairs_bfs(pg, max_degree=5)
     return _augment_pair_counts(named)
 
@@ -1405,8 +1383,28 @@ def compute_relationship_summary(
     }
 
 
-def _build_compacted_graph(df: pd.DataFrame) -> PedigreeGraph:
-    """Compact arbitrary IDs to ``0..n-1`` and build a ``PedigreeGraph``."""
+def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
+    """Compact arbitrary IDs to ``0..n-1`` and build a full ``PedigreeGraph``.
+
+    Threads ``sex`` through to ``PedigreeGraph.from_arrays`` so downstream
+    sex-aware estimators (Ne_sr, the sex-decomposed Ne_V quadrants, sex-
+    stratified relationship-pair extraction) receive correct sex data
+    rather than the silent zeros that the bare-arrays construction path
+    would supply.
+
+    Generation is derived inside ``from_arrays`` from the (already-remapped)
+    parent arrays via a fixed-point sweep — same semantics as pedsum's
+    historical Kahn pass.  ``twin`` defaults to ``-1`` because pedsum's
+    input format does not carry twin annotations.
+
+    The compaction is necessary because ``PedigreeGraph`` allocates an
+    ``id_to_row`` table sized to ``max(id) + 1``; passing original IDs
+    on a sparse pedigree would inflate memory by orders of magnitude.
+
+    Assumes the input has already passed ``load_and_validate`` (in
+    particular ``_check_topological_row_order``); ``PedigreeGraph``
+    requires parents to precede children in row order.
+    """
     ids = df["id"].to_numpy()
     n = len(ids)
     new_ids = np.arange(n, dtype=np.int64)
@@ -1418,193 +1416,77 @@ def _build_compacted_graph(df: pd.DataFrame) -> PedigreeGraph:
         ).astype(np.int64)
 
     return PedigreeGraph.from_arrays(
-        new_ids,
-        _remap(df["mother"].to_numpy()),
-        _remap(df["father"].to_numpy()),
+        ids=new_ids,
+        mothers=_remap(df["mother"].to_numpy()),
+        fathers=_remap(df["father"].to_numpy()),
+        sex=df["sex"].to_numpy().astype(np.int8),
     )
 
 
 # ---------------------------------------------------------------------------
-# Section 4: inbreeding (recursive memoized kinship)
+# Section 4: inbreeding (summary helper)
 # ---------------------------------------------------------------------------
 
 
-def _merge_sorted_rows(
-    a_cols: np.ndarray,
-    a_vals: np.ndarray,
-    b_cols: np.ndarray,
-    b_vals: np.ndarray,
-    scale_a: float = 1.0,
-    scale_b: float = 1.0,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Merge two sorted (cols, vals) sparse rows; sums values at matching cols.
+def compute_effective_size(
+    pg: PedigreeGraph,
+    *,
+    ne_coancestry: bool = False,
+    n_threads: int = 1,
+) -> dict:
+    """Run the eight pedigree-based Ne estimators via ``pedigree_graph``.
 
-    Optional scale_a / scale_b are applied to the inputs during the merge.
-    Vectorized two-pointer alternatives microbench slower than this
-    argsort-based form for the ~100-entry rows we hit at scale.
+    Thin wrapper around ``pedigree_graph.compute_all_ne``: builds the
+    founder-contribution structures once, dispatches every estimator,
+    and serialises each result dataclass to a YAML-ready dict via its
+    own ``.to_dict()`` method.
+
+    When ``ne_coancestry`` is False (the default), the coancestry-rate
+    Ne_C estimator is skipped — its kinship DP can dominate memory on
+    very large pedigrees.  The ``ne_coancestry`` slot in the returned
+    dict will then carry ``ne=None`` and NaN per-gen arrays.
     """
-    if len(a_cols) == 0:
-        return b_cols, (b_vals * scale_b) if scale_b != 1.0 else b_vals
-    if len(b_cols) == 0:
-        return a_cols, (a_vals * scale_a) if scale_a != 1.0 else a_vals
-    all_cols = np.concatenate([a_cols, b_cols])
-    all_vals = np.concatenate([a_vals * scale_a, b_vals * scale_b])
-    order = np.argsort(all_cols, kind="stable")
-    sorted_cols = all_cols[order]
-    sorted_vals = all_vals[order]
-    boundaries = np.concatenate([[0], np.where(np.diff(sorted_cols) != 0)[0] + 1])
-    merged_cols = sorted_cols[boundaries].astype(np.int32)
-    merged_vals = np.add.reduceat(sorted_vals, boundaries)
-    return merged_cols, merged_vals
+    from pedigree_graph import compute_all_ne
 
-
-def compute_inbreeding(
-    df: pd.DataFrame,
-    id_index: pd.Index,
-    children_csr: sp.csr_matrix | None,
-) -> tuple[dict, np.ndarray, np.ndarray]:
-    """Per-individual inbreeding F via Henderson-Quaas L D L^T decomposition.
-
-    Stores L[i, *] as a sorted (cols, vals) pair per row; non-zeros are
-    only at k = ancestors of i (genuinely sparse, no sibling fill-in).
-    F[i] = sum_k L[i, k]^2 * D[k] - 1, where D[k] is the Mendelian-sampling
-    scaling derived from F[sire_k], F[dam_k] (already known in topological
-    order). L rows are dropped as soon as their last child has consumed
-    them, capping peak memory near max(remaining ancestor frontier).
-
-    Returns (summary_dict, F_vector, n_ancestors) where n_ancestors[i] is the
-    number of strict ancestors of row i (used by per-individual reports).
-    """
-    n = len(df)
-    sire, _ = _parent_rows(df["father"].to_numpy(), id_index)
-    dam, _ = _parent_rows(df["mother"].to_numpy(), id_index)
-
-    n_children = (
-        np.diff(children_csr.indptr).astype(np.int64) if children_csr is not None
-        else np.zeros(n, dtype=np.int64)
+    raw = compute_all_ne(
+        pg,
+        skip_ne_coancestry=not ne_coancestry,
+        n_threads=n_threads,
     )
+    return {name: result.to_dict() for name, result in raw.items()}
 
-    gen = df["ped_depth"].to_numpy()
-    order = np.argsort(gen, kind="stable")
 
-    F = np.zeros(n, dtype=np.float64)
-    D = np.zeros(n, dtype=np.float64)
-    L_cols: dict[int, np.ndarray] = {}
-    L_vals: dict[int, np.ndarray] = {}
-    n_ancestors = np.zeros(n, dtype=np.int32)
-    empty_c = np.array([], dtype=np.int32)
-    empty_v = np.array([], dtype=np.float64)
-    peak_entries = 0
-    live_entries = 0
+def _build_inbreeding_summary(F: np.ndarray) -> dict:
+    """Aggregate a per-individual F vector into the YAML-shaped summary.
 
-    def _drop(parent: int) -> None:
-        nonlocal live_entries
-        cols = L_cols.pop(parent)
-        L_vals.pop(parent)
-        n_ancestors[parent] = len(cols) - 1
-        live_entries -= len(cols)
-
-    for i in order:
-        s = sire[i]
-        d = dam[i]
-
-        if s == -1 and d == -1:
-            D[i] = 1.0
-        elif s == -1:
-            D[i] = 0.75 - 0.25 * F[d]
-        elif d == -1:
-            D[i] = 0.75 - 0.25 * F[s]
-        else:
-            D[i] = 0.5 - 0.25 * (F[s] + F[d])
-
-        s_cols = L_cols.get(s, empty_c) if s != -1 else empty_c
-        d_cols = L_cols.get(d, empty_c) if d != -1 else empty_c
-        s_vals = L_vals.get(s, empty_v) if s != -1 else empty_v
-        d_vals = L_vals.get(d, empty_v) if d != -1 else empty_v
-
-        merged_cols, merged_vals = _merge_sorted_rows(
-            s_cols, s_vals, d_cols, d_vals, scale_a=0.5, scale_b=0.5
-        )
-
-        new_cols = np.empty(len(merged_cols) + 1, dtype=np.int32)
-        new_vals = np.empty(len(merged_vals) + 1, dtype=np.float64)
-        new_cols[:-1] = merged_cols
-        new_cols[-1] = i
-        new_vals[:-1] = merged_vals
-        new_vals[-1] = 1.0
-
-        L_cols[i] = new_cols
-        L_vals[i] = new_vals
-        live_entries += len(new_cols)
-        if live_entries > peak_entries:
-            peak_entries = live_entries
-
-        F[i] = float(np.sum(new_vals * new_vals * D[new_cols]) - 1.0)
-
-        if s != -1:
-            n_children[s] -= 1
-            if n_children[s] == 0:
-                _drop(s)
-        if d != -1:
-            n_children[d] -= 1
-            if d != s and n_children[d] == 0:
-                _drop(d)
-
-    for i in list(L_cols.keys()):
-        _drop(i)
-
+    F itself is computed by ``pedigree_graph.PedigreeGraph.compute_inbreeding()``
+    (Meuwissen-Luo); pedsum no longer owns an F implementation.  This
+    helper produces only the histogram / aggregate fields previously
+    returned by the deleted ``compute_inbreeding`` function, and drops
+    the ``memo_size`` diagnostic (which described the deleted algorithm
+    and has no analogue in the upstream implementation).
+    """
+    n = len(F)
     inbred = F > INBRED_TOL
     n_inbred = int(inbred.sum())
     edges = [0.0, 0.0625, 0.125, 0.25, 1.0]
-    hist = {}
+    hist: dict[str, float] = {}
     hist["0"] = float((F <= INBRED_TOL).sum()) / n if n else 0.0
     for lo, hi in pairwise(edges):
         label = f"<{hi:g}"
         hist[label] = float(((lo < F) & (hi >= F)).sum()) / n if n else 0.0
-
-    summary = {
+    return {
         "n_inbred": n_inbred,
         "frac_inbred": n_inbred / n if n else 0.0,
         "mean_F": float(F.mean()) if n else 0.0,
         "max_F": float(F.max()) if n else 0.0,
         "hist": hist,
-        "memo_size": peak_entries,
     }
-    return summary, F, n_ancestors
 
 
 # ---------------------------------------------------------------------------
 # Section 5: per-individual data
 # ---------------------------------------------------------------------------
-
-
-def compute_descendants(df: pd.DataFrame, children_csr: sp.csr_matrix | None) -> np.ndarray:
-    """Per-individual descendant count via reverse-topological scalar sum.
-
-    Path-count semantics: ``n_desc[v]`` counts (v, w) walks down the DAG, not
-    unique descendants. Identical to unique counts in non-inbred pedigrees;
-    over-counts by the inbreeding rate where marriage loops give a
-    descendant multiple ancestor paths to v. Matches the convention used
-    for GP / Av / 1C in :func:`count_relationship_pairs`.
-    """
-    n = len(df)
-    if n == 0 or children_csr is None:
-        return np.zeros(n, dtype=np.int32)
-
-    gen = df["ped_depth"].to_numpy()
-    rev_order = np.argsort(-gen, kind="stable")
-    indptr = children_csr.indptr
-    indices = children_csr.indices
-
-    n_desc = np.zeros(n, dtype=np.int64)
-    for i in rev_order:
-        start, end = indptr[i], indptr[i + 1]
-        if start == end:
-            continue
-        kids = indices[start:end]
-        n_desc[i] = (end - start) + int(n_desc[kids].sum())
-
-    return n_desc.astype(np.int32)
 
 
 def build_individual_df(
@@ -1764,8 +1646,19 @@ def _build_pedigree_data(
     mating_pairs: dict | None,
     relationship_summary: dict | None,
     aggregates: dict | None = None,
-) -> dict:
-    """Canonical nested dict for the pedigree-level report; safe to YAML-dump."""
+) -> tuple[dict, dict]:
+    """Build the pedigree-level report payloads.
+
+    Returns ``(tsv_payload, yaml_extras)``.
+
+    * ``tsv_payload`` is the dict that gets flattened into
+      ``summary.pedigree.tsv`` by ``_write_long_tsv``.  It contains every
+      section that should appear as long-form (key, subkey, value) rows.
+    * ``yaml_extras`` contains deep structures (e.g. ``effective_size``)
+      that should appear in ``summary.yaml`` under ``pedigree:`` but
+      should NOT be flattened to TSV.  Currently always returned empty
+      from this helper — populated by the caller after Ne computation.
+    """
     family_section: dict | None
     if family.get("empty"):
         family_section = None
@@ -1787,9 +1680,8 @@ def _build_pedigree_data(
             "mean_F": float(inbreeding["mean_F"]),
             "max_F": float(inbreeding["max_F"]),
             "hist": {str(k): float(v) for k, v in inbreeding["hist"].items()},
-            "memo_size": int(inbreeding["memo_size"]),
         }
-    return {
+    tsv_payload = {
         "input": str(path),
         "command": cmd,
         "version": VERSION,
@@ -1836,6 +1728,8 @@ def _build_pedigree_data(
         },
         "inbreeding": inb_section,
     }
+    yaml_extras: dict = {}
+    return tsv_payload, yaml_extras
 
 
 def _build_individual_data(
@@ -2041,12 +1935,29 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
         _ = col  # silence unused-loop-var
 
 
-def _build_summary_data(ped_data: dict, ind_data: dict) -> dict:
-    """Merge per-section dicts into one summary; shared meta lifted to the top."""
+def _build_summary_data(
+    ped_data: dict, ind_data: dict, *, yaml_extras: dict | None = None,
+) -> dict:
+    """Merge per-section dicts into one summary; shared meta lifted to the top.
+
+    ``yaml_extras`` is for deep structures (e.g. ``effective_size``)
+    that belong in the YAML but not in the long-form TSV.  They are
+    merged under ``pedigree:`` after the flat sections.  When a section
+    in ``yaml_extras`` has a TSV-friendly twin in ``ped_data`` (e.g.
+    ``effective_size_scalars``), the flat twin is dropped from the YAML
+    to avoid emitting both the deep structure and a redundant scalar
+    echo.
+    """
     out = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
-    out["pedigree"] = {
+    pedigree_section = {
         k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS
     }
+    if yaml_extras:
+        pedigree_section.update(yaml_extras)
+        # If Ne was computed, the scalar twin is redundant in YAML.
+        if "effective_size" in yaml_extras:
+            pedigree_section.pop("effective_size_scalars", None)
+    out["pedigree"] = pedigree_section
     out["individual"] = {
         k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS
     }
@@ -2323,6 +2234,17 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _positive_int(v: str) -> int:
+    """argparse type guard for ints >= 1."""
+    try:
+        iv = int(v)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"expected integer, got {v!r}") from exc
+    if iv < 1:
+        raise argparse.ArgumentTypeError(f"expected integer >= 1, got {iv}")
+    return iv
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = _FullHelpParser(
         prog="pedigree_summary.py",
@@ -2369,8 +2291,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_sum.add_argument(
         "--inbreeding",
         action="store_true",
-        help="compute inbreeding F (off by default; ~5 min on 10M rows). "
-        "When off, F and n_ancestors in the per-individual table are zero-filled.",
+        help="emit per-individual F and the inbreeding summary section. "
+        "Off by default (F is the most expensive single computation in pedsum; "
+        "~minutes on 10M-row pedigrees). When `--effective-size` is also passed, "
+        "F is shared with the Ne pipeline (computed once via pedigree-graph's "
+        "Meuwissen-Luo kernel). When off, F and n_ancestors in the per-individual "
+        "table are zero-filled.",
+    )
+    p_sum.add_argument(
+        "--effective-size",
+        action="store_true",
+        help="compute eight pedigree-based effective population size estimators "
+        "(Ne_I, Ne_C, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_CT) via "
+        "pedigree-graph.compute_all_ne. Off by default. Ne_C is excluded unless "
+        "`--ne-coancestry` is also passed. Works standalone; pair with "
+        "`--inbreeding` to additionally emit the per-individual F section.",
+    )
+    p_sum.add_argument(
+        "--ne-coancestry",
+        action="store_true",
+        help="include the coancestry-rate Ne_C estimator alongside the other "
+        "seven. Off by default because the kinship DP can blow up RAM on very "
+        "large pedigrees (>~500K rows). No-op without `--effective-size`.",
+    )
+    p_sum.add_argument(
+        "--ne-threads",
+        type=_positive_int, default=1, metavar="N",
+        help="number of worker threads for independent Ne estimator dispatch "
+        "(default: %(default)s; serial). No-op without `--effective-size`.",
     )
     p_sum.add_argument(
         "--safe-attempt",
@@ -2451,6 +2399,21 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         logger.error("file error: %s", e)
         return 2
 
+    # Flag-combination validation (must happen before any heavy work).
+    if not args.effective_size and (args.ne_coancestry or args.ne_threads != 1):
+        logger.warning(
+            "--ne-coancestry / --ne-threads have no effect without --effective-size",
+        )
+
+    # Build the PedigreeGraph once and reuse for every primitive that
+    # needs it (relationship pairs, F, lineage counts, effective size).
+    # ``ped_depth`` MUST be populated from ``pg.generation`` before any
+    # summary function runs — six callers read it.
+    t0 = time.perf_counter()
+    pg = _build_pedigree_graph(df)
+    df["ped_depth"] = np.asarray(pg.generation, dtype=np.int32)
+    logger.info("built PedigreeGraph in %.2fs", time.perf_counter() - t0)
+
     id_index = pd.Index(df["id"].to_numpy())
 
     t0 = time.perf_counter()
@@ -2467,7 +2430,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     t0 = time.perf_counter()
     pairs = count_relationship_pairs(
-        df, engine=args.engine, threshold=args.bfs_threshold, include_pair_lists=True,
+        df, engine=args.engine, threshold=args.bfs_threshold,
+        include_pair_lists=True, pg=pg,
     )
     logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
 
@@ -2478,24 +2442,35 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     n_indiv = len(df)
     if args.inbreeding:
         t0 = time.perf_counter()
-        inb_summary, F_vec, n_anc = compute_inbreeding(df, id_index, children_csr)
-        logger.info(
-            "inbreeding in %.2fs (peak L entries: %d)",
-            time.perf_counter() - t0,
-            inb_summary["memo_size"],
-        )
+        F_vec = pg.compute_inbreeding()
+        n_anc = pg.compute_n_ancestors()
+        inb_summary: dict | None = _build_inbreeding_summary(F_vec)
+        logger.info("inbreeding (F + n_ancestors) in %.2fs", time.perf_counter() - t0)
     else:
         logger.info("inbreeding: skipped (pass --inbreeding to enable)")
-        inb_summary: dict | None = None
+        inb_summary = None
         F_vec = np.zeros(n_indiv, dtype=np.float64)
         n_anc = np.zeros(n_indiv, dtype=np.int32)
+
+    t0 = time.perf_counter()
+    n_desc = pg.compute_n_descendants()
+    logger.info("descendants in %.2fs", time.perf_counter() - t0)
+
+    effective_size: dict | None = None
+    if args.effective_size:
+        t0 = time.perf_counter()
+        effective_size = compute_effective_size(
+            pg, ne_coancestry=args.ne_coancestry, n_threads=args.ne_threads,
+        )
+        logger.info(
+            "effective size (%d estimators) in %.2fs",
+            8 if args.ne_coancestry else 7,
+            time.perf_counter() - t0,
+        )
 
     base = args.out_basename
     base.parent.mkdir(parents=True, exist_ok=True)
 
-    t0 = time.perf_counter()
-    n_desc = compute_descendants(df, children_csr)
-    logger.info("descendants in %.2fs", time.perf_counter() - t0)
     t0 = time.perf_counter()
     idf = build_individual_df(df, id_index, F_vec, n_anc, n_desc, comp_labels)
     logger.info("individual table built in %.2fs", time.perf_counter() - t0)
@@ -2504,23 +2479,28 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     aggregates = compute_aggregate_sections(idf, include_inbreeding=args.inbreeding)
     logger.info("aggregate pedigree sections in %.2fs", time.perf_counter() - t0)
 
-    ped_data = _build_pedigree_data(
+    tsv_payload, yaml_extras = _build_pedigree_data(
         args.in_path, cmd, size, family, pairs, inb_summary, mating_pairs,
         relationship_summary, aggregates,
     )
+    if effective_size is not None:
+        tsv_payload["effective_size_scalars"] = {
+            name: result["ne"] for name, result in effective_size.items()
+        }
+        yaml_extras["effective_size"] = effective_size
 
     ind_data = _build_individual_data(
         idf, args.in_path, cmd, include_inbreeding=args.inbreeding,
     )
 
     if args.safe_attempt:
-        _apply_safe_attempt(ped_data, ind_data)
+        _apply_safe_attempt(tsv_payload, ind_data)
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
 
-    _write_long_tsv(ped_data, _at(base, ".summary.pedigree.tsv"))
+    _write_long_tsv(tsv_payload, _at(base, ".summary.pedigree.tsv"))
     _write_long_tsv(ind_data, _at(base, ".summary.individual.tsv"))
 
-    summary_data = _build_summary_data(ped_data, ind_data)
+    summary_data = _build_summary_data(tsv_payload, ind_data, yaml_extras=yaml_extras)
     _write_yaml(summary_data, _at(base, ".summary.yaml"))
     logger.info(
         "wrote %s.summary.yaml + %s.summary.{pedigree,individual}.tsv", base, base,

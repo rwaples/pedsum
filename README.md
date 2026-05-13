@@ -22,14 +22,14 @@ dependencies:
 
 ```bash
 conda install -c conda-forge numpy scipy pandas pyyaml
-pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.2.0"
+pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.0"
 ```
 
 **pip:**
 
 ```bash
 pip install numpy scipy pandas pyyaml
-pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.2.0"
+pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.0"
 ```
 
 (`pedigree-graph` brings in `numba` transitively for the BFS engine's
@@ -52,6 +52,7 @@ A 200-individual, 5-generation example pedigree
 
 ```bash
 python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo --inbreeding
+python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo --effective-size
 python pedigree_summary.py validate  --in example_pedigree.tsv --out /tmp/demo
 ```
 
@@ -81,8 +82,23 @@ Writes:
 
 Flags:
 
-- `--inbreeding` — compute `F` (inbreeding coefficient) per individual.
-  Off by default; ~5 min on 10M rows.
+- `--inbreeding` — emit per-individual `F` and the inbreeding summary
+  section.  Off by default; ~minutes on 10M rows (F is the single most
+  expensive computation in pedsum, even with the upstream
+  Meuwissen-Luo kernel).  When `--effective-size` is also passed, F is
+  shared with the Ne pipeline and the cost is paid once.
+- `--effective-size` — compute the eight pedigree-based effective
+  population size estimators
+  (`Ne_I`, `Ne_C`, `Ne_V`, `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`,
+  `Ne_CT`) via `pedigree-graph.compute_all_ne`.  Off by default.
+  Works standalone — pair with `--inbreeding` to additionally emit
+  the per-individual F section.
+- `--ne-coancestry` — include the coancestry-rate `Ne_C` estimator.
+  Off by default because the kinship DP can blow up RAM on very
+  large pedigrees (>~500K rows).  No-op without `--effective-size`.
+- `--ne-threads N` — number of threads for independent Ne estimator
+  dispatch (default `1`, serial).  Validated `>= 1` by argparse.  No-op
+  without `--effective-size`.
 - `--safe-attempt` — best-effort GDPR-style redaction: skip the
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
@@ -208,11 +224,14 @@ pd.read_excel("input.xlsx").to_csv("input.tsv", sep="\t", index=False)
 ### Topological depth (`ped_depth`)
 
 The script **always computes** a topological-depth column called
-`ped_depth` (founders = 0, offspring = `max(parent_depth) + 1` via
-Kahn's algorithm) and uses it as the grouping variable for
-`f_by_generation`, `gen_counts`, and the per-individual ancestor /
-descendant columns. The output column is named `ped_depth` and is
-always a 32-bit integer.
+`ped_depth` (founders = 0, offspring = `max(parent_depth) + 1`).
+Since pedsum 0.4 the depth is sourced from `PedigreeGraph.generation`
+in the upstream `pedigree-graph` library — semantics are unchanged,
+output dtype is still `int32`, and it remains the grouping variable
+for `f_by_generation`, `gen_counts`, and the per-individual ancestor
+/ descendant columns.  Inputs must be in topological row order
+(parents precede children); rows that violate this raise a clear
+`PedigreeError`.
 
 You do not need to supply a depth column at all. If your input
 already has a column named `ped_depth`, it is treated as a
@@ -270,10 +289,19 @@ The `summary.yaml` contains:
   G3Av, H1C1R, 1C2R, 2C) plus `PO = MO + FO` and `by_degree[0..5]`
   rollup.
 - `inbreeding` — distribution of F (only when `--inbreeding`).
+- `effective_size` — scenario-level Ne from eight pedigree-based
+  estimators (`Ne_I`, `Ne_C`, `Ne_V`, `Ne_sr`, `Ne_iΔF`, `Ne_LTC`,
+  `Ne_H`, `Ne_CT`).  Each estimator emits its scalar `ne` plus a
+  per-generation (or per-transition) breakdown vector.  Only present
+  when `--effective-size` is passed; `Ne_C` carries `ne: null` unless
+  `--ne-coancestry` is also passed.
 - `individual.distributions` — mean/std/quartiles/`nz` (non-zero
   count) for each per-individual numeric column.
 
-Floats are rounded to 4 decimal places.
+Floats are rounded to 4 decimal places.  Ne scalar values also appear
+in `BASENAME.summary.pedigree.tsv` under the `effective_size_scalars`
+section (the per-generation vectors live only in the YAML, to keep
+the long-form TSV scannable).
 
 ## Logging
 
