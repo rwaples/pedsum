@@ -377,6 +377,39 @@ def _summarize_findings(findings: list[Finding]) -> str:
     return f"{check}: {n} finding(s) — {sample_str}{extra}"
 
 
+def _compute_depth_unordered(
+    mother_rows: np.ndarray, father_rows: np.ndarray, n: int,
+) -> np.ndarray:
+    """Per-row topological depth, tolerant of any input row order.
+
+    Vectorized fixed-point sweep: founders have depth 0, other rows have
+    ``max(parent_depth) + 1``.  Iterates until depths stabilise — unlike
+    a single Kahn pass, this does not require parents to already precede
+    children in row index.  Returns ``np.int32``.  Raises ``PedigreeError``
+    when no progress can be made (true cycle).
+    """
+    depth = np.full(n, -1, dtype=np.int32)
+    depth[(mother_rows < 0) & (father_rows < 0)] = 0
+    while True:
+        todo = depth < 0
+        if not todo.any():
+            return depth
+        m_safe = np.maximum(mother_rows, 0)
+        f_safe = np.maximum(father_rows, 0)
+        m_resolved = (mother_rows < 0) | (depth[m_safe] >= 0)
+        f_resolved = (father_rows < 0) | (depth[f_safe] >= 0)
+        eligible = todo & m_resolved & f_resolved
+        if not eligible.any():
+            unresolved = np.where(todo)[0][:5].tolist()
+            raise PedigreeError(
+                f"pedigree contains a cycle: {int(todo.sum())} individual(s) "
+                f"could not be topologically ordered (e.g. rows {unresolved})",
+            )
+        md = np.where(mother_rows >= 0, depth[m_safe], 0)
+        fd = np.where(father_rows >= 0, depth[f_safe], 0)
+        depth[eligible] = np.maximum(md[eligible], fd[eligible]) + 1
+
+
 def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray,
                    id_index: pd.Index) -> list[Finding]:
     """Detect IDs in a cycle via Kahn's; one Finding per node that couldn't be resolved."""
@@ -546,16 +579,41 @@ def load_and_validate(
         _check_self_loops(ids, mothers, fathers),
         _check_parents_distinct(ids, mothers, fathers),
         _check_sex_role_consistency(mothers, fathers, sex, id_index),
-        _check_topological_row_order(ids, mothers, fathers, id_index),
     ):
         if findings:
             raise PedigreeError(_summarize_findings(findings))
 
-    out = pd.DataFrame(
-        {"id": ids, "sex": sex, "mother": mothers, "father": fathers},
-    )
+    # Map parent IDs to row indices, then run a fixed-point depth sweep
+    # that is tolerant of arbitrary input row order (real-world TSV /
+    # PLINK fam files commonly aren't topologically ordered).  Sort the
+    # df by depth so PedigreeGraph's parents-precede-children invariant
+    # holds for downstream construction.  Detects cycles by failure to
+    # converge.
     m_row, mask_m = _parent_rows(mothers, id_index)
     f_row, mask_f = _parent_rows(fathers, id_index)
+    depth = _compute_depth_unordered(m_row, f_row, n)
+    natural = np.arange(n)
+    order = np.argsort(depth, kind="stable")
+    reordered = not np.array_equal(order, natural)
+
+    if reordered:
+        n_oo = int((order != natural).sum())
+        logger.info(
+            "reordering %d/%d row(s) into topological order (parents before children)",
+            n_oo, n,
+        )
+        out = pd.DataFrame(
+            {"id": ids[order], "sex": sex[order],
+             "mother": mothers[order], "father": fathers[order]},
+        )
+        id_index = pd.Index(out["id"].to_numpy())
+        m_row, mask_m = _parent_rows(out["mother"].to_numpy(), id_index)
+        f_row, mask_f = _parent_rows(out["father"].to_numpy(), id_index)
+    else:
+        out = pd.DataFrame(
+            {"id": ids, "sex": sex, "mother": mothers, "father": fathers},
+        )
+
     children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
     # Note: ``ped_depth`` is populated by the caller (``_run_summarize``)
     # immediately after ``PedigreeGraph`` construction, using
@@ -2057,10 +2115,20 @@ def _write_annotated_tsv(
         raw = raw.rename(columns=rename_map)
 
     raw_ids = pd.to_numeric(raw["id"], errors="raise").astype(np.int64).to_numpy()
-    if not np.array_equal(raw_ids, idf["id"].to_numpy()):
-        raise PedigreeError(
-            "internal: row order mismatch between input and individual table"
-        )
+    idf_ids = idf["id"].to_numpy()
+    if not np.array_equal(raw_ids, idf_ids):
+        # ``load_and_validate`` may have reordered rows into topological
+        # order when the input was not already sorted parents-before-
+        # children.  Realign the raw read to ``idf`` order by ID.
+        raw_id_to_row = pd.Series(np.arange(len(raw_ids), dtype=np.int64), index=raw_ids)
+        perm = raw_id_to_row.reindex(idf_ids).to_numpy()
+        if np.isnan(perm).any() or len(perm) != len(idf_ids):
+            # Truly mismatched (rows added or dropped between input and
+            # idf) — not a benign reorder.
+            raise PedigreeError(
+                "internal: row order mismatch between input and individual table"
+            )
+        raw = raw.iloc[perm.astype(np.int64)].reset_index(drop=True)
 
     canonical = ("id", "sex", "mother", "father")
     extras = raw.drop(columns=[c for c in canonical if c in raw.columns]).reset_index(drop=True)
@@ -2321,6 +2389,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: %(default)s; serial). No-op without `--effective-size`.",
     )
     p_sum.add_argument(
+        "--no-pairs",
+        action="store_true",
+        help="skip relationship-pair enumeration entirely. The 23 named "
+        "pair counts and the relationship-burden summary are replaced "
+        "with a stub. Useful on pair-dense pedigrees (stallion-heavy "
+        "livestock, large half-sib clusters) where the matrix / BFS "
+        "engines OOM at degree 5. The rest of the pipeline (size, "
+        "family, mating, lineage, inbreeding, effective size) is "
+        "unaffected.",
+    )
+    p_sum.add_argument(
         "--safe-attempt",
         action="store_true",
         help="best-effort GDPR-style redaction: skip the per-individual "
@@ -2428,16 +2507,29 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     mating_pairs = compute_mating_pair_summary(df)
     logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
 
-    t0 = time.perf_counter()
-    pairs = count_relationship_pairs(
-        df, engine=args.engine, threshold=args.bfs_threshold,
-        include_pair_lists=True, pg=pg,
-    )
-    logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
+    if args.no_pairs:
+        logger.info(
+            "relationship pairs: skipped (--no-pairs); pair counts and "
+            "relationship-burden summary replaced with stubs",
+        )
+        n_indiv_for_stub = len(df)
+        pairs = {"_engine": "skipped"}
+        relationship_summary = {
+            "computed": False,
+            "skip_reason": "relationship-pair counting skipped via --no-pairs",
+            "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
+        }
+    else:
+        t0 = time.perf_counter()
+        pairs = count_relationship_pairs(
+            df, engine=args.engine, threshold=args.bfs_threshold,
+            include_pair_lists=True, pg=pg,
+        )
+        logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
 
-    t0 = time.perf_counter()
-    relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
-    logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
+        logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
 
     n_indiv = len(df)
     if args.inbreeding:

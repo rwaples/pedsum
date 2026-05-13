@@ -99,6 +99,13 @@ Flags:
 - `--ne-threads N` — number of threads for independent Ne estimator
   dispatch (default `1`, serial).  Validated `>= 1` by argparse.  No-op
   without `--effective-size`.
+- `--no-pairs` — skip the relationship-pair enumeration stage entirely.
+  The 23 named pair counts and the relationship-burden summary are
+  replaced with stubs (`pairs_engine: skipped`, `pairs: {}`,
+  `relationship_summary.computed: false`).  Use on pair-dense pedigrees
+  (stallion-heavy livestock, large half-sib clusters) where the matrix
+  or BFS engines OOM at degree 5.  All other sections — size, family,
+  mating, lineage, inbreeding, effective size — are unaffected.
 - `--safe-attempt` — best-effort GDPR-style redaction: skip the
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
