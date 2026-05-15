@@ -7,35 +7,16 @@ argparse ``--ne-threads`` guard.
 """
 from __future__ import annotations
 
-import csv
-import logging
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
-REPO = Path(__file__).resolve().parents[1]
-EXAMPLE = REPO / "example_pedigree.tsv"
-SCRIPT = REPO / "pedigree_summary.py"
-
-
-def _run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, cwd=cwd or REPO,
-    )
-
-
-def _load_yaml(base: Path) -> dict:
-    return yaml.safe_load((base.parent / f"{base.name}.summary.yaml").read_text())
-
-
-def _load_tsv(base: Path) -> list[list[str]]:
-    path = base.parent / f"{base.name}.summary.pedigree.tsv"
-    with path.open() as fh:
-        return list(csv.reader(fh, delimiter="\t"))
+from conftest import (
+    EXAMPLE,
+    load_summary_tsv as _load_tsv,
+    load_summary_yaml as _load_yaml,
+    run_pedsum as _run,
+)
 
 
 def test_default_run_has_no_effective_size_keys(tmp_path):

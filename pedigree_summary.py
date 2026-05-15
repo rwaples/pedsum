@@ -2277,15 +2277,17 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
 def _add_engine_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--engine", choices=("auto", "matrix", "bfs"), default="auto",
-        help="relationship-pair enumeration engine. ``auto`` picks "
-        "``bfs`` when n is at or above the threshold; otherwise ``matrix`` "
-        "(default: %(default)s). The ``bfs`` engine is experimental — see "
-        "the README's 'Choosing an engine' section.",
+        help="relationship-pair enumeration engine, only consulted under "
+        "``--burden``. ``auto`` picks ``bfs`` when n is at or above the "
+        "threshold; otherwise ``matrix`` (default: %(default)s). The "
+        "``bfs`` engine is experimental — see the README's 'Choosing "
+        "an engine' section.",
     )
     p.add_argument(
         "--bfs-threshold", type=int, default=_BFS_AUTO_THRESHOLD,
         metavar="N",
-        help="auto-select threshold for the bfs engine (default: %(default)s)",
+        help="auto-select threshold for the bfs engine, only consulted "
+        "under ``--burden`` (default: %(default)s).",
     )
 
 
@@ -2391,19 +2393,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_sum.add_argument(
         "--burden",
         action="store_true",
-        help="opt into per-individual relationship-burden summary "
-        "(`relationship_summary.relatives_total`, "
-        "`relationship_summary.relatives_by_degree`, etc.).  Requires "
-        "materialising the full pair lists via the matrix or BFS "
-        "engine, which OOMs on pair-dense pedigrees (stallion-heavy "
-        "livestock, large half-sib clusters).  When unset (default), "
-        "pedsum uses `pedigree_graph.PedigreeGraph.count_pairs_streaming` "
-        "to populate the 23 pair counts in O(N) memory and leaves the "
-        "burden summary as a stub.  Precision: the streaming path is "
-        "bit-identical to the matrix engine for the 10 simple codes "
-        "(MO, FO, FS, MHS, PHS, MZ, GP, GGP, GGGP, G3GP); ~1% scalar "
-        "approximation on the 13 cousin / collateral codes when the "
-        "pedigree has inbreeding, twins, or shallow depth.",
+        help="opt into per-individual relationship-burden summary. "
+        "Requires the matrix or BFS engine to materialise full pair "
+        "lists (OOMs on pair-dense pedigrees). When unset (default), "
+        "pedsum uses count_pairs_streaming for the 23 pair counts in "
+        "O(N) memory; the burden summary is left as a stub. See the "
+        "README for the streaming-vs-matrix precision contract.",
     )
     p_sum.add_argument(
         "--safe-attempt",
@@ -2513,7 +2508,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     mating_pairs = compute_mating_pair_summary(df)
     logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
 
-    n_indiv_for_stub = len(df)
+    n_indiv = len(df)
     if args.burden:
         t0 = time.perf_counter()
         pairs = count_relationship_pairs(
@@ -2526,7 +2521,6 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
         logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
     else:
-        # Default: scalar streaming counts via pedigree-graph.
         t0 = time.perf_counter()
         streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
         logger.info(
@@ -2541,10 +2535,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
                 "per-individual relationship burden requires full pair-list "
                 "enumeration; pass --burden to compute via the matrix / BFS engine"
             ),
-            "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
+            "n_possible_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
 
-    n_indiv = len(df)
     if args.inbreeding:
         t0 = time.perf_counter()
         F_vec = pg.compute_inbreeding()

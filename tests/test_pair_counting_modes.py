@@ -9,26 +9,9 @@ on pair-dense pedigrees.
 """
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
-import yaml
-
-REPO = Path(__file__).resolve().parents[1]
-EXAMPLE = REPO / "example_pedigree.tsv"
-SCRIPT = REPO / "pedigree_summary.py"
-
-
-def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, cwd=REPO,
-    )
-
-
-def _load_yaml(base: Path) -> dict:
-    return yaml.safe_load((base.parent / f"{base.name}.summary.yaml").read_text())
+from conftest import EXAMPLE, load_summary_yaml as _load_yaml, run_pedsum as _run
 
 
 # ----- default (streaming scalar) mode --------------------------------
