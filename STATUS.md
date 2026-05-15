@@ -87,22 +87,26 @@ them.
    F kernel's row-retirement) would bound peak memory to the live
    frontier; deferred until a user hits the wall.
 
-2. **Relationship-pair counting OOMs on pair-dense pedigrees.**  Both
-   the matrix and BFS engines materialise pair arrays before counting,
-   so peak memory scales with `O(answer size)` not `O(N)`.  Stallion-
-   heavy livestock pedigrees (e.g., one sire with 2,500 offspring →
-   ~156 M paternal half-sib pairs) OOM at 30 GB.  Two operational
-   workarounds shipped:
+2. **Relationship-pair counting** — the matrix and BFS engines
+   materialise pair arrays before counting, so peak memory scales
+   with `O(answer size)` not `O(N)`.  Stallion-heavy livestock
+   pedigrees (e.g., one sire with 2,500 offspring → ~156 M paternal
+   half-sib pairs) OOM at 30 GB.
 
-   - `--no-pairs` — skip the relationship-pair stage entirely;
-     emits stubs.  Smallest memory footprint.
-   - `--counts-only` — populate the 23 pair counts via
-     `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar /
-     O(N) memory).  Bit-identical to the matrix engine for the 10
-     simple codes; ~1% scalar approximation on the 13 cousin /
-     collateral codes when the pedigree has inbreeding, twins, or
-     shallow depth.  Per-individual relationship-burden summary
-     stays a stub (needs full pair lists).
-     See [`../pedigree-graph/LIMITATIONS.md`](../pedigree-graph/LIMITATIONS.md)
-     for the precision contract and what would unlock exact
-     matrix-engine semantics at scale.
+   **Pedsum 0.5 (2026-05-15) flipped the default to streaming.**
+   By default `summarize` uses
+   `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar,
+   O(N) memory) to populate the 23 pair counts.  Bit-identical to
+   the matrix engine for the 10 simple codes; ~1% scalar
+   approximation on the 13 cousin / collateral codes when the
+   pedigree has inbreeding, twins, or shallow depth.  Per-individual
+   relationship-burden summary stays a stub.
+
+   The opt-in `--burden` flag restores the matrix / BFS engine
+   path with full pair-list output (and the per-individual burden
+   summary).  OOMs on pair-dense pedigrees; use only when burden
+   is required.
+
+   See [`../pedigree-graph/LIMITATIONS.md`](../pedigree-graph/LIMITATIONS.md)
+   for the precision contract and what would unlock exact
+   matrix-engine semantics at scale.

@@ -67,7 +67,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 
 _BFS_AUTO_THRESHOLD = 5_000_000
 
-VERSION = "0.4"
+VERSION = "0.5"
 SEX_FEMALE = 0
 SEX_MALE = 1
 INBRED_TOL = 1e-9
@@ -2389,27 +2389,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: %(default)s; serial). No-op without `--effective-size`.",
     )
     p_sum.add_argument(
-        "--no-pairs",
+        "--burden",
         action="store_true",
-        help="skip relationship-pair enumeration entirely. The 23 named "
-        "pair counts and the relationship-burden summary are replaced "
-        "with a stub. Useful on pair-dense pedigrees (stallion-heavy "
-        "livestock, large half-sib clusters) where the matrix / BFS "
-        "engines OOM at degree 5. The rest of the pipeline (size, "
-        "family, mating, lineage, inbreeding, effective size) is "
-        "unaffected.",
-    )
-    p_sum.add_argument(
-        "--counts-only",
-        action="store_true",
-        help="use `pedigree_graph.PedigreeGraph.count_pairs_streaming` "
-        "(scalar / memory-bounded) to populate the 23 pair counts. The "
-        "relationship-burden summary (per-individual cousin / aunt-uncle "
-        "counts) is NOT computed — that needs full pair-list enumeration. "
-        "Useful on pair-dense pedigrees where the matrix / BFS engines OOM. "
-        "Precision: bit-identical for lineal + sibling + MZ codes (10/23); "
-        "scalar approximation (~1% off on inbred input) for the 13 cousin / "
-        "collateral codes. Mutually exclusive with `--no-pairs`.",
+        help="opt into per-individual relationship-burden summary "
+        "(`relationship_summary.relatives_total`, "
+        "`relationship_summary.relatives_by_degree`, etc.).  Requires "
+        "materialising the full pair lists via the matrix or BFS "
+        "engine, which OOMs on pair-dense pedigrees (stallion-heavy "
+        "livestock, large half-sib clusters).  When unset (default), "
+        "pedsum uses `pedigree_graph.PedigreeGraph.count_pairs_streaming` "
+        "to populate the 23 pair counts in O(N) memory and leaves the "
+        "burden summary as a stub.  Precision: the streaming path is "
+        "bit-identical to the matrix engine for the 10 simple codes "
+        "(MO, FO, FS, MHS, PHS, MZ, GP, GGP, GGGP, G3GP); ~1% scalar "
+        "approximation on the 13 cousin / collateral codes when the "
+        "pedigree has inbreeding, twins, or shallow depth.",
     )
     p_sum.add_argument(
         "--safe-attempt",
@@ -2519,25 +2513,20 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     mating_pairs = compute_mating_pair_summary(df)
     logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
 
-    if args.no_pairs and args.counts_only:
-        logger.error(
-            "--no-pairs and --counts-only are mutually exclusive; pick one",
-        )
-        return 1
-
     n_indiv_for_stub = len(df)
-    if args.no_pairs:
-        logger.info(
-            "relationship pairs: skipped (--no-pairs); pair counts and "
-            "relationship-burden summary replaced with stubs",
+    if args.burden:
+        t0 = time.perf_counter()
+        pairs = count_relationship_pairs(
+            df, engine=args.engine, threshold=args.bfs_threshold,
+            include_pair_lists=True, pg=pg,
         )
-        pairs = {"_engine": "skipped"}
-        relationship_summary = {
-            "computed": False,
-            "skip_reason": "relationship-pair counting skipped via --no-pairs",
-            "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
-        }
-    elif args.counts_only:
+        logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
+        logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
+    else:
+        # Default: scalar streaming counts via pedigree-graph.
         t0 = time.perf_counter()
         streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
         logger.info(
@@ -2550,21 +2539,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "computed": False,
             "skip_reason": (
                 "per-individual relationship burden requires full pair-list "
-                "enumeration; not computed under --counts-only"
+                "enumeration; pass --burden to compute via the matrix / BFS engine"
             ),
             "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
         }
-    else:
-        t0 = time.perf_counter()
-        pairs = count_relationship_pairs(
-            df, engine=args.engine, threshold=args.bfs_threshold,
-            include_pair_lists=True, pg=pg,
-        )
-        logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
-
-        t0 = time.perf_counter()
-        relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
-        logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
 
     n_indiv = len(df)
     if args.inbreeding:

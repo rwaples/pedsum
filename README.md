@@ -99,25 +99,19 @@ Flags:
 - `--ne-threads N` — number of threads for independent Ne estimator
   dispatch (default `1`, serial).  Validated `>= 1` by argparse.  No-op
   without `--effective-size`.
-- `--no-pairs` — skip the relationship-pair enumeration stage entirely.
-  The 23 named pair counts and the relationship-burden summary are
-  replaced with stubs (`pairs_engine: skipped`, `pairs: {}`,
-  `relationship_summary.computed: false`).  Use on pair-dense pedigrees
-  (stallion-heavy livestock, large half-sib clusters) where the matrix
-  or BFS engines OOM at degree 5.  All other sections — size, family,
-  mating, lineage, inbreeding, effective size — are unaffected.
-- `--counts-only` — populate the 23 pair counts via
-  `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar /
-  memory-bounded).  Memory peak is O(N), with linear scaling in row
-  count.  Useful on pair-dense pedigrees where the default engines
-  OOM and you want counts (not just stubs).  Precision contract:
-  bit-identical to the matrix engine for the 10 simple codes
+- `--burden` — opt into per-individual relationship-burden summary
+  (`relationship_summary.relatives_total`, `.relatives_by_degree`,
+  closest-degree distribution, etc.).  Requires the matrix or BFS
+  engine to materialise full pair lists, which OOMs on pair-dense
+  pedigrees (stallion-heavy livestock, large half-sib clusters).
+  Without this flag pedsum uses
+  `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar,
+  O(N) memory) to populate the 23 pair counts and leaves the burden
+  summary as a stub.  The streaming counts are bit-identical to the
+  matrix engine for the 10 simple codes
   (`MO`, `FO`, `FS`, `MHS`, `PHS`, `MZ`, `GP`, `GGP`, `GGGP`,
   `G3GP`); ~1% scalar approximation on the 13 cousin / collateral
-  codes when the pedigree has inbreeding / twins / shallow depth.
-  Mutually exclusive with `--no-pairs`.  The per-individual
-  relationship burden summary remains a stub (that needs full pair
-  lists).
+  codes when the pedigree has inbreeding, twins, or shallow depth.
 - `--safe-attempt` — best-effort GDPR-style redaction: skip the
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
