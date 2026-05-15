@@ -2400,6 +2400,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "unaffected.",
     )
     p_sum.add_argument(
+        "--counts-only",
+        action="store_true",
+        help="use `pedigree_graph.PedigreeGraph.count_pairs_streaming` "
+        "(scalar / memory-bounded) to populate the 23 pair counts. The "
+        "relationship-burden summary (per-individual cousin / aunt-uncle "
+        "counts) is NOT computed — that needs full pair-list enumeration. "
+        "Useful on pair-dense pedigrees where the matrix / BFS engines OOM. "
+        "Precision: bit-identical for lineal + sibling + MZ codes (10/23); "
+        "scalar approximation (~1% off on inbred input) for the 13 cousin / "
+        "collateral codes. Mutually exclusive with `--no-pairs`.",
+    )
+    p_sum.add_argument(
         "--safe-attempt",
         action="store_true",
         help="best-effort GDPR-style redaction: skip the per-individual "
@@ -2507,16 +2519,39 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     mating_pairs = compute_mating_pair_summary(df)
     logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
 
+    if args.no_pairs and args.counts_only:
+        logger.error(
+            "--no-pairs and --counts-only are mutually exclusive; pick one",
+        )
+        return 1
+
+    n_indiv_for_stub = len(df)
     if args.no_pairs:
         logger.info(
             "relationship pairs: skipped (--no-pairs); pair counts and "
             "relationship-burden summary replaced with stubs",
         )
-        n_indiv_for_stub = len(df)
         pairs = {"_engine": "skipped"}
         relationship_summary = {
             "computed": False,
             "skip_reason": "relationship-pair counting skipped via --no-pairs",
+            "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
+        }
+    elif args.counts_only:
+        t0 = time.perf_counter()
+        streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
+        logger.info(
+            "relationship pair counts (count_pairs_streaming) in %.2fs",
+            time.perf_counter() - t0,
+        )
+        pairs = _augment_pair_counts(streamed_counts)
+        pairs["_engine"] = "streaming_scalar"
+        relationship_summary = {
+            "computed": False,
+            "skip_reason": (
+                "per-individual relationship burden requires full pair-list "
+                "enumeration; not computed under --counts-only"
+            ),
             "n_possible_pairs": int(n_indiv_for_stub * (n_indiv_for_stub - 1) // 2),
         }
     else:

@@ -86,3 +86,23 @@ them.
    exceeds commodity hardware.  A retirement-style DP (analogous to the
    F kernel's row-retirement) would bound peak memory to the live
    frontier; deferred until a user hits the wall.
+
+2. **Relationship-pair counting OOMs on pair-dense pedigrees.**  Both
+   the matrix and BFS engines materialise pair arrays before counting,
+   so peak memory scales with `O(answer size)` not `O(N)`.  Stallion-
+   heavy livestock pedigrees (e.g., one sire with 2,500 offspring →
+   ~156 M paternal half-sib pairs) OOM at 30 GB.  Two operational
+   workarounds shipped:
+
+   - `--no-pairs` — skip the relationship-pair stage entirely;
+     emits stubs.  Smallest memory footprint.
+   - `--counts-only` — populate the 23 pair counts via
+     `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar /
+     O(N) memory).  Bit-identical to the matrix engine for the 10
+     simple codes; ~1% scalar approximation on the 13 cousin /
+     collateral codes when the pedigree has inbreeding, twins, or
+     shallow depth.  Per-individual relationship-burden summary
+     stays a stub (needs full pair lists).
+     See [`../pedigree-graph/LIMITATIONS.md`](../pedigree-graph/LIMITATIONS.md)
+     for the precision contract and what would unlock exact
+     matrix-engine semantics at scale.
