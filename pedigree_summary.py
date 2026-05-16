@@ -2305,7 +2305,7 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
 
 
 def _positive_int(v: str) -> int:
-    """argparse type guard for ints >= 1."""
+    """Argparse type guard for ints >= 1."""
     try:
         iv = int(v)
     except (TypeError, ValueError) as exc:

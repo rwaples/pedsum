@@ -15,12 +15,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pedigree_summary as ps  # noqa: E402
-
+import pedigree_summary as ps
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"
 
@@ -45,12 +43,14 @@ def _build_pg_and_df():
 
 
 def test_ped_depth_matches_pg_generation():
+    """``df['ped_depth']`` after construction equals ``pg.generation``."""
     pg, df = _build_pg_and_df()
     np.testing.assert_array_equal(df["ped_depth"].to_numpy(), pg.generation)
     assert int(df["ped_depth"].max()) == _SNAPSHOT["ped_depth_max"]
 
 
 def test_compute_n_descendants_snapshot():
+    """``pg.compute_n_descendants`` matches the pre-refactor snapshot totals."""
     pg, _ = _build_pg_and_df()
     n_desc = pg.compute_n_descendants()
     assert n_desc.dtype == np.int32
@@ -59,6 +59,7 @@ def test_compute_n_descendants_snapshot():
 
 
 def test_compute_n_ancestors_snapshot():
+    """``pg.compute_n_ancestors`` matches the pre-refactor snapshot totals."""
     pg, _ = _build_pg_and_df()
     n_anc = pg.compute_n_ancestors()
     assert n_anc.dtype == np.int32

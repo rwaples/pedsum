@@ -1,3 +1,9 @@
+"""Tests for the ``--inbreeding`` gating of ancestor-distribution aggregates.
+
+Pin that the default summarize path leaves the per-individual
+``n_ancestors`` distribution and the lineage/generation ancestor
+aggregates empty, and that ``--inbreeding`` flips them on.
+"""
 from __future__ import annotations
 
 import sys
@@ -8,7 +14,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pedigree_summary import (  # noqa: E402
+from pedigree_summary import (
     SEX_FEMALE,
     SEX_MALE,
     _build_individual_data,
@@ -43,6 +49,7 @@ def _individual_df() -> pd.DataFrame:
 
 
 def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
+    """Default mode emits None for lineage/generation ancestor stats."""
     idf = _individual_df()
 
     aggregates = compute_aggregate_sections(idf, include_inbreeding=False)
@@ -52,6 +59,7 @@ def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
 
 
 def test_default_individual_data_omits_ancestor_distribution() -> None:
+    """Default mode omits ``F`` and ``n_ancestors`` from the distribution block."""
     idf = _individual_df()
 
     out = _build_individual_data(
@@ -66,6 +74,7 @@ def test_default_individual_data_omits_ancestor_distribution() -> None:
 
 
 def test_inbreeding_mode_reports_ancestor_stats() -> None:
+    """``--inbreeding`` populates lineage, generation, and per-individual ancestor stats."""
     idf = _individual_df()
 
     aggregates = compute_aggregate_sections(idf, include_inbreeding=True)

@@ -9,15 +9,15 @@ on pair-dense pedigrees.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-from conftest import EXAMPLE, load_summary_yaml as _load_yaml, run_pedsum as _run
-
+from conftest import EXAMPLE
+from conftest import load_summary_yaml as _load_yaml
+from conftest import run_pedsum as _run
 
 # ----- default (streaming scalar) mode --------------------------------
 
 
 def test_default_uses_streaming_engine(tmp_path):
+    """Default summarize routes through the streaming scalar pair-count engine."""
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
@@ -26,6 +26,7 @@ def test_default_uses_streaming_engine(tmp_path):
 
 
 def test_default_populates_pair_counts(tmp_path):
+    """Streaming engine emits all 23 named codes plus PO synthesis and by_degree."""
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
@@ -42,6 +43,7 @@ def test_default_populates_pair_counts(tmp_path):
 
 
 def test_default_relationship_summary_is_stub(tmp_path):
+    """In streaming mode ``relationship_summary`` is a stub with skip_reason set."""
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
@@ -52,6 +54,7 @@ def test_default_relationship_summary_is_stub(tmp_path):
 
 
 def test_default_works_with_inbreeding_and_effective_size(tmp_path):
+    """Streaming engine composes with ``--inbreeding`` and ``--effective-size``."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base),
@@ -68,6 +71,7 @@ def test_default_works_with_inbreeding_and_effective_size(tmp_path):
 
 
 def test_burden_uses_matrix_engine(tmp_path):
+    """``--burden`` routes through the matrix / BFS pair-count engine."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base), "--burden",
@@ -79,6 +83,7 @@ def test_burden_uses_matrix_engine(tmp_path):
 
 
 def test_burden_populates_relationship_summary(tmp_path):
+    """``--burden`` populates the per-individual relationship-burden summary."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base), "--burden",
@@ -92,8 +97,7 @@ def test_burden_populates_relationship_summary(tmp_path):
 
 
 def test_burden_pair_counts_close_to_streaming(tmp_path):
-    """On the example pedigree, the two modes should give similar
-    counts for the 10 exact codes."""
+    """On the example pedigree, the two modes should give similar counts for the 10 exact codes."""
     base_s = tmp_path / "stream"
     base_b = tmp_path / "burden"
     assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(base_s)]).returncode == 0

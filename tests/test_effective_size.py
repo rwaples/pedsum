@@ -7,19 +7,22 @@ argparse ``--ne-threads`` guard.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from conftest import (
     EXAMPLE,
+)
+from conftest import (
     load_summary_tsv as _load_tsv,
+)
+from conftest import (
     load_summary_yaml as _load_yaml,
+)
+from conftest import (
     run_pedsum as _run,
 )
 
 
 def test_default_run_has_no_effective_size_keys(tmp_path):
+    """Without ``--effective-size`` the YAML/TSV omit all Ne sections."""
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
@@ -52,6 +55,7 @@ def test_effective_size_without_inbreeding_works(tmp_path):
 
 
 def test_effective_size_with_inbreeding(tmp_path):
+    """``--inbreeding --effective-size`` populates both sections; memo_size is gone."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base),
@@ -68,6 +72,7 @@ def test_effective_size_with_inbreeding(tmp_path):
 
 
 def test_ne_coancestry_opts_in(tmp_path):
+    """``--ne-coancestry`` enables the coancestry-based Ne computation."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base),
@@ -103,6 +108,7 @@ def test_tsv_split_holds(tmp_path):
 
 
 def test_warning_for_orphaned_ne_flags(tmp_path, caplog):
+    """``--ne-coancestry`` without ``--effective-size`` warns on stderr."""
     base = tmp_path / "p"
     # Drive via subprocess to get realistic stderr capture.
     res = _run([
@@ -113,6 +119,7 @@ def test_warning_for_orphaned_ne_flags(tmp_path, caplog):
 
 
 def test_ne_threads_zero_argparse_error(tmp_path):
+    """``--ne-threads 0`` is rejected by argparse and writes nothing."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base),
@@ -125,6 +132,7 @@ def test_ne_threads_zero_argparse_error(tmp_path):
 
 
 def test_ne_threads_accepts_positive_int(tmp_path):
+    """``--ne-threads`` accepts a positive integer and runs to completion."""
     base = tmp_path / "p"
     res = _run([
         "summarize", "--in", str(EXAMPLE), "--out", str(base),
