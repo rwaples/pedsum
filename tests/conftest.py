@@ -26,6 +26,13 @@ def load_summary_yaml(base: Path) -> dict:
     return yaml.safe_load((base.parent / f"{base.name}.summary.yaml").read_text())
 
 
+def load_summary_extra_yaml(base: Path) -> dict:
+    """Parse ``BASENAME.summary.extra.yaml`` produced by a ``summarize`` run."""
+    import yaml
+
+    return yaml.safe_load((base.parent / f"{base.name}.summary.extra.yaml").read_text())
+
+
 def load_summary_tsv(base: Path) -> list[list[str]]:
     """Read the long-form ``BASENAME.summary.pedigree.tsv`` rows."""
     path = base.parent / f"{base.name}.summary.pedigree.tsv"

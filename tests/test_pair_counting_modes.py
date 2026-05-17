@@ -22,22 +22,23 @@ def test_default_uses_streaming_engine(tmp_path):
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(base)["pedigree"]
-    assert ped["pairs_engine"] == "streaming_scalar"
+    assert ped["relatedness"]["pairs"]["engine"] == "streaming_scalar"
 
 
 def test_default_populates_pair_counts(tmp_path):
-    """Streaming engine emits all 23 named codes plus PO synthesis and by_degree."""
+    """Streaming engine emits all 23 named codes plus PO synthesis; by_degree dropped from YAML."""
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
-    pairs = _load_yaml(base)["pedigree"]["pairs"]
-    # 23 named codes + PO synthesis + by_degree rollup.
+    pairs = _load_yaml(base)["pedigree"]["relatedness"]["pairs"]
+    # 23 named codes + PO synthesis.
     for code in ("MZ", "MO", "FO", "FS", "MHS", "PHS",
                  "GP", "GGP", "GGGP", "G3GP", "Av", "HAv",
                  "1C", "H1C", "2C"):
         assert code in pairs, f"{code} missing from default pairs dict"
     assert "PO" in pairs
-    assert "by_degree" in pairs
+    # by_degree is a YAML-only drop (derivable from the 23 codes; still in TSV).
+    assert "by_degree" not in pairs
     assert pairs["MO"] > 0
     assert pairs["FS"] > 0
 
@@ -47,7 +48,7 @@ def test_default_relationship_summary_is_stub(tmp_path):
     base = tmp_path / "p"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
     assert res.returncode == 0, res.stderr
-    rs = _load_yaml(base)["pedigree"]["relationship_summary"]
+    rs = _load_yaml(base)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is False
     assert "pass --burden" in rs["skip_reason"]
     assert rs["n_possible_pairs"] == 200 * 199 // 2
@@ -62,9 +63,9 @@ def test_default_works_with_inbreeding_and_effective_size(tmp_path):
     ])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(base)["pedigree"]
-    assert ped["pairs_engine"] == "streaming_scalar"
-    assert ped["inbreeding"] is not None
-    assert len(ped["effective_size"]) == 8
+    assert ped["relatedness"]["pairs"]["engine"] == "streaming_scalar"
+    assert ped["relatedness"]["inbreeding"] is not None
+    assert len(ped["popgen"]["effective_size"]) == 8
 
 
 # ----- --burden (matrix engine) mode ----------------------------------
@@ -78,8 +79,8 @@ def test_burden_uses_matrix_engine(tmp_path):
     ])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(base)["pedigree"]
-    # _engine field comes from count_relationship_pairs, set to "matrix" or "bfs".
-    assert ped["pairs_engine"] in ("matrix", "bfs")
+    # engine field comes from count_relationship_pairs, set to "matrix" or "bfs".
+    assert ped["relatedness"]["pairs"]["engine"] in ("matrix", "bfs")
 
 
 def test_burden_populates_relationship_summary(tmp_path):
@@ -89,7 +90,7 @@ def test_burden_populates_relationship_summary(tmp_path):
         "summarize", "--in", str(EXAMPLE), "--out", str(base), "--burden",
     ])
     assert res.returncode == 0, res.stderr
-    rs = _load_yaml(base)["pedigree"]["relationship_summary"]
+    rs = _load_yaml(base)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is True
     # Per-individual burden fields appear when matrix engine ran.
     assert "relatives_by_degree" in rs
@@ -102,8 +103,8 @@ def test_burden_pair_counts_close_to_streaming(tmp_path):
     base_b = tmp_path / "burden"
     assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(base_s)]).returncode == 0
     assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(base_b), "--burden"]).returncode == 0
-    s = _load_yaml(base_s)["pedigree"]["pairs"]
-    b = _load_yaml(base_b)["pedigree"]["pairs"]
+    s = _load_yaml(base_s)["pedigree"]["relatedness"]["pairs"]
+    b = _load_yaml(base_b)["pedigree"]["relatedness"]["pairs"]
     # The 10 simple codes match bit-identically.
     for code in ("MZ", "MO", "FO", "FS", "MHS", "PHS",
                  "GP", "GGP", "GGGP", "G3GP"):

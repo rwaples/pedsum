@@ -6,7 +6,10 @@ machine-readable summaries covering size, structure, family-size
 distribution, relationship-pair counts, and per-individual inbreeding.
 
 Outputs of ``summarize`` (with ``--out BASENAME``):
-    BASENAME.summary.yaml             combined pedigree+individual summary
+    BASENAME.summary.yaml             slim categorised summary (~500 lines)
+    BASENAME.summary.extra.yaml       per-generation / per-cohort arrays and
+                                      full per-individual quantiles
+                                      (suppressed under ``--single-file``)
     BASENAME.summary.pedigree.tsv     long-form pedigree-level summary
     BASENAME.summary.individual.tsv   long-form per-individual distribution
     BASENAME.annotated.tsv.gz         input pedigree + per-individual cols
@@ -525,6 +528,29 @@ def _as_parent_int_col(
     return arr
 
 
+def _as_birth_year_col(series: pd.Series, name: str) -> np.ndarray:
+    """Parse a birth-year column to int32 with sentinel -1 for unknown.
+
+    Accepts integer- or float-valued tokens (``"1988"``, ``"1988.0"``) and
+    the same missing tokens as parent IDs (empty/NA/NaN/N/A/./?/None/null).
+    Float values are truncated to int (a birth year is by definition a
+    whole calendar year). Sentinel encoding matches
+    ``pedigree_graph.PedigreeGraph.birth_year``.
+    """
+    filled = series.where(series.notna(), "-1")
+    str_vals = filled.astype(str).str.strip()
+    missing_mask = str_vals.str.upper().isin(_PARENT_MISSING_TOKENS)
+    cleaned = str_vals.where(~missing_mask, "-1")
+    try:
+        as_float = pd.to_numeric(cleaned, errors="raise").to_numpy(dtype=np.float64)
+    except (ValueError, TypeError) as e:
+        raise PedigreeError(
+            f"birth-year column {name!r} must be numeric (integer or float "
+            f"calendar year, with -1/NA/blank for unknown); failed to parse: {e}"
+        ) from None
+    return as_float.astype(np.int32)
+
+
 def load_and_validate(
     path: Path,
     id_col: str = "id",
@@ -533,13 +559,16 @@ def load_and_validate(
     father_col: str = "father",
     plink_sex: bool = False,
     zero_as_missing: bool = False,
+    birth_year_col: str | None = None,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
 
-    df has columns id, sex (int8), mother, father, generation (int32).
-    Missing parent encoded as -1. children_csr is the parent→child sparse
-    matrix (None if there are no parent edges) and is shared across the
-    generations / components / descendants / inbreeding passes.
+    df has columns id, sex (int8), mother, father, generation (int32),
+    and ``birth_year`` (int32, sentinel -1) when ``birth_year_col`` is
+    set. Missing parent encoded as -1. children_csr is the parent→child
+    sparse matrix (None if there are no parent edges) and is shared
+    across the generations / components / descendants / inbreeding
+    passes.
     """
     if not path.exists():
         raise PedigreeError(f"input file not found: {path}")
@@ -550,6 +579,8 @@ def load_and_validate(
     _maybe_warn_csv(df)
 
     needed = {id_col, sex_col, mother_col, father_col}
+    if birth_year_col is not None:
+        needed.add(birth_year_col)
     miss_cols = needed - set(df.columns)
     if miss_cols:
         raise PedigreeError(f"missing required columns: {sorted(miss_cols)}; file has {list(df.columns)}")
@@ -564,6 +595,11 @@ def load_and_validate(
     mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
     fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
     sex = _decode_sex(df[sex_col], plink=plink_sex)
+    birth_year = (
+        _as_birth_year_col(df[birth_year_col], birth_year_col)
+        if birth_year_col is not None
+        else None
+    )
 
     n = len(ids)
 
@@ -606,6 +642,8 @@ def load_and_validate(
             {"id": ids[order], "sex": sex[order],
              "mother": mothers[order], "father": fathers[order]},
         )
+        if birth_year is not None:
+            out["birth_year"] = birth_year[order]
         id_index = pd.Index(out["id"].to_numpy())
         m_row, mask_m = _parent_rows(out["mother"].to_numpy(), id_index)
         f_row, mask_f = _parent_rows(out["father"].to_numpy(), id_index)
@@ -613,6 +651,8 @@ def load_and_validate(
         out = pd.DataFrame(
             {"id": ids, "sex": sex, "mother": mothers, "father": fathers},
         )
+        if birth_year is not None:
+            out["birth_year"] = birth_year
 
     children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
     # Note: ``ped_depth`` is populated by the caller (``_run_summarize``)
@@ -1448,7 +1488,10 @@ def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
     sex-aware estimators (Ne_sr, the sex-decomposed Ne_V quadrants, sex-
     stratified relationship-pair extraction) receive correct sex data
     rather than the silent zeros that the bare-arrays construction path
-    would supply.
+    would supply. When the df carries a ``birth_year`` column (populated
+    by ``load_and_validate`` under ``--birth-year-col``), the array is
+    threaded through as well so the Hill overlapping-generation estimator
+    can build its cohort window.
 
     Generation is derived inside ``from_arrays`` from the (already-remapped)
     parent arrays via a fixed-point sweep — same semantics as pedsum's
@@ -1473,11 +1516,17 @@ def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
             parents == -1, -1, id_to_compact.reindex(parents).to_numpy(),
         ).astype(np.int64)
 
+    birth_year = (
+        df["birth_year"].to_numpy().astype(np.int32)
+        if "birth_year" in df.columns
+        else None
+    )
     return PedigreeGraph.from_arrays(
         ids=new_ids,
         mothers=_remap(df["mother"].to_numpy()),
         fathers=_remap(df["father"].to_numpy()),
         sex=df["sex"].to_numpy().astype(np.int8),
+        birth_year=birth_year,
     )
 
 
@@ -1692,6 +1741,345 @@ _NUMERIC_COLS = (
 
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------------------
+# Categorised summary YAML schema (Axis 1, one nesting level)
+# ---------------------------------------------------------------------------
+# Two output files split a single pre-categorised pedigree dict:
+#   <base>.summary.yaml         — slim, headline content
+#   <base>.summary.extra.yaml   — residue (omitted keys / arrays), see split contract
+# The flat dict that feeds the TSV writers is untouched — TSV output is
+# YAML-reorg-invariant. Drops, renames, and category structure live ONLY
+# here in this schema; section builders stay split-unaware.
+
+
+@dataclass(frozen=True)
+class SectionSpec:
+    """One leaf section under a category."""
+    name: str
+    slim_keys: tuple[str, ...] | None = None
+    list_of_dict_slim_keys: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
+class CategorySpec:
+    """One category bucket grouping related sections."""
+    name: str
+    sections: tuple[SectionSpec, ...]
+
+
+# 23 named relationship codes from REL_REGISTRY plus PO and engine.
+_PAIRS_SLIM_KEYS: tuple[str, ...] = (
+    "MZ", "MO", "FO", "FS", "MHS", "PHS", "GP", "Av", "GGP", "HAv", "GAv",
+    "1C", "GGGP", "HGAv", "GGAv", "H1C", "1C1R", "G3GP", "HGGAv", "G3Av",
+    "H1C1R", "1C2R", "2C", "PO", "engine",
+)
+
+
+SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
+    CategorySpec("structure", (
+        SectionSpec("size_structure"),
+        SectionSpec("components"),
+        SectionSpec("max_degree_enumerated"),
+    )),
+    CategorySpec("demography", (
+        SectionSpec("family_size"),
+        SectionSpec("mating_pairs"),
+    )),
+    CategorySpec("lineage", (
+        SectionSpec("lineage"),
+        SectionSpec("founder_contribution"),
+        SectionSpec("founder_generation"),
+    )),
+    CategorySpec("relatedness", (
+        SectionSpec("pairs", slim_keys=_PAIRS_SLIM_KEYS),
+        SectionSpec("relationship_summary"),
+        SectionSpec("inbreeding"),
+    )),
+    CategorySpec("popgen", (
+        SectionSpec("effective_size"),  # per-estimator special handling
+    )),
+    CategorySpec("strata", (
+        SectionSpec("sex_summary"),     # per-stratum special handling
+        SectionSpec("generation_summary", list_of_dict_slim_keys=("gen", "n")),
+    )),
+)
+
+
+# Per-stratum slim keys for sex_summary (the scalar integers only).
+_SEX_SUMMARY_SLIM_KEYS: tuple[str, ...] = (
+    "n", "n_founders", "n_reproductive", "n_inbred",
+)
+
+# Per-individual distribution split: only headline columns in slim, and within
+# each column only mean+median; extra carries all 12 columns × 8 quantile keys.
+INDIVIDUAL_SLIM_COLS: tuple[str, ...] = ("n_offspring", "n_mates", "F", "n_ancestors")
+INDIVIDUAL_SLIM_DIST_KEYS: tuple[str, ...] = ("mean", "median")
+
+# YAML-only drops (paths within the categorised dict). Constructed in the
+# flat dict and visible in the TSV; excluded from both slim and extra YAML.
+KNOWN_YAML_DROPS: frozenset[str] = frozenset({
+    "pedigree.relatedness.pairs.by_degree",
+    "individual.distributions.F.max",
+})
+
+# Schema renames from flat → categorised path. Used by the totality test so
+# renamed fields aren't flagged as missing.
+RENAMES: dict[str, str] = {
+    "pedigree.pairs_engine": "pedigree.relatedness.pairs.engine",
+}
+
+
+def _categorise_pedigree(flat_ped: dict) -> dict:
+    """Wrap the flat pedigree dict into the category structure.
+
+    Pure function. Reads ``SUMMARY_SCHEMA`` to bucket sections by
+    category, drops empty categories, and folds the sibling
+    ``pairs_engine`` into ``pairs.engine`` so it lives inside the
+    relatedness.pairs subtree (matches ``RENAMES``).
+
+    Does NOT apply slim/extra splitting — that is ``_split_summary``'s
+    job. Does NOT apply ``KNOWN_YAML_DROPS`` — splitter handles them.
+    """
+    sections = dict(flat_ped)
+    pairs = sections.get("pairs")
+    pairs_engine = sections.pop("pairs_engine", None)
+    if pairs is not None and pairs_engine is not None:
+        # Non-destructive: build a new dict so the caller's flat payload
+        # (which the TSV writer also reads) is not mutated.
+        sections["pairs"] = {**pairs, "engine": pairs_engine}
+
+    nested: dict = {}
+    for cat in SUMMARY_SCHEMA:
+        cat_dict: dict = {}
+        for sec in cat.sections:
+            value = sections.get(sec.name)
+            if value is None:
+                continue
+            if isinstance(value, dict) and not value:
+                continue
+            if isinstance(value, list) and not value:
+                continue
+            cat_dict[sec.name] = value
+        if cat_dict:
+            nested[cat.name] = cat_dict
+    return nested
+
+
+# Per-estimator routing for effective_size. Detection is name-based (not
+# value-based) so a field that *normally* carries an array still routes to
+# extra when upstream emits ``None`` (e.g. Hill arrays when birth_year is
+# absent and the estimator collapses).
+_EFFECTIVE_SIZE_ARRAY_SUFFIXES: tuple[str, ...] = (
+    "_per_gen", "_per_transition", "_per_cohort",
+)
+_EFFECTIVE_SIZE_ARRAY_NAMES: frozenset[str] = frozenset({
+    "cohort_years", "age_table",
+    "v_mm", "v_mf", "v_fm", "v_ff", "cov_m", "cov_f",
+})
+
+
+def _is_effective_size_array_key(key: str) -> bool:
+    """Return True if ``key`` names an array field inside an Ne estimator."""
+    if key in _EFFECTIVE_SIZE_ARRAY_NAMES:
+        return True
+    return any(key.endswith(suf) for suf in _EFFECTIVE_SIZE_ARRAY_SUFFIXES)
+
+
+def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
+    """Per-estimator scalar/array split for ``popgen.effective_size``.
+
+    For each estimator: scalars and small dicts like ``cohort_window``
+    stay in slim; per-generation / per-cohort / per-transition arrays
+    plus ``age_table`` go to extra. Routing is name-based, so
+    placeholder ``None`` values for unpopulated arrays still land in
+    extra. ``ne_coancestry`` with ``ne is None`` gets a slim-only
+    ``{ne: null}`` stub and no extra entry.
+    """
+    slim: dict = {}
+    extra: dict = {}
+    for est_name, est_value in es_dict.items():
+        if not isinstance(est_value, dict):
+            slim[est_name] = est_value
+            continue
+        if est_name == "ne_coancestry" and est_value.get("ne") is None:
+            slim[est_name] = {"ne": None}
+            continue
+        est_slim: dict = {}
+        est_extra: dict = {}
+        for k, v in est_value.items():
+            if _is_effective_size_array_key(k):
+                est_extra[k] = v
+            else:
+                est_slim[k] = v
+        if est_slim:
+            slim[est_name] = est_slim
+        if est_extra:
+            extra[est_name] = est_extra
+    return slim, extra
+
+
+def _split_sex_summary(sex_dict: dict) -> tuple[dict, dict]:
+    """Per-stratum split for ``strata.sex_summary``: scalars in slim, dists in extra."""
+    slim: dict = {}
+    extra: dict = {}
+    for stratum_name, stratum_value in sex_dict.items():
+        if not isinstance(stratum_value, dict):
+            slim[stratum_name] = stratum_value
+            continue
+        s_slim = {k: stratum_value[k] for k in _SEX_SUMMARY_SLIM_KEYS if k in stratum_value}
+        s_extra = {k: v for k, v in stratum_value.items() if k not in _SEX_SUMMARY_SLIM_KEYS}
+        if s_slim:
+            slim[stratum_name] = s_slim
+        if s_extra:
+            extra[stratum_name] = s_extra
+    return slim, extra
+
+
+def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
+    """Split a single section value into (slim, extra) per its SectionSpec."""
+    if not isinstance(value, (dict, list)):
+        return value, None  # scalar section → slim only
+    if isinstance(value, list):
+        if spec.list_of_dict_slim_keys is None:
+            return value, None
+        slim_rows: list = []
+        extra_rows: list = []
+        any_extra = False
+        for row in value:
+            if not isinstance(row, dict):
+                slim_rows.append(row)
+                extra_rows.append(None)
+                continue
+            keep = spec.list_of_dict_slim_keys
+            slim_rows.append({k: row[k] for k in keep if k in row})
+            row_extra = {k: v for k, v in row.items() if k not in keep}
+            extra_rows.append(row_extra if row_extra else {})
+            if row_extra:
+                any_extra = True
+        return slim_rows, (extra_rows if any_extra else None)
+    # Dict section.
+    if spec.name == "effective_size":
+        s, e = _split_effective_size(value)
+        return s, (e if e else None)
+    if spec.name == "sex_summary":
+        s, e = _split_sex_summary(value)
+        return s, (e if e else None)
+    if spec.slim_keys is None:
+        return value, None
+    slim_dict = {k: value[k] for k in spec.slim_keys if k in value}
+    extra_dict = {k: v for k, v in value.items() if k not in spec.slim_keys}
+    return slim_dict, (extra_dict if extra_dict else None)
+
+
+def _drop_dotted_path(d: dict, parts: tuple[str, ...]) -> None:
+    """Delete ``d[parts[0]][parts[1]]...`` if present. In-place; safe on missing keys."""
+    if not parts or not isinstance(d, dict):
+        return
+    if len(parts) == 1:
+        d.pop(parts[0], None)
+        return
+    sub = d.get(parts[0])
+    if isinstance(sub, dict):
+        _drop_dotted_path(sub, parts[1:])
+
+
+def _split_summary(nested_ped: dict) -> tuple[dict, dict]:
+    """Split a categorised pedigree dict into (slim, extra) per ``SUMMARY_SCHEMA``.
+
+    Implements the split contract: every leaf key in ``nested_ped``
+    appears in exactly one of (slim, extra, ``KNOWN_YAML_DROPS``). Empty
+    categories are omitted from both files.
+    """
+    spec_by_name = {sec.name: sec for cat in SUMMARY_SCHEMA for sec in cat.sections}
+    slim: dict = {}
+    extra: dict = {}
+    for cat_name, cat_dict in nested_ped.items():
+        slim_cat: dict = {}
+        extra_cat: dict = {}
+        for sec_name, value in cat_dict.items():
+            spec = spec_by_name.get(sec_name)
+            if spec is None:
+                slim_cat[sec_name] = value
+                continue
+            slim_val, extra_val = _split_section(value, spec)
+            if slim_val not in (None, {}, []):
+                slim_cat[sec_name] = slim_val
+            if extra_val not in (None, {}, []):
+                extra_cat[sec_name] = extra_val
+        if slim_cat:
+            slim[cat_name] = slim_cat
+        if extra_cat:
+            extra[cat_name] = extra_cat
+    for drop_path in KNOWN_YAML_DROPS:
+        if not drop_path.startswith("pedigree."):
+            continue
+        parts = tuple(drop_path.split(".")[1:])
+        _drop_dotted_path(slim, parts)
+        _drop_dotted_path(extra, parts)
+    return slim, extra
+
+
+def _split_individual_distributions(
+    dists: dict,
+) -> tuple[dict, dict]:
+    """Split per-individual distributions into (slim, extra) residues.
+
+    For each column:
+
+    * If the column is in ``INDIVIDUAL_SLIM_COLS``, slim keeps the
+      ``INDIVIDUAL_SLIM_DIST_KEYS`` (mean/median); extra carries the
+      remaining quantile keys (min/std/q1/q3/max/nz).
+    * Otherwise the full distribution dict goes to extra; slim has no
+      entry for that column.
+
+    Applies the ``individual.distributions.F.max`` YAML-only drop (drops
+    from extra; slim never carried ``max`` for ``F`` anyway). Under this
+    contract, no leaf path appears in both slim and extra.
+    """
+    slim_d: dict = {}
+    extra_d: dict = {}
+    for col, dist in dists.items():
+        if not isinstance(dist, dict):
+            slim_d[col] = dist
+            continue
+        if col in INDIVIDUAL_SLIM_COLS:
+            slim_d[col] = {k: dist[k] for k in INDIVIDUAL_SLIM_DIST_KEYS if k in dist}
+            residue = {k: v for k, v in dist.items() if k not in INDIVIDUAL_SLIM_DIST_KEYS}
+            if residue:
+                extra_d[col] = residue
+        else:
+            extra_d[col] = dict(dist)
+    if "F" in extra_d and isinstance(extra_d["F"], dict):
+        extra_d["F"].pop("max", None)  # KNOWN_YAML_DROPS
+    return slim_d, extra_d
+
+
+def _deep_merge_summary(slim, extra):
+    """Merge a (slim, extra) pair back into one structure for ``--single-file``.
+
+    Three cases: dict (deep-union keys), list-of-dict (zip-by-index,
+    deep-union per entry), and scalars (slim wins — extra should not
+    carry scalars under the split contract).
+    """
+    if extra is None:
+        return slim
+    if slim is None:
+        return extra
+    if isinstance(slim, dict) and isinstance(extra, dict):
+        out: dict = dict(slim)
+        for k, v in extra.items():
+            if k in out:
+                out[k] = _deep_merge_summary(out[k], v)
+            else:
+                out[k] = v
+        return out
+    if isinstance(slim, list) and isinstance(extra, list):
+        if len(slim) != len(extra):
+            return slim  # length mismatch: take slim (defensive; should not happen)
+        return [_deep_merge_summary(a, b) for a, b in zip(slim, extra, strict=False)]
+    return slim
 
 
 def _build_pedigree_data(
@@ -1995,31 +2383,45 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
 
 def _build_summary_data(
     ped_data: dict, ind_data: dict, *, yaml_extras: dict | None = None,
-) -> dict:
-    """Merge per-section dicts into one summary; shared meta lifted to the top.
+) -> tuple[dict, dict]:
+    """Build the (slim, extra) categorised YAML payloads from flat dicts.
 
-    ``yaml_extras`` is for deep structures (e.g. ``effective_size``)
-    that belong in the YAML but not in the long-form TSV.  They are
-    merged under ``pedigree:`` after the flat sections.  When a section
-    in ``yaml_extras`` has a TSV-friendly twin in ``ped_data`` (e.g.
-    ``effective_size_scalars``), the flat twin is dropped from the YAML
-    to avoid emitting both the deep structure and a redundant scalar
-    echo.
+    Pipeline: strip meta → drop ``effective_size_scalars`` (TSV-only)
+    → splice ``yaml_extras`` (carries ``effective_size``) → categorise
+    → split per ``SUMMARY_SCHEMA``. The same meta block sits at the top
+    of both files so each is self-identifying. Per-individual
+    ``distributions`` gets its own slim/extra split via
+    ``_split_individual_distributions``.
+
+    ``ped_data`` is left untouched (the TSV writers read it directly).
     """
-    out = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
-    pedigree_section = {
-        k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS
-    }
+    meta = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
+
+    flat_ped = {k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS}
+    # ``effective_size_scalars`` is the TSV's separate scalar projection
+    # (built in ``_run_summarize``); it never belonged in YAML. Drop it
+    # before categorisation so it doesn't leak into the slim or extra
+    # YAML files.
+    flat_ped.pop("effective_size_scalars", None)
     if yaml_extras:
-        pedigree_section.update(yaml_extras)
-        # If Ne was computed, the scalar twin is redundant in YAML.
-        if "effective_size" in yaml_extras:
-            pedigree_section.pop("effective_size_scalars", None)
-    out["pedigree"] = pedigree_section
-    out["individual"] = {
-        k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS
-    }
-    return out
+        flat_ped.update(yaml_extras)
+
+    nested_ped = _categorise_pedigree(flat_ped)
+    slim_ped, extra_ped = _split_summary(nested_ped)
+
+    ind_payload = {k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS}
+    dists = ind_payload.get("distributions", {})
+    slim_dists, extra_dists = _split_individual_distributions(dists)
+    slim_ind: dict = {k: v for k, v in ind_payload.items() if k != "distributions"}
+    extra_ind: dict = {k: v for k, v in ind_payload.items() if k != "distributions"}
+    if slim_dists:
+        slim_ind["distributions"] = slim_dists
+    if extra_dists:
+        extra_ind["distributions"] = extra_dists
+
+    slim_yaml = {**meta, "pedigree": slim_ped, "individual": slim_ind}
+    extra_yaml = {**meta, "pedigree": extra_ped, "individual": extra_ind}
+    return slim_yaml, extra_yaml
 
 
 def _flatten_long(obj, prefix: tuple = ()):
@@ -2336,7 +2738,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_sum.add_argument(
         "--out", dest="out_basename", required=True, type=Path, metavar="BASENAME",
         help="output basename (no extension); writes BASENAME.summary.yaml "
-        "(combined pedigree+individual summary), BASENAME.summary.pedigree.tsv, "
+        "(slim categorised summary), BASENAME.summary.extra.yaml (per-generation "
+        "/ per-cohort / per-transition arrays and full per-individual quantiles; "
+        "suppressed under --single-file), BASENAME.summary.pedigree.tsv, "
         "BASENAME.summary.individual.tsv, and BASENAME.annotated.tsv.gz "
         "(input pedigree + per-individual columns; suppressed under "
         "--safe-attempt)",
@@ -2357,6 +2761,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_sum.add_argument(
         "--father-col", default="father", metavar="NAME",
         help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
+    )
+    p_sum.add_argument(
+        "--birth-year-col", default=None, metavar="NAME",
+        help="optional column name for birth year (integer or float "
+        "calendar year; -1/NA/blank for unknown). When set, pedsum threads "
+        "the column through to PedigreeGraph so the Hill overlapping-"
+        "generation Ne estimator (Ne_H) can build its cohort window; "
+        "without it Ne_H collapses to Ne_V.",
     )
     p_sum.add_argument(
         "--inbreeding",
@@ -2406,6 +2818,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="best-effort GDPR-style redaction: skip the per-individual "
         "annotated TSV, drop min/max from distributions, and null any "
         "count or stratum below cell-size 5. Not a safe-harbor guarantee.",
+    )
+    p_sum.add_argument(
+        "--single-file",
+        action="store_true",
+        help="write a single BASENAME.summary.yaml containing the deep-merge "
+        "of slim + extra (still in the categorised structure) instead of the "
+        "default two-file split. Any pre-existing BASENAME.summary.extra.yaml "
+        "at the same path is deleted to avoid stale output.",
     )
     _add_engine_args(p_sum)
     _add_format_args(p_sum)
@@ -2471,6 +2891,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             father_col=args.father_col,
             plink_sex=args.plink_sex,
             zero_as_missing=args.zero_as_missing,
+            birth_year_col=args.birth_year_col,
         )
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
@@ -2598,11 +3019,28 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     _write_long_tsv(tsv_payload, _at(base, ".summary.pedigree.tsv"))
     _write_long_tsv(ind_data, _at(base, ".summary.individual.tsv"))
 
-    summary_data = _build_summary_data(tsv_payload, ind_data, yaml_extras=yaml_extras)
-    _write_yaml(summary_data, _at(base, ".summary.yaml"))
-    logger.info(
-        "wrote %s.summary.yaml + %s.summary.{pedigree,individual}.tsv", base, base,
+    slim_yaml, extra_yaml = _build_summary_data(
+        tsv_payload, ind_data, yaml_extras=yaml_extras,
     )
+    slim_path = _at(base, ".summary.yaml")
+    extra_path = _at(base, ".summary.extra.yaml")
+    if args.single_file:
+        merged = _deep_merge_summary(slim_yaml, extra_yaml)
+        _write_yaml(merged, slim_path)
+        if extra_path.exists():
+            extra_path.unlink()
+        logger.info(
+            "wrote %s + %s.summary.{pedigree,individual}.tsv (single-file mode)",
+            slim_path, base,
+        )
+    else:
+        _write_yaml(slim_yaml, slim_path)
+        _write_yaml(extra_yaml, extra_path)
+        logger.info(
+            "wrote %s.summary.yaml + %s.summary.extra.yaml + "
+            "%s.summary.{pedigree,individual}.tsv",
+            base, base, base,
+        )
 
     if args.safe_attempt:
         logger.info("safe-attempt: skipped %s.annotated.tsv.gz (per-individual)", base)

@@ -11,6 +11,9 @@ from conftest import (
     EXAMPLE,
 )
 from conftest import (
+    load_summary_extra_yaml as _load_extra,
+)
+from conftest import (
     load_summary_tsv as _load_tsv,
 )
 from conftest import (
@@ -29,7 +32,8 @@ def test_default_run_has_no_effective_size_keys(tmp_path):
 
     yaml_data = _load_yaml(base)
     ped = yaml_data["pedigree"]
-    assert "effective_size" not in ped
+    # popgen category is omitted entirely when effective_size is not computed.
+    assert "popgen" not in ped
     assert "effective_size_scalars" not in ped
 
     tsv_rows = _load_tsv(base)
@@ -47,11 +51,13 @@ def test_effective_size_without_inbreeding_works(tmp_path):
 
     yaml_data = _load_yaml(base)
     ped = yaml_data["pedigree"]
-    assert ped.get("inbreeding") is None
-    assert "effective_size" in ped
-    assert len(ped["effective_size"]) == 8
-    # Without --ne-coancestry the Ne_C scalar is null.
-    assert ped["effective_size"]["ne_coancestry"]["ne"] is None
+    # Without --inbreeding, the relatedness category may still exist (pairs lives
+    # there) but the inbreeding section inside it must be absent.
+    assert "inbreeding" not in ped.get("relatedness", {})
+    assert "effective_size" in ped["popgen"]
+    assert len(ped["popgen"]["effective_size"]) == 8
+    # Without --ne-coancestry the Ne_C scalar is null (compact stub).
+    assert ped["popgen"]["effective_size"]["ne_coancestry"]["ne"] is None
 
 
 def test_effective_size_with_inbreeding(tmp_path):
@@ -65,10 +71,10 @@ def test_effective_size_with_inbreeding(tmp_path):
 
     yaml_data = _load_yaml(base)
     ped = yaml_data["pedigree"]
-    assert ped["inbreeding"] is not None
+    assert ped["relatedness"]["inbreeding"] is not None
     # memo_size dropped from the inbreeding summary in the refactor.
-    assert "memo_size" not in ped["inbreeding"]
-    assert ped["effective_size"]["ne_coancestry"]["ne"] is None
+    assert "memo_size" not in ped["relatedness"]["inbreeding"]
+    assert ped["popgen"]["effective_size"]["ne_coancestry"]["ne"] is None
 
 
 def test_ne_coancestry_opts_in(tmp_path):
@@ -81,14 +87,16 @@ def test_ne_coancestry_opts_in(tmp_path):
     assert res.returncode == 0, res.stderr
 
     yaml_data = _load_yaml(base)
-    es = yaml_data["pedigree"]["effective_size"]
+    es = yaml_data["pedigree"]["popgen"]["effective_size"]
     ne_c = es["ne_coancestry"]["ne"]
     # On the 200-row example we expect a finite scalar; if upstream changes
     # cause it to come back as None for genuine reasons, the test still
     # validates "not the NaN-array sentinel that --skip-ne-coancestry=True
     # would have produced".
     assert ne_c is None or isinstance(ne_c, float)
-    assert all(v is not None for v in es["ne_coancestry"]["mean_theta_per_gen"][1:])
+    # The per-gen array lives in the extra YAML.
+    extra_es = _load_extra(base)["pedigree"]["popgen"]["effective_size"]
+    assert all(v is not None for v in extra_es["ne_coancestry"]["mean_theta_per_gen"][1:])
 
 
 def test_tsv_split_holds(tmp_path):
