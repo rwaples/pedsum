@@ -2,16 +2,54 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Test / lint / type-check caches
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.pyright/
+.pytype/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets / local env
+.env
+.env.*
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Editor / OS
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.#*
+\#*\#
+
+# Local tooling caches
+.code-review-graph/
 
 # Sample run outputs (don't commit pedigree data or summaries)
 *.summary.yaml
+*.summary.extra.yaml
 *.summary.pedigree.tsv
 *.summary.individual.tsv
 *.annotated.tsv.gz
