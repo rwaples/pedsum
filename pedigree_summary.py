@@ -70,9 +70,10 @@ from pedigree_graph.experimental import count_pairs_bfs
 
 _BFS_AUTO_THRESHOLD = 5_000_000
 
-VERSION = "0.5"
+VERSION = "0.6"
 SEX_FEMALE = 0
 SEX_MALE = 1
+SEX_UNKNOWN = -1
 INBRED_TOL = 1e-9
 
 logger = logging.getLogger("pedigree_summary")
@@ -121,11 +122,53 @@ _CHECK_ORDER: tuple[str, ...] = (
     "parent_refs_present_mother",
     "parent_refs_present_father",
     "parent_refs_sex_conflict",
+    "sex_role_ambiguity",
     "self_loops",
     "parents_distinct",
     "sex_role_consistency",
-    "topological_row_order",
+    "unknown_sex",
     "acyclic",
+)
+
+
+_CHECK_LABELS: dict[str, str] = {
+    "required_columns":            "required columns present",
+    "id_dtype":                    "id column parses as integer",
+    "mother_dtype":                "mother column parses as integer",
+    "father_dtype":                "father column parses as integer",
+    "sex_tokens":                  "sex column tokens recognized",
+    "negative_ids":                "no negative IDs",
+    "duplicate_ids":               "no duplicate IDs",
+    "parent_token_range_mother":   "mother IDs in valid range",
+    "parent_token_range_father":   "father IDs in valid range",
+    "parent_refs_present_mother":  "mother IDs present in pedigree",
+    "parent_refs_present_father":  "father IDs present in pedigree",
+    "parents_distinct":            "mother and father distinct",
+    "parent_refs_sex_conflict":    "no missing-parent sex conflicts",
+    "sex_role_ambiguity":          "no role-ambiguous unsexed individuals",
+    "self_loops":                  "no self-loops",
+    "sex_role_consistency":        "sex consistent with parent role",
+    "unknown_sex":                 "all individuals have resolved sex",
+    "acyclic":                     "acyclic (no descent cycles)",
+    "empty_pedigree":              "pedigree is non-empty",
+}
+
+
+_CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Columns & parsing", (
+        "required_columns", "empty_pedigree",
+        "id_dtype", "mother_dtype", "father_dtype", "sex_tokens",
+    )),
+    ("IDs", ("negative_ids", "duplicate_ids")),
+    ("Parent references", (
+        "parent_token_range_mother", "parent_token_range_father",
+        "parent_refs_present_mother", "parent_refs_present_father",
+        "parents_distinct",
+        "parent_refs_sex_conflict", "sex_role_ambiguity",
+    )),
+    ("Graph structure", (
+        "self_loops", "sex_role_consistency", "unknown_sex", "acyclic",
+    )),
 )
 
 
@@ -310,55 +353,161 @@ def _check_parent_refs_sex_conflict(
     ]
 
 
-def _check_topological_row_order(
-    ids: np.ndarray,
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    id_index: pd.Index,
-) -> list[Finding]:
-    """Detect rows whose parent appears in a later row; one Finding per offending row."""
-    n = len(ids)
-    m_row, _ = _parent_rows(mothers, id_index)
-    f_row, _ = _parent_rows(fathers, id_index)
-    own = np.arange(n, dtype=np.int64)
-    bad_m = (m_row != -1) & (m_row >= own)
-    bad_f = (f_row != -1) & (f_row >= own)
-    findings = []
-    for i in np.where(bad_m | bad_f)[0]:
-        roles = []
-        if bad_m[i]:
-            roles.append(f"mother (row {int(m_row[i])})")
-        if bad_f[i]:
-            roles.append(f"father (row {int(f_row[i])})")
-        findings.append(Finding(
-            check="topological_row_order", id=int(ids[i]), row=int(i),
-            detail=f"row {int(i)} (id={int(ids[i])}) appears before its " + " and ".join(roles),
-        ))
-    return findings
-
-
 def _check_sex_role_consistency(
     mothers: np.ndarray,
     fathers: np.ndarray,
     sex: np.ndarray,
     id_index: pd.Index,
+    *,
+    skip_mask: np.ndarray | None = None,
 ) -> list[Finding]:
-    """Detect IDs used as mother but sex != female, or as father but sex != male."""
+    """Detect IDs used as mother but sex != female, or as father but sex != male.
+
+    When ``skip_mask`` is supplied, rows whose mask entry is True are excluded
+    from both role tests. This is used to bypass rows whose sex started as
+    unknown (already covered by ``sex_role_ambiguity`` and ``unknown_sex``).
+    """
     used_as_mother = np.unique(mothers[mothers != -1])
     used_as_father = np.unique(fathers[fathers != -1])
     rows_um = id_index.get_indexer(used_as_mother)
     rows_uf = id_index.get_indexer(used_as_father)
+    if skip_mask is not None:
+        keep_m = (rows_um != -1) & ~skip_mask[np.where(rows_um != -1, rows_um, 0)]
+        keep_f = (rows_uf != -1) & ~skip_mask[np.where(rows_uf != -1, rows_uf, 0)]
+    else:
+        keep_m = rows_um != -1
+        keep_f = rows_uf != -1
     findings = [
         Finding(check="sex_role_consistency", id=int(mid),
                 detail=f"id={int(mid)} used as mother but sex != female")
-        for mid in used_as_mother[(rows_um != -1) & (sex[rows_um] != SEX_FEMALE)]
+        for mid in used_as_mother[keep_m & (sex[rows_um] != SEX_FEMALE)]
     ]
     findings.extend(
         Finding(check="sex_role_consistency", id=int(fid),
                 detail=f"id={int(fid)} used as father but sex != male")
-        for fid in used_as_father[(rows_uf != -1) & (sex[rows_uf] != SEX_MALE)]
+        for fid in used_as_father[keep_f & (sex[rows_uf] != SEX_MALE)]
     )
     return findings
+
+
+@dataclass
+class _SexImputation:
+    """Result of imputing unknown sex from mother / father role usage."""
+
+    imputed_sex: np.ndarray
+    n_imputed: int
+    ambiguous_mask: np.ndarray
+    original_unknown_mask: np.ndarray
+    mother_first_row: dict[int, int]
+    father_first_row: dict[int, int]
+
+
+def _impute_sex_from_roles(
+    sex: np.ndarray,
+    ids: np.ndarray,
+    mothers: np.ndarray,
+    fathers: np.ndarray,
+) -> _SexImputation:
+    """Impute SEX_UNKNOWN rows from their usage as mother / father.
+
+    Rules:
+      - id used only as mother → impute F
+      - id used only as father → impute M
+      - id used as both        → leave -1, mark ambiguous
+      - id used as neither     → leave -1, orphan (caller decides whether to
+                                 raise / tolerate via ``--allow-unknown-sex``)
+    """
+    original_unknown_mask = (sex == SEX_UNKNOWN).copy()
+    imputed = sex.copy()
+    ambiguous_mask = np.zeros(len(sex), dtype=bool)
+    n_imputed = 0
+
+    mother_first_row: dict[int, int] = {}
+    for row_idx in np.where(mothers != -1)[0]:
+        mid = int(mothers[row_idx])
+        mother_first_row.setdefault(mid, int(row_idx))
+    father_first_row: dict[int, int] = {}
+    for row_idx in np.where(fathers != -1)[0]:
+        fid = int(fathers[row_idx])
+        father_first_row.setdefault(fid, int(row_idx))
+
+    mother_ids = set(mother_first_row.keys())
+    father_ids = set(father_first_row.keys())
+
+    for row_idx in np.where(original_unknown_mask)[0]:
+        rid = int(ids[row_idx])
+        in_m = rid in mother_ids
+        in_f = rid in father_ids
+        if in_m and in_f:
+            ambiguous_mask[row_idx] = True
+        elif in_m:
+            imputed[row_idx] = SEX_FEMALE
+            n_imputed += 1
+        elif in_f:
+            imputed[row_idx] = SEX_MALE
+            n_imputed += 1
+
+    return _SexImputation(
+        imputed_sex=imputed,
+        n_imputed=n_imputed,
+        ambiguous_mask=ambiguous_mask,
+        original_unknown_mask=original_unknown_mask,
+        mother_first_row=mother_first_row,
+        father_first_row=father_first_row,
+    )
+
+
+def _check_sex_role_ambiguity(
+    ids: np.ndarray,
+    ambiguous_mask: np.ndarray,
+    mother_first_row: dict[int, int],
+    father_first_row: dict[int, int],
+) -> list[Finding]:
+    """Detect unsexed rows that are referenced as BOTH mother and father.
+
+    Always a hard block — this is a data contradiction, not just missing
+    information, and cannot be bypassed via ``--allow-unknown-sex``.
+    """
+    findings: list[Finding] = []
+    for row_idx in np.where(ambiguous_mask)[0]:
+        rid = int(ids[row_idx])
+        mrow = mother_first_row.get(rid, -1)
+        frow = father_first_row.get(rid, -1)
+        findings.append(Finding(
+            check="sex_role_ambiguity",
+            id=rid,
+            row=int(row_idx),
+            detail=(
+                f"id={rid} has unknown sex AND is referenced as both "
+                f"mother (row {mrow}) and father (row {frow}); "
+                "sex cannot be imputed"
+            ),
+        ))
+    return findings
+
+
+def _check_unknown_sex(
+    ids: np.ndarray,
+    sex: np.ndarray,
+    ambiguous_mask: np.ndarray,
+) -> list[Finding]:
+    """Detect rows that still carry SEX_UNKNOWN after imputation.
+
+    Excludes rows already reported by ``sex_role_ambiguity``.
+    """
+    orphan_mask = (sex == SEX_UNKNOWN) & ~ambiguous_mask
+    return [
+        Finding(
+            check="unknown_sex",
+            id=int(ids[i]),
+            row=int(i),
+            detail=(
+                f"id={int(ids[i])} has unknown sex and is not referenced as a "
+                "parent; cannot be imputed"
+            ),
+        )
+        for i in np.where(orphan_mask)[0]
+    ]
 
 
 def _summarize_findings(findings: list[Finding]) -> str:
@@ -446,20 +595,91 @@ _PARENT_MISSING_TOKENS: frozenset[str] = frozenset({
     "", "NA", "NAN", "N/A", ".", "?", "NONE", "NULL",
 })
 
+_SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset({
+    "-1", "U", "UNKNOWN",
+})
 
-def _decode_sex(series: pd.Series, plink: bool = False) -> np.ndarray:
-    """Parse a sex column. Accepts M/F (any case) and Male/Female by default.
 
-    Numeric encoding: 0=female, 1=male (matches the script's internal
-    convention). When ``plink=True``, numeric encoding is 1=male, 2=female
-    (PLINK convention).
+def _detect_sex_encoding(
+    upper_non_missing: pd.Series,
+    zero_as_missing: bool,
+) -> tuple[str, str]:
+    """Resolve the sex-column encoding from the observed tokens.
+
+    Returns ``(encoding, ambiguity_class)`` where encoding is ``"default"``
+    (0=F, 1=M) or ``"plink"`` (1=M, 2=F), and ambiguity_class is one of
+    ``"confident"``, ``"word_only"``, or ``"ones_only"``.
     """
-    str_vals = series.astype(str).str.strip()
+    numeric = {t for t in upper_non_missing.unique() if t.isdigit() or t.lstrip("-").isdigit()}
+    if "2" in numeric:
+        return "plink", "confident"
+    if "0" in numeric and not zero_as_missing:
+        return "default", "confident"
+    if "0" in numeric and zero_as_missing:
+        return "plink", "confident"
+    if not numeric:
+        return "default", "word_only"
+    return "default", "ones_only"
+
+
+def _decode_sex(
+    series: pd.Series,
+    *,
+    encoding: str = "auto",
+    zero_as_missing: bool = False,
+) -> np.ndarray:
+    """Parse a sex column to int8 with ``SEX_UNKNOWN`` (-1) for missing.
+
+    Accepts M/F (any case), Male/Female, and numeric tokens whose meaning
+    depends on the resolved encoding:
+
+    - ``encoding="default"`` (pedsum default): ``0=female, 1=male``.
+    - ``encoding="plink"`` (PLINK fam convention): ``1=male, 2=female``,
+      with ``0`` always treated as missing (PLINK fam spec).
+    - ``encoding="auto"``: detect from the observed tokens (presence of
+      ``"2"`` → plink; presence of ``"0"`` → default unless
+      ``zero_as_missing=True``, which flips to plink).
+
+    Missing tokens (``""``, ``NA``, ``NaN``, ``N/A``, ``.``, ``?``, ``None``,
+    ``null``, ``-1``, ``U``, ``Unknown``, case-insensitive) decode to
+    ``SEX_UNKNOWN``. Unrecognized non-missing tokens raise ``PedigreeError``.
+
+    Returns an ``int8`` array; rows whose token was missing carry
+    ``SEX_UNKNOWN`` (-1) and must be resolved by the caller.
+    """
+    # Cast through ``fillna("")`` so NaN cells (pandas' default na_value for
+    # StringDtype) collapse into the missing-token set rather than leaking
+    # into the unique-token scan.
+    str_vals = series.fillna("").astype(str).str.strip()
     upper = str_vals.str.upper()
-    out = np.full(len(str_vals), -1, dtype=np.int8)
+    missing_mask = upper.isin(_SEX_MISSING_TOKENS)
+    non_missing = upper[~missing_mask]
+
+    if encoding == "auto":
+        resolved, ambiguity = _detect_sex_encoding(non_missing, zero_as_missing)
+        logger.info("sex auto-detect: resolved to %s encoding", resolved)
+        if ambiguity == "ones_only":
+            logger.warning(
+                "sex auto-detect: only '1' tokens present; defaulting to "
+                "0=female, 1=male — pass --sex-encoding=plink if your file "
+                "uses 1=male, 2=female",
+            )
+    elif encoding in ("default", "plink"):
+        resolved = encoding
+    else:
+        raise PedigreeError(
+            f"unknown sex encoding {encoding!r}; expected 'auto', 'default', or 'plink'",
+        )
+
+    # Under PLINK, "0" is always missing (fam-file spec); fold it into the
+    # missing mask before decoding numeric tokens.
+    if resolved == "plink":
+        missing_mask = missing_mask | (str_vals == "0")
+
+    out = np.full(len(str_vals), SEX_UNKNOWN, dtype=np.int8)
     female_words = (upper == "F") | (upper == "FEMALE")
     male_words = (upper == "M") | (upper == "MALE")
-    if plink:
+    if resolved == "plink":
         out[female_words | (str_vals == "2")] = SEX_FEMALE
         out[male_words | (str_vals == "1")] = SEX_MALE
         allowed = "M/F (any case), Male/Female, or 1/2 (1=male, 2=female; PLINK convention)."
@@ -468,16 +688,18 @@ def _decode_sex(series: pd.Series, plink: bool = False) -> np.ndarray:
         out[male_words | (str_vals == "1")] = SEX_MALE
         allowed = (
             "M/F (any case), Male/Female, or 0/1 (0=female, 1=male). "
-            "Pass --plink-sex if your file uses 1=male, 2=female."
+            "Pass --sex-encoding=plink if your file uses 1=male, 2=female."
         )
-    bad = out == -1
+
+    # Tokens that were neither decoded nor recognized as missing are invalid.
+    bad = (out == SEX_UNKNOWN) & ~missing_mask
     if bad.any():
         bad_rows = np.where(bad)[0][:5]
         bad_vals = str_vals.iloc[bad_rows].tolist()
         raise PedigreeError(
             f"sex column has {int(bad.sum())} invalid value(s); "
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
-            f"Allowed: {allowed}"
+            f"Allowed: {allowed}",
         )
     return out
 
@@ -557,9 +779,11 @@ def load_and_validate(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    plink_sex: bool = False,
+    sex_encoding: str = "auto",
     zero_as_missing: bool = False,
+    allow_unknown_sex: bool = False,
     birth_year_col: str | None = None,
+    plink_sex: bool = False,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
 
@@ -591,10 +815,13 @@ def load_and_validate(
 
     _raise_first(_check_empty_pedigree(len(df)))
 
+    if plink_sex:
+        sex_encoding = "plink"
+
     ids = _as_int_col(df[id_col], id_col)
     mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
     fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
-    sex = _decode_sex(df[sex_col], plink=plink_sex)
+    sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
     birth_year = (
         _as_birth_year_col(df[birth_year_col], birth_year_col)
         if birth_year_col is not None
@@ -614,10 +841,36 @@ def load_and_validate(
         _check_parent_refs_present(fathers, "father", id_index),
         _check_self_loops(ids, mothers, fathers),
         _check_parents_distinct(ids, mothers, fathers),
-        _check_sex_role_consistency(mothers, fathers, sex, id_index),
     ):
         if findings:
             raise PedigreeError(_summarize_findings(findings))
+
+    # Impute unknown sex from parent role usage where possible.
+    imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
+    sex = imp.imputed_sex
+    if imp.n_imputed > 0:
+        logger.info(
+            "imputed sex for %d row(s) from parent role (F if used as mother, "
+            "M if used as father)", imp.n_imputed,
+        )
+    _raise_first(_check_sex_role_ambiguity(
+        ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
+    ))
+    if not allow_unknown_sex:
+        _raise_first(_check_unknown_sex(ids, sex, imp.ambiguous_mask))
+    else:
+        n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
+        if n_orphan > 0:
+            logger.info(
+                "kept %d row(s) with sex=%d (--allow-unknown-sex)",
+                n_orphan, SEX_UNKNOWN,
+            )
+
+    role_consistency = _check_sex_role_consistency(
+        mothers, fathers, sex, id_index, skip_mask=imp.original_unknown_mask,
+    )
+    if role_consistency:
+        raise PedigreeError(_summarize_findings(role_consistency))
 
     # Map parent IDs to row indices, then run a fixed-point depth sweep
     # that is tolerant of arbitrary input row order (real-world TSV /
@@ -676,8 +929,10 @@ def validate_pedigree(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    plink_sex: bool = False,
+    sex_encoding: str = "auto",
     zero_as_missing: bool = False,
+    allow_unknown_sex: bool = False,
+    plink_sex: bool = False,
 ) -> tuple[int, list[CheckResult], list[Finding], dict]:
     """Run every integrity check accumulating.
 
@@ -741,9 +996,11 @@ def validate_pedigree(
     ids = _coerce_int(id_col, "id_dtype")
     mothers = _coerce_int(mother_col, "mother_dtype", _parent_parser)
     fathers = _coerce_int(father_col, "father_dtype", _parent_parser)
+    if plink_sex:
+        sex_encoding = "plink"
     sex: np.ndarray | None = None
     try:
-        sex = _decode_sex(df[sex_col], plink=plink_sex)
+        sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
         results["sex_tokens"] = CheckResult(name="sex_tokens", status="PASS")
     except PedigreeError as e:
         findings.append(Finding(check="sex_tokens", detail=str(e)))
@@ -786,13 +1043,37 @@ def validate_pedigree(
                     _check_parent_refs_sex_conflict(mothers, fathers, id_index))
             _record("self_loops", _check_self_loops(ids, mothers, fathers))
             _record("parents_distinct", _check_parents_distinct(ids, mothers, fathers))
+
             if sex is not None:
-                _record("sex_role_consistency",
-                        _check_sex_role_consistency(mothers, fathers, sex, id_index))
+                imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
+                imputed_sex = imp.imputed_sex
+                _record("sex_role_ambiguity", _check_sex_role_ambiguity(
+                    ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
+                ))
+                _record("sex_role_consistency", _check_sex_role_consistency(
+                    mothers, fathers, imputed_sex, id_index,
+                    skip_mask=imp.original_unknown_mask,
+                ))
+                n_orphan = int(((imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
+                if allow_unknown_sex:
+                    _skip(
+                        "unknown_sex",
+                        f"bypassed via --allow-unknown-sex ({n_orphan} tolerated)",
+                    )
+                else:
+                    _record("unknown_sex", _check_unknown_sex(
+                        ids, imputed_sex, imp.ambiguous_mask,
+                    ))
+                ctx["sex_imputation"] = {
+                    "imputed_sex": imputed_sex,
+                    "n_imputed": imp.n_imputed,
+                    "ambiguous_mask": imp.ambiguous_mask,
+                    "original_unknown_mask": imp.original_unknown_mask,
+                }
             else:
+                _skip("sex_role_ambiguity", "sex_tokens failed")
                 _skip("sex_role_consistency", "sex_tokens failed")
-            _record("topological_row_order",
-                    _check_topological_row_order(ids, mothers, fathers, id_index))
+                _skip("unknown_sex", "sex_tokens failed")
             blocks_acyclic = []
             if results["parent_refs_present_mother"].status == "FAIL":
                 blocks_acyclic.append("missing mother references")
@@ -806,16 +1087,18 @@ def validate_pedigree(
                 _skip("acyclic", "; ".join(blocks_acyclic))
         else:
             _skip("parent_refs_sex_conflict", "mother_dtype or father_dtype failed")
+            _skip("sex_role_ambiguity", "mother_dtype or father_dtype failed")
             _skip("self_loops", "mother_dtype or father_dtype failed")
             _skip("parents_distinct", "mother_dtype or father_dtype failed")
             _skip("sex_role_consistency", "mother_dtype or father_dtype failed")
-            _skip("topological_row_order", "mother_dtype or father_dtype failed")
+            _skip("unknown_sex", "mother_dtype or father_dtype failed")
             _skip("acyclic", "mother_dtype or father_dtype failed")
     else:
         for name in (
             "parent_refs_present_mother", "parent_refs_present_father",
-            "parent_refs_sex_conflict", "self_loops", "parents_distinct",
-            "sex_role_consistency", "topological_row_order", "acyclic",
+            "parent_refs_sex_conflict", "sex_role_ambiguity",
+            "self_loops", "parents_distinct",
+            "sex_role_consistency", "unknown_sex", "acyclic",
         ):
             _skip(name, "id_dtype/negative_ids/duplicate_ids failed")
 
@@ -853,6 +1136,7 @@ def compute_size_structure(
     sex = df["sex"].to_numpy()
     n_male = int((sex == SEX_MALE).sum())
     n_female = int((sex == SEX_FEMALE).sum())
+    n_unknown = int((sex == SEX_UNKNOWN).sum())
 
     gen = df["ped_depth"].to_numpy()
     max_depth = int(gen.max()) if n > 0 else 0
@@ -875,6 +1159,7 @@ def compute_size_structure(
         "nonfounder_frac": n_nonfounders / n if n else 0.0,
         "n_male": n_male,
         "n_female": n_female,
+        "n_unknown_sex": n_unknown,
         "n_mother_links": n_mother_links,
         "n_father_links": n_father_links,
         "n_parent_child_edges": n_mother_links + n_father_links,
@@ -1502,9 +1787,9 @@ def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
     ``id_to_row`` table sized to ``max(id) + 1``; passing original IDs
     on a sparse pedigree would inflate memory by orders of magnitude.
 
-    Assumes the input has already passed ``load_and_validate`` (in
-    particular ``_check_topological_row_order``); ``PedigreeGraph``
-    requires parents to precede children in row order.
+    Assumes the input has already passed ``load_and_validate``, which
+    sorts rows into topological order; ``PedigreeGraph`` requires
+    parents to precede children in row order.
     """
     ids = df["id"].to_numpy()
     n = len(ids)
@@ -2555,16 +2840,33 @@ def _write_annotated_tsv(
 
 
 def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
-    """Multi-line stderr summary: header + per-check PASS/FAIL/SKIP + result line."""
-    width = max(len(r.name) for r in results) + 2
+    """Render the validate summary as grouped sections with friendly labels.
+
+    The internal check names remain in ``.validate.log``; only the on-screen
+    rendering changes here. Unknown check names (e.g. after a partial rename)
+    are skipped defensively rather than crashing the formatter.
+    """
+    by_check = {r.name: r for r in results}
+    width = max(len(label) for label in _CHECK_LABELS.values()) + 1
     lines = [f"pedigree_summary.py: validating {path} (N={n_total:,})"]
-    for r in results:
-        line = f"  {r.name:<{width}} {r.status}"
-        if r.status == "FAIL":
-            line += f" ({r.count})"
-        elif r.status == "SKIP" and r.skip_reason:
-            line += f" ({r.skip_reason})"
-        lines.append(line)
+    total_findings = 0
+    for group_name, check_names in _CHECK_GROUPS:
+        lines.append("")
+        lines.append(group_name)
+        for name in check_names:
+            r = by_check.get(name)
+            if r is None:
+                continue  # defensive: tolerate missing check names
+            label = _CHECK_LABELS.get(name, name)
+            line = f"  {label} {'.' * (width - len(label))} {r.status}"
+            if r.status == "FAIL":
+                line += f" ({r.count})"
+                total_findings += r.count
+            elif r.status == "SKIP" and r.skip_reason:
+                line += f" ({r.skip_reason})"
+            lines.append(line)
+    lines.append("")
+    lines.append(f"result: {total_findings} finding(s)")
     return "\n".join(lines) + "\n"
 
 
@@ -2695,14 +2997,26 @@ def _add_engine_args(p: argparse.ArgumentParser) -> None:
 
 def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--plink-sex", action="store_true",
-        help="interpret the sex column with the PLINK convention (1=male, "
-        "2=female) instead of the default 0=female, 1=male",
+        "--sex-encoding", choices=("auto", "default", "plink"), default="auto",
+        help="how to decode the sex column: 'default' = 0=female, 1=male "
+        "(pedsum default); 'plink' = 1=male, 2=female, 0=unknown (PLINK fam "
+        "convention); 'auto' (default) detects from the observed tokens.",
+    )
+    p.add_argument(
+        "--plink-sex", action="store_const", dest="sex_encoding", const="plink",
+        help="legacy alias for --sex-encoding=plink (PLINK convention: 1=male, 2=female)",
     )
     p.add_argument(
         "--zero-as-missing", action="store_true",
         help="treat 0 in mother/father columns as missing (PLINK fam "
         "convention). NA/blank/N/A/./? are always treated as missing.",
+    )
+    p.add_argument(
+        "--allow-unknown-sex", action="store_true",
+        help="tolerate rows whose sex is missing AND cannot be imputed from "
+        "parent role (kept as sentinel -1). Without this flag, unresolved "
+        "rows are an error. Incompatible with --effective-size / --inbreeding "
+        "in summarize.",
     )
 
 
@@ -2889,8 +3203,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             sex_col=args.sex_col,
             mother_col=args.mother_col,
             father_col=args.father_col,
-            plink_sex=args.plink_sex,
+            sex_encoding=args.sex_encoding,
             zero_as_missing=args.zero_as_missing,
+            allow_unknown_sex=args.allow_unknown_sex,
             birth_year_col=args.birth_year_col,
         )
     except PedigreeError as e:
@@ -2899,6 +3214,17 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
         return 2
+
+    # Sex-stratified Ne / F kernel cannot honour SEX_UNKNOWN rows; refuse
+    # the combination cleanly rather than producing silently-miscounted
+    # output.
+    if (df["sex"].to_numpy() == SEX_UNKNOWN).any() and (args.effective_size or args.inbreeding):
+        logger.error(
+            "sex-stratified Ne / F kernel requires resolved sex for every row; "
+            "remove --allow-unknown-sex, supply sex for the offending rows, or "
+            "drop --effective-size / --inbreeding",
+        )
+        return 1
 
     # Flag-combination validation (must happen before any heavy work).
     if not args.effective_size and (args.ne_coancestry or args.ne_threads != 1):
@@ -3060,8 +3386,9 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             sex_col=args.sex_col,
             mother_col=args.mother_col,
             father_col=args.father_col,
-            plink_sex=args.plink_sex,
+            sex_encoding=args.sex_encoding,
             zero_as_missing=args.zero_as_missing,
+            allow_unknown_sex=args.allow_unknown_sex,
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
@@ -3089,6 +3416,10 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         blocks.append("rows with mother == father (cannot disambiguate)")
     if by_check["parent_refs_sex_conflict"].status == "FAIL":
         blocks.append("sex conflict on missing parent(s); pass --no-sex-check to default to sex=F")
+    if by_check["sex_role_ambiguity"].status == "FAIL":
+        blocks.append("present individual(s) with unknown sex used as BOTH mother and father (sex cannot be imputed)")
+    if by_check["unknown_sex"].status == "FAIL":
+        blocks.append("rows with unresolved sex; pass --allow-unknown-sex to tolerate")
 
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
@@ -3105,15 +3436,51 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 2
 
     added_founders: list[dict] = []
+    df_out = ctx["df_raw"]
     if ctx["ids"] is not None and ctx["mothers"] is not None and ctx["fathers"] is not None:
         id_index = pd.Index(ctx["ids"])
         added_founders = _build_added_founders(
             ctx["mothers"], ctx["fathers"], id_index, args.no_sex_check,
         )
+        # Fold any sex imputation into the fixed output's sex column so the
+        # file the user gets back actually contains the auto-fix, not the
+        # original blanks. Maps int8 -> human-readable token: 0→F, 1→M,
+        # -1→original token (already a recognized missing string).
+        sex_imp = ctx.get("sex_imputation")
+        if sex_imp is not None and sex_imp["n_imputed"] > 0:
+            df_out = df_out.copy()
+            imputed = sex_imp["imputed_sex"]
+            original_unknown = sex_imp["original_unknown_mask"]
+            sex_col_values = df_out[args.sex_col].astype(object).copy()
+            for i in np.where(original_unknown & (imputed == SEX_FEMALE))[0]:
+                sex_col_values.iat[int(i)] = "F"
+            for i in np.where(original_unknown & (imputed == SEX_MALE))[0]:
+                sex_col_values.iat[int(i)] = "M"
+            df_out[args.sex_col] = sex_col_values
+            logger.info(
+                "validate: imputed sex for %d row(s) from parent role",
+                int(sex_imp["n_imputed"]),
+            )
+        # Reorder rows into topological (parents-before-children) order so
+        # the fixed output file feeds back into pedsum without warnings.
+        m_row, _ = _parent_rows(ctx["mothers"], id_index)
+        f_row, _ = _parent_rows(ctx["fathers"], id_index)
+        try:
+            depth = _compute_depth_unordered(m_row, f_row, len(ctx["ids"]))
+        except PedigreeError:
+            depth = None  # acyclic FAIL already surfaced; skip reorder
+        if depth is not None:
+            order = np.argsort(depth, kind="stable")
+            if not np.array_equal(order, np.arange(len(order))):
+                logger.info(
+                    "validate: reordering %d row(s) into topological order",
+                    int((order != np.arange(len(order))).sum()),
+                )
+                df_out = df_out.iloc[order].reset_index(drop=True)
 
     out_path = _at(base, ".validate.tsv.gz")
     _write_validate_tsv_gz(
-        ctx["df_raw"], added_founders,
+        df_out, added_founders,
         args.id_col, args.sex_col, args.mother_col, args.father_col,
         out_path,
     )

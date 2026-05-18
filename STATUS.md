@@ -1,5 +1,44 @@
 # pedsum status — post-port
 
+## Resolved in pedsum 0.6 (collaborator-friendly polish)
+
+- **Sex-encoding auto-detection.** `--sex-encoding=auto` (the new default)
+  picks `default` (0=F, 1=M) or `plink` (1=M, 2=F, 0=unknown) from the
+  observed tokens. `--plink-sex` remains as a legacy alias. Word-only
+  columns get no warning (encoding moot); only-`1` numeric columns get a
+  WARNING since the encoding is genuinely ambiguous. Under `plink`, sex=0
+  is unconditionally treated as missing (PLINK fam spec) without needing
+  `--zero-as-missing`.
+
+- **Missing-sex imputation.** Missing-sex tokens (the parent-missing set
+  plus `-1`, `U`, `Unknown`) decode to a sentinel and are then imputed
+  from parent role: F if the row is used as a mother, M if used as a
+  father. Two new checks surface the residual cases:
+  `sex_role_ambiguity` (present individual with unknown sex referenced as
+  BOTH mother and father — always a hard block) and `unknown_sex` (orphan
+  unsexed row — hard block unless `--allow-unknown-sex` is passed, in
+  which case it shows as SKIP with a tolerated-count note, mirroring the
+  existing `--no-sex-check` precedent). The imputed sex is folded into
+  `.validate.tsv.gz` so the fixed output reflects the auto-fix.
+
+- **Row-order check dropped, reorder silent.** The `topological_row_order`
+  check is gone. Both `summarize` and `validate` reorder rows into
+  topological order silently (single INFO log line with the moved count).
+  The `.validate.tsv.gz` output is always parents-before-children.
+
+- **Grouped validation summary.** The stderr summary now prints four
+  named sections ("Columns & parsing", "IDs", "Parent references",
+  "Graph structure") with human-friendly dot-padded labels. Internal
+  check names are preserved in `.validate.log` so parsing contracts are
+  unchanged.
+
+- **`--effective-size` / `--inbreeding` refuse `sex=-1`.** When
+  `--allow-unknown-sex` leaves rows with sentinel sex AND the user asks
+  for sex-stratified Ne or the F kernel, summarize exits 1 with a clear
+  message rather than silently miscounting.
+
+
+
 The BFS / boolean-matmul / numba relationship-pair engine that used to
 live inline in `pedigree_summary.py` (under the misleading name
 `_count_pairs_graphtool` / `--engine=graph-tool`) has been moved to the

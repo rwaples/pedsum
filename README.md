@@ -116,9 +116,17 @@ Flags:
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
   **Not a safe-harbor guarantee** — review before sharing.
-- `--plink-sex` — interpret the sex column with PLINK's encoding
-  (`1 = male, 2 = female`) instead of the script default
-  (`0 = female, 1 = male`).
+- `--sex-encoding {auto,default,plink}` — how to decode the sex
+  column. `auto` (default) detects from the observed tokens; `default`
+  forces `0 = female, 1 = male` (pedsum convention); `plink` forces
+  `1 = male, 2 = female` with `0 = unknown` (PLINK fam spec). See
+  "Sex auto-detection" below.
+- `--plink-sex` — legacy alias for `--sex-encoding=plink`.
+- `--allow-unknown-sex` — tolerate rows whose sex is missing AND
+  cannot be imputed from parent role (kept as the sentinel `-1`).
+  Without this flag, unresolved rows are an error. Incompatible with
+  `--effective-size` / `--inbreeding` in `summarize` (sex-stratified
+  estimators require resolved sex).
 - `--zero-as-missing` — treat `0` in `mother`/`father` columns as
   missing (PLINK fam convention).
 - `--engine {auto,matrix,bfs}` — relationship-pair enumeration engine.
@@ -135,16 +143,23 @@ python pedigree_summary.py validate --in PED.tsv --out BASENAME
 ```
 
 Runs all integrity checks (duplicate IDs, missing parents, sex
-conflicts, cycles, …) and writes:
+conflicts, cycles, unsexed individuals, …) and writes:
 
 | File | Contents |
 |---|---|
 | `BASENAME.validate.log` | per-finding TSV (one row per issue) |
 | `BASENAME.validate.tsv.gz` | the pedigree with auto-fixes applied (omitted on hard-block findings) |
 
-Auto-fix synthesizes founder rows for missing parent IDs.
+Auto-fixes folded into `BASENAME.validate.tsv.gz`:
+- Synthesized founder rows for missing parent IDs.
+- Sex imputed from parent role (F if used as a mother, M if used as
+  a father) for any row whose original sex was missing.
+- Rows reordered so parents always precede children (topological
+  order), if the input was not already ordered.
+
 Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
-etc.) cause the fixed TSV to be skipped — fix the source data first.
+unresolved sex without `--allow-unknown-sex`, sex-role ambiguity)
+cause the fixed TSV to be skipped — fix the source data first.
 
 ## Input format
 
@@ -155,10 +170,14 @@ are overridable via `--id-col` / `--sex-col` / `--mother-col` /
 
 - `id`: non-negative integer, unique per row. **Strings (e.g.
   `"P001"`) are not accepted** — see "Preparing your data" below.
-- `sex`: `M`/`F` (any case), `Male`/`Female`, or `0`/`1` with **0 =
-  female, 1 = male**. ⚠️ **This is the opposite of PLINK's
-  convention** (PLINK uses `1 = male, 2 = female`). For PLINK-encoded
-  data pass `--plink-sex`.
+- `sex`: `M`/`F` (any case), `Male`/`Female`, or numeric tokens whose
+  meaning depends on the resolved encoding (see "Sex auto-detection"
+  below). The default pedsum encoding is `0 = female, 1 = male`;
+  PLINK's encoding is `1 = male, 2 = female` with `0 = unknown`.
+  Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`,
+  `-1`, `U`, `Unknown`, any case) are recognised and are either
+  imputed from parent role (F if used as a mother, M if used as a
+  father) or surfaced as findings.
 - `mother`, `father`: parent IDs; `-1` for unknown/founder. The
   tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any
   case) are also recognised as missing. To treat literal `0` as
@@ -166,6 +185,28 @@ are overridable via `--id-col` / `--sex-col` / `--mother-col` /
 
 Half-founders (one parent missing, the other a valid ID) are
 accepted.
+
+### Sex auto-detection
+
+`--sex-encoding=auto` (the default) picks an encoding from the tokens
+in the sex column:
+
+| Tokens seen | Resolved encoding |
+|---|---|
+| any `2` | `plink` (1=M, 2=F, 0=unknown) |
+| any `0` (without `--zero-as-missing`) | `default` (0=F, 1=M) |
+| any `0` plus `--zero-as-missing` | `plink` (0 = unknown) |
+| only `M`/`F`/`Male`/`Female` | `default` (encoding choice is moot) |
+| only `1` tokens | `default` + WARNING — pass `--sex-encoding=plink` if the file is actually PLINK-encoded |
+
+Under the resolved encoding, missing-sex tokens decode to a sentinel
+`-1`. pedsum then imputes those rows from parent role where possible:
+an unsexed individual used as a mother is imputed F, and as a father
+is imputed M. If a present individual is referenced as BOTH mother
+and father with unknown sex, that's a data contradiction (`sex_role_ambiguity`)
+and a hard block — pedsum cannot pick a side. Truly orphan unsexed
+rows (not used as a parent) are a hard block unless `--allow-unknown-sex`
+is set.
 
 ## Preparing your data
 
