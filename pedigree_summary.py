@@ -128,6 +128,9 @@ _CHECK_ORDER: tuple[str, ...] = (
     "sex_role_consistency",
     "unknown_sex",
     "acyclic",
+    "birth_year_dtype",
+    "birth_year_range",
+    "birth_year_topology",
 )
 
 
@@ -151,6 +154,9 @@ _CHECK_LABELS: dict[str, str] = {
     "unknown_sex":                 "all individuals have resolved sex",
     "acyclic":                     "acyclic (no descent cycles)",
     "empty_pedigree":              "pedigree is non-empty",
+    "birth_year_dtype":            "birth_year column parses as numeric",
+    "birth_year_range":            "birth years within sanity range",
+    "birth_year_topology":         "child birth_year >= parent birth_year",
 }
 
 
@@ -168,6 +174,9 @@ _CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Graph structure", (
         "self_loops", "sex_role_consistency", "unknown_sex", "acyclic",
+    )),
+    ("Birth years (optional)", (
+        "birth_year_dtype", "birth_year_range", "birth_year_topology",
     )),
 )
 
@@ -773,6 +782,79 @@ def _as_birth_year_col(series: pd.Series, name: str) -> np.ndarray:
     return as_float.astype(np.int32)
 
 
+_BIRTH_YEAR_DEFAULT_MIN = 1800
+
+
+def _birth_year_default_max() -> int:
+    """Default upper bound for birth-year sanity (current calendar year + 1)."""
+    return datetime.now(tz=UTC).year + 1
+
+
+def _check_birth_year_range(
+    ids: np.ndarray,
+    birth_year: np.ndarray,
+    year_min: int,
+    year_max: int,
+) -> list[Finding]:
+    """Detect known birth years outside ``[year_min, year_max]``.
+
+    Sentinel ``-1`` (unknown) is skipped. One Finding per offending row.
+    """
+    known = birth_year != -1
+    bad = known & ((birth_year < year_min) | (birth_year > year_max))
+    return [
+        Finding(
+            check="birth_year_range",
+            id=int(ids[i]),
+            row=int(i),
+            detail=(
+                f"id={int(ids[i])} birth_year={int(birth_year[i])} is outside "
+                f"the sanity range [{year_min}, {year_max}]"
+            ),
+        )
+        for i in np.where(bad)[0]
+    ]
+
+
+def _check_birth_year_topology(
+    ids: np.ndarray,
+    mothers: np.ndarray,
+    fathers: np.ndarray,
+    birth_year: np.ndarray,
+    id_index: pd.Index,
+) -> list[Finding]:
+    """Detect parent-child edges with ``child.birth_year < parent.birth_year``.
+
+    Edges where either endpoint has ``birth_year == -1`` are skipped. One
+    Finding per offending edge.
+    """
+    findings: list[Finding] = []
+    for role, parents in (("mother", mothers), ("father", fathers)):
+        parent_rows = id_index.get_indexer(parents)
+        edges = (parents != -1) & (parent_rows != -1)
+        if not edges.any():
+            continue
+        child_rows = np.where(edges)[0]
+        prows = parent_rows[child_rows]
+        child_by = birth_year[child_rows]
+        parent_by = birth_year[prows]
+        both_known = (child_by != -1) & (parent_by != -1)
+        bad = both_known & (child_by < parent_by)
+        for i in np.where(bad)[0]:
+            row_idx = int(child_rows[i])
+            findings.append(Finding(
+                check="birth_year_topology",
+                id=int(ids[row_idx]),
+                row=row_idx,
+                detail=(
+                    f"id={int(ids[row_idx])} birth_year={int(child_by[i])} < "
+                    f"{role} (id={int(parents[row_idx])}) "
+                    f"birth_year={int(parent_by[i])}"
+                ),
+            ))
+    return findings
+
+
 def load_and_validate(
     path: Path,
     id_col: str = "id",
@@ -783,6 +865,8 @@ def load_and_validate(
     zero_as_missing: bool = False,
     allow_unknown_sex: bool = False,
     birth_year_col: str | None = None,
+    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
+    birth_year_max: int | None = None,
     plink_sex: bool = False,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
@@ -844,6 +928,14 @@ def load_and_validate(
     ):
         if findings:
             raise PedigreeError(_summarize_findings(findings))
+
+    # Birth-year sanity + topology checks. Raise structured errors here so
+    # users get a clear message instead of the ValueError that pedigree_graph
+    # would emit later during PedigreeGraph construction.
+    if birth_year is not None:
+        by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
+        _raise_first(_check_birth_year_range(ids, birth_year, birth_year_min, by_max))
+        _raise_first(_check_birth_year_topology(ids, mothers, fathers, birth_year, id_index))
 
     # Impute unknown sex from parent role usage where possible.
     imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
@@ -932,6 +1024,9 @@ def validate_pedigree(
     sex_encoding: str = "auto",
     zero_as_missing: bool = False,
     allow_unknown_sex: bool = False,
+    birth_year_col: str | None = None,
+    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
+    birth_year_max: int | None = None,
     plink_sex: bool = False,
 ) -> tuple[int, list[CheckResult], list[Finding], dict]:
     """Run every integrity check accumulating.
@@ -1101,6 +1196,42 @@ def validate_pedigree(
             "sex_role_consistency", "unknown_sex", "acyclic",
         ):
             _skip(name, "id_dtype/negative_ids/duplicate_ids failed")
+
+    # Birth-year checks (optional column).
+    if birth_year_col is None:
+        for name in ("birth_year_dtype", "birth_year_range", "birth_year_topology"):
+            _skip(name, "no --birth-year-col specified")
+    elif birth_year_col not in df.columns:
+        for name in ("birth_year_dtype", "birth_year_range", "birth_year_topology"):
+            _skip(name, f"column {birth_year_col!r} not present in file")
+    else:
+        by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
+        try:
+            birth_year = _as_birth_year_col(df[birth_year_col], birth_year_col)
+            results["birth_year_dtype"] = CheckResult(name="birth_year_dtype", status="PASS")
+        except PedigreeError as e:
+            findings.append(Finding(check="birth_year_dtype", detail=str(e)))
+            results["birth_year_dtype"] = CheckResult(
+                name="birth_year_dtype", status="FAIL", count=1,
+            )
+            birth_year = None
+        if birth_year is not None and ids is not None:
+            _record("birth_year_range", _check_birth_year_range(
+                ids, birth_year, birth_year_min, by_max,
+            ))
+            if mothers is not None and fathers is not None and can_index:
+                id_index = pd.Index(ids)
+                _record("birth_year_topology", _check_birth_year_topology(
+                    ids, mothers, fathers, birth_year, id_index,
+                ))
+            else:
+                _skip(
+                    "birth_year_topology",
+                    "parent columns or ID index unavailable",
+                )
+        else:
+            _skip("birth_year_range", "birth_year_dtype failed")
+            _skip("birth_year_topology", "birth_year_dtype failed")
 
     ctx["ids"] = ids
     ctx["mothers"] = mothers
@@ -3085,6 +3216,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "without it Ne_H collapses to Ne_V.",
     )
     p_sum.add_argument(
+        "--birth-year-min", type=int, default=_BIRTH_YEAR_DEFAULT_MIN, metavar="YEAR",
+        help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
+        "No-op without --birth-year-col.",
+    )
+    p_sum.add_argument(
+        "--birth-year-max", type=int, default=None, metavar="YEAR",
+        help="inclusive upper bound for birth_year sanity check "
+        "(default: current calendar year + 1). No-op without --birth-year-col.",
+    )
+    p_sum.add_argument(
         "--inbreeding",
         action="store_true",
         help="emit per-individual F and the inbreeding summary section. "
@@ -3175,6 +3316,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="bypass the sex-conflict check on missing parents; auto-added "
         "founders default to sex=F when the role is ambiguous (default: off)",
     )
+    p_val.add_argument(
+        "--birth-year-col", default=None, metavar="NAME",
+        help="optional column name for birth year (integer or float calendar "
+        "year; -1/NA/blank for unknown). When set, validate runs three checks: "
+        "birth_year_dtype (numeric parsing), birth_year_range (within "
+        "[--birth-year-min, --birth-year-max]), and birth_year_topology "
+        "(child birth_year >= parent birth_year).",
+    )
+    p_val.add_argument(
+        "--birth-year-min", type=int, default=_BIRTH_YEAR_DEFAULT_MIN, metavar="YEAR",
+        help="inclusive lower bound for birth_year_range check (default: %(default)s).",
+    )
+    p_val.add_argument(
+        "--birth-year-max", type=int, default=None, metavar="YEAR",
+        help="inclusive upper bound for birth_year_range check "
+        "(default: current calendar year + 1).",
+    )
     _add_format_args(p_val)
     _add_logging_args(p_val)
 
@@ -3207,6 +3365,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             zero_as_missing=args.zero_as_missing,
             allow_unknown_sex=args.allow_unknown_sex,
             birth_year_col=args.birth_year_col,
+            birth_year_min=args.birth_year_min,
+            birth_year_max=args.birth_year_max,
         )
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
@@ -3389,6 +3549,9 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             sex_encoding=args.sex_encoding,
             zero_as_missing=args.zero_as_missing,
             allow_unknown_sex=args.allow_unknown_sex,
+            birth_year_col=args.birth_year_col,
+            birth_year_min=args.birth_year_min,
+            birth_year_max=args.birth_year_max,
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)

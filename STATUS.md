@@ -1,5 +1,18 @@
 # pedsum status — post-port
 
+## Resolved in pedsum 0.6.x (post-0.6 follow-ups)
+
+- **Birth-year validation in `validate`.** `--birth-year-col NAME` is
+  now accepted by the validate subcommand and runs three checks:
+  `birth_year_dtype` (numeric parsing), `birth_year_range` (within
+  `[--birth-year-min, --birth-year-max]`; defaults `1800` and the
+  current calendar year + 1), and `birth_year_topology` (child's
+  birth_year >= each known parent's birth_year). Findings appear in
+  `.validate.log` like any other check. summarize now also surfaces
+  range / topology violations as a clean `PedigreeError` (return
+  code 1) instead of letting `PedigreeGraph` raise a `ValueError`
+  mid-pipeline with a traceback.
+
 ## Resolved in pedsum 0.6 (collaborator-friendly polish)
 
 - **Sex-encoding auto-detection.** `--sex-encoding=auto` (the new default)

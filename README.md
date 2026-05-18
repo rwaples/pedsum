@@ -150,6 +150,14 @@ conflicts, cycles, unsexed individuals, …) and writes:
 | `BASENAME.validate.log` | per-finding TSV (one row per issue) |
 | `BASENAME.validate.tsv.gz` | the pedigree with auto-fixes applied (omitted on hard-block findings) |
 
+When `--birth-year-col NAME` is passed, validate also runs three
+optional checks: `birth_year_dtype` (numeric parsing),
+`birth_year_range` (each year within `[--birth-year-min,
+--birth-year-max]`; defaults to `[1800, current_year + 1]`), and
+`birth_year_topology` (`child.birth_year >= parent.birth_year` for
+every edge where both endpoints are known). Findings are written to
+`.validate.log` like any other check.
+
 Auto-fixes folded into `BASENAME.validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
 - Sex imputed from parent role (F if used as a mother, M if used as
