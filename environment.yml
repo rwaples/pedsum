@@ -7,7 +7,9 @@ dependencies:
   - scipy
   - pandas
   - pyyaml
+  - numba
   - pigz
+  - pytest
   - ruff
   - pip
   - pip:
