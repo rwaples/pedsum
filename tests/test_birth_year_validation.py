@@ -7,11 +7,7 @@ import pandas as pd
 import pedigree_summary as ps
 import pytest
 from conftest import run_pedsum
-
-
-def _write_ped(path, rows):
-    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
-    return path
+from conftest import write_ped as _write_ped
 
 
 def test_validate_without_birth_year_col_skips_all_three(tmp_path):

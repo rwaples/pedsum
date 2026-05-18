@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
 SCRIPT = REPO / "pedigree_summary.py"
@@ -17,6 +19,12 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
         [sys.executable, str(SCRIPT), *args],
         capture_output=True, text=True, cwd=cwd or REPO,
     )
+
+
+def write_ped(path, rows):
+    """Write a list of ``{id, sex, mother, father, ...}`` dicts to a TSV."""
+    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
+    return path
 
 
 def load_summary_yaml(base: Path) -> dict:

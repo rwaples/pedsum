@@ -19,10 +19,8 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from pathlib import Path
 
 import pytest
-
 from conftest import EXAMPLE, REPO
 from conftest import load_summary_extra_yaml as _load_extra
 from conftest import load_summary_yaml as _load_yaml

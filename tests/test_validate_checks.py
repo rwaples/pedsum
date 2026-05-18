@@ -5,11 +5,7 @@ import gzip
 
 import pandas as pd
 from conftest import run_pedsum
-
-
-def _write_ped(path, rows):
-    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
-    return path
+from conftest import write_ped as _write_ped
 
 
 def test_validate_unknown_sex_is_hard_block(tmp_path):

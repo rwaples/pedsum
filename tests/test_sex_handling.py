@@ -8,13 +8,7 @@ import pandas as pd
 import pedigree_summary as ps
 import pytest
 from conftest import run_pedsum
-
-
-def _write_ped(path, rows):
-    """Write a minimal pedigree TSV from a list of {id, sex, mother, father} dicts."""
-    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
-    return path
-
+from conftest import write_ped as _write_ped
 
 # ---------------------------------------------------------------------------
 # Auto-detection

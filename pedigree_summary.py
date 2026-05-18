@@ -428,33 +428,24 @@ def _impute_sex_from_roles(
     """
     original_unknown_mask = (sex == SEX_UNKNOWN).copy()
     imputed = sex.copy()
-    ambiguous_mask = np.zeros(len(sex), dtype=bool)
-    n_imputed = 0
 
-    mother_first_row: dict[int, int] = {}
-    for row_idx in np.where(mothers != -1)[0]:
-        mid = int(mothers[row_idx])
-        mother_first_row.setdefault(mid, int(row_idx))
-    father_first_row: dict[int, int] = {}
-    for row_idx in np.where(fathers != -1)[0]:
-        fid = int(fathers[row_idx])
-        father_first_row.setdefault(fid, int(row_idx))
+    # first_row dicts are only consumed to render row-X / row-Y detail in
+    # sex_role_ambiguity findings.
+    m_idx = np.where(mothers != -1)[0]
+    f_idx = np.where(fathers != -1)[0]
+    unique_mids, first_m = np.unique(mothers[m_idx], return_index=True)
+    unique_fids, first_f = np.unique(fathers[f_idx], return_index=True)
+    mother_first_row = {int(mid): int(m_idx[i]) for mid, i in zip(unique_mids, first_m, strict=True)}
+    father_first_row = {int(fid): int(f_idx[i]) for fid, i in zip(unique_fids, first_f, strict=True)}
 
-    mother_ids = set(mother_first_row.keys())
-    father_ids = set(father_first_row.keys())
-
-    for row_idx in np.where(original_unknown_mask)[0]:
-        rid = int(ids[row_idx])
-        in_m = rid in mother_ids
-        in_f = rid in father_ids
-        if in_m and in_f:
-            ambiguous_mask[row_idx] = True
-        elif in_m:
-            imputed[row_idx] = SEX_FEMALE
-            n_imputed += 1
-        elif in_f:
-            imputed[row_idx] = SEX_MALE
-            n_imputed += 1
+    as_mother = np.isin(ids, unique_mids)
+    as_father = np.isin(ids, unique_fids)
+    impute_f = original_unknown_mask & as_mother & ~as_father
+    impute_m = original_unknown_mask & as_father & ~as_mother
+    ambiguous_mask = original_unknown_mask & as_mother & as_father
+    imputed[impute_f] = SEX_FEMALE
+    imputed[impute_m] = SEX_MALE
+    n_imputed = int(impute_f.sum() + impute_m.sum())
 
     return _SexImputation(
         imputed_sex=imputed,
@@ -700,7 +691,6 @@ def _decode_sex(
             "Pass --sex-encoding=plink if your file uses 1=male, 2=female."
         )
 
-    # Tokens that were neither decoded nor recognized as missing are invalid.
     bad = (out == SEX_UNKNOWN) & ~missing_mask
     if bad.any():
         bad_rows = np.where(bad)[0][:5]
@@ -718,6 +708,21 @@ def _as_int_col(series: pd.Series, name: str) -> np.ndarray:
         return pd.to_numeric(series, errors="raise").astype(np.int64).to_numpy()
     except (ValueError, TypeError) as e:
         raise PedigreeError(f"column {name!r} must be integer-valued; failed to parse: {e}") from None
+
+
+def _replace_missing_with(
+    series: pd.Series, missing_tokens: frozenset[str], sentinel: str,
+) -> pd.Series:
+    """Normalize ``series`` to stripped strings with ``missing_tokens`` → ``sentinel``.
+
+    Used by the parent-ID and birth-year parsers to fold every recognized
+    missing token (NA, blank, NaN, etc.) into a single sentinel string before
+    handing off to ``pd.to_numeric``.
+    """
+    filled = series.where(series.notna(), sentinel)
+    str_vals = filled.astype(str).str.strip()
+    missing_mask = str_vals.str.upper().isin(missing_tokens)
+    return str_vals.where(~missing_mask, sentinel)
 
 
 def _maybe_warn_csv(df: pd.DataFrame) -> None:
@@ -743,10 +748,7 @@ def _as_parent_int_col(
     N/A, ".", "?", None, null. With ``zero_as_missing=True``, the literal
     integer 0 is also remapped to -1 (PLINK fam convention).
     """
-    filled = series.where(series.notna(), "-1")
-    str_vals = filled.astype(str).str.strip()
-    missing_mask = str_vals.str.upper().isin(_PARENT_MISSING_TOKENS)
-    cleaned = str_vals.where(~missing_mask, "-1")
+    cleaned = _replace_missing_with(series, _PARENT_MISSING_TOKENS, "-1")
     try:
         arr = pd.to_numeric(cleaned, errors="raise").astype(np.int64).to_numpy(copy=True)
     except (ValueError, TypeError) as e:
@@ -768,10 +770,7 @@ def _as_birth_year_col(series: pd.Series, name: str) -> np.ndarray:
     whole calendar year). Sentinel encoding matches
     ``pedigree_graph.PedigreeGraph.birth_year``.
     """
-    filled = series.where(series.notna(), "-1")
-    str_vals = filled.astype(str).str.strip()
-    missing_mask = str_vals.str.upper().isin(_PARENT_MISSING_TOKENS)
-    cleaned = str_vals.where(~missing_mask, "-1")
+    cleaned = _replace_missing_with(series, _PARENT_MISSING_TOKENS, "-1")
     try:
         as_float = pd.to_numeric(cleaned, errors="raise").to_numpy(dtype=np.float64)
     except (ValueError, TypeError) as e:
@@ -867,7 +866,6 @@ def load_and_validate(
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
-    plink_sex: bool = False,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
 
@@ -899,9 +897,6 @@ def load_and_validate(
 
     _raise_first(_check_empty_pedigree(len(df)))
 
-    if plink_sex:
-        sex_encoding = "plink"
-
     ids = _as_int_col(df[id_col], id_col)
     mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
     fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
@@ -929,15 +924,13 @@ def load_and_validate(
         if findings:
             raise PedigreeError(_summarize_findings(findings))
 
-    # Birth-year sanity + topology checks. Raise structured errors here so
-    # users get a clear message instead of the ValueError that pedigree_graph
-    # would emit later during PedigreeGraph construction.
+    # Surface as PedigreeError here so summarize exits cleanly instead of
+    # crashing later inside PedigreeGraph.from_arrays with a ValueError.
     if birth_year is not None:
         by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
         _raise_first(_check_birth_year_range(ids, birth_year, birth_year_min, by_max))
         _raise_first(_check_birth_year_topology(ids, mothers, fathers, birth_year, id_index))
 
-    # Impute unknown sex from parent role usage where possible.
     imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
     sex = imp.imputed_sex
     if imp.n_imputed > 0:
@@ -1027,7 +1020,6 @@ def validate_pedigree(
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
-    plink_sex: bool = False,
 ) -> tuple[int, list[CheckResult], list[Finding], dict]:
     """Run every integrity check accumulating.
 
@@ -1091,8 +1083,6 @@ def validate_pedigree(
     ids = _coerce_int(id_col, "id_dtype")
     mothers = _coerce_int(mother_col, "mother_dtype", _parent_parser)
     fathers = _coerce_int(father_col, "father_dtype", _parent_parser)
-    if plink_sex:
-        sex_encoding = "plink"
     sex: np.ndarray | None = None
     try:
         sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
@@ -1197,7 +1187,6 @@ def validate_pedigree(
         ):
             _skip(name, "id_dtype/negative_ids/duplicate_ids failed")
 
-    # Birth-year checks (optional column).
     if birth_year_col is None:
         for name in ("birth_year_dtype", "birth_year_range", "birth_year_topology"):
             _skip(name, "no --birth-year-col specified")
@@ -1220,7 +1209,7 @@ def validate_pedigree(
                 ids, birth_year, birth_year_min, by_max,
             ))
             if mothers is not None and fathers is not None and can_index:
-                id_index = pd.Index(ids)
+                # id_index is already built above when can_index is True.
                 _record("birth_year_topology", _check_birth_year_topology(
                     ids, mothers, fathers, birth_year, id_index,
                 ))
@@ -3605,10 +3594,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         added_founders = _build_added_founders(
             ctx["mothers"], ctx["fathers"], id_index, args.no_sex_check,
         )
-        # Fold any sex imputation into the fixed output's sex column so the
-        # file the user gets back actually contains the auto-fix, not the
-        # original blanks. Maps int8 -> human-readable token: 0→F, 1→M,
-        # -1→original token (already a recognized missing string).
+        # Fold sex imputation into the fixed output so the user's "fixed"
+        # file reflects the auto-fix instead of the original blanks.
         sex_imp = ctx.get("sex_imputation")
         if sex_imp is not None and sex_imp["n_imputed"] > 0:
             df_out = df_out.copy()
@@ -3624,8 +3611,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
                 "validate: imputed sex for %d row(s) from parent role",
                 int(sex_imp["n_imputed"]),
             )
-        # Reorder rows into topological (parents-before-children) order so
-        # the fixed output file feeds back into pedsum without warnings.
+        # Reorder so the fixed file is parents-before-children and feeds
+        # back into pedsum without further auto-fixes.
         m_row, _ = _parent_rows(ctx["mothers"], id_index)
         f_row, _ = _parent_rows(ctx["fathers"], id_index)
         try:

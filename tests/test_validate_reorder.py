@@ -6,11 +6,7 @@ import gzip
 import pandas as pd
 import pedigree_summary as ps
 from conftest import run_pedsum
-
-
-def _write_ped(path, rows):
-    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
-    return path
+from conftest import write_ped as _write_ped
 
 
 def test_topological_row_order_check_removed():
