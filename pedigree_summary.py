@@ -3,26 +3,33 @@
 
 Reads a TSV pedigree (id, sex, mother, father), validates it, and writes
 machine-readable summaries covering size, structure, family-size
-distribution, relationship-pair counts, and per-individual inbreeding.
+distribution, relationship-pair counts, per-individual inbreeding (F),
+and pedigree-based effective population size (Ne).
 
-Outputs of ``summarize`` (with ``--out BASENAME``):
-    BASENAME.summary.yaml             slim categorised summary (~500 lines)
-    BASENAME.summary.extra.yaml       per-generation / per-cohort arrays and
-                                      full per-individual quantiles
-                                      (suppressed under ``--single-file``)
-    BASENAME.summary.pedigree.tsv     long-form pedigree-level summary
-    BASENAME.summary.individual.tsv   long-form per-individual distribution
-    BASENAME.annotated.tsv.gz         input pedigree + per-individual cols
-                                      (suppressed under ``--safe-attempt``)
+Outputs of ``summarize`` (with ``--out DIR``):
+    DIR/summary.yaml              slim categorised summary (~500 lines)
+    DIR/summary.extra.yaml        per-generation / per-cohort arrays and
+                                  full per-individual quantiles
+    DIR/annotated.tsv.gz          input pedigree + per-individual cols
+                                  (suppressed under ``--safe-attempt``)
+    DIR/summary.pedigree.tsv      long-form pedigree-level summary
+                                  (only with ``--tsv``)
+    DIR/summary.individual.tsv    long-form per-individual distribution
+                                  (only with ``--tsv``)
 
-Outputs of ``validate``:
-    BASENAME.validate.log             per-finding TSV
-    BASENAME.validate.tsv.gz          fixed pedigree (omitted on hard block)
+Outputs of ``validate`` (with ``--out DIR``):
+    DIR/validate.log              per-finding TSV
+    DIR/validate.tsv.gz           fixed pedigree (omitted on hard block)
 
-Single-file CLI on top of numpy, scipy, pandas, pyyaml, numba, and the
+Pedsum 0.7 makes F and the seven cheap Ne estimators on by default;
+pass ``--no-inbreeding`` or ``--no-effective-size`` to skip. The
+coancestry-rate Ne_C estimator remains opt-in via ``--ne-coancestry``
+because its kinship DP can blow up RAM on very large pedigrees.
+
+Single-file CLI on top of numpy, scipy, pandas, pyyaml, and the
 ``pedigree_graph`` package (which provides the matrix-engine
-relationship enumeration through degree 5). The BFS engine in
-Section 3b lives only here.
+relationship enumeration through degree 5 plus the streaming-scalar
+pair counter that is the default for the 23 named codes).
 
 Counting semantics: relationship pairs (FS / MHS / PHS / GP / Av / 1C
 and all named codes through degree 5) are unique unordered pairs.
@@ -38,12 +45,11 @@ Sex encoding: by default 0=female, 1=male; M/F (any case) and
 Male/Female are also accepted. Pass ``--plink-sex`` for PLINK's
 1=male, 2=female encoding. Missing parents: ``-1`` (default), or any
 of ``NA``, ``NaN``, ``N/A``, ``.``, ``?``, blank, ``None``, ``null``
-case-insensitively. Pass ``--zero-as-missing`` to treat ``0`` as
-missing (PLINK fam convention).
+case-insensitively.
 
 Usage:
-    python pedigree_summary.py summarize --in PED.tsv --out BASENAME [options]
-    python pedigree_summary.py validate  --in PED.tsv --out BASENAME [options]
+    python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
+    python pedigree_summary.py validate  --in PED.tsv --out DIR [options]
 """
 
 from __future__ import annotations
@@ -69,8 +75,9 @@ from pedigree_graph import REL_REGISTRY, PedigreeGraph
 from pedigree_graph.experimental import count_pairs_bfs
 
 _BFS_AUTO_THRESHOLD = 5_000_000
+_F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.6"
+VERSION = "0.7"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
@@ -2872,9 +2879,19 @@ def _write_long_tsv(data: dict, path: Path) -> None:
     df.to_csv(path, sep="\t", index=False)
 
 
-def _at(base: Path, suffix: str) -> Path:
-    """Append ``suffix`` to ``base`` (handles paths without extensions)."""
-    return base.with_name(base.name + suffix)
+def _prepare_out_dir(path: Path) -> int:
+    """Create ``path`` as a directory if needed; refuse if it is a file.
+
+    Returns 0 on success, 1 if the path exists as a non-directory.
+    """
+    if path.exists() and not path.is_dir():
+        logger.error(
+            "--out %s exists and is not a directory; pass a directory path",
+            path,
+        )
+        return 1
+    path.mkdir(parents=True, exist_ok=True)
+    return 0
 
 
 def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
@@ -3078,7 +3095,15 @@ def _write_validate_tsv_gz(
 
 
 class _FullHelpParser(argparse.ArgumentParser):
-    """ArgumentParser that prints full help (not just usage) on parse errors."""
+    """ArgumentParser that prints full help (not just usage) on parse errors.
+
+    Disables prefix-matching abbreviation so deleted long-options cannot be
+    silently resurrected via partial-match.
+    """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
 
     def error(self, message: str) -> None:
         self.print_help(sys.stderr)
@@ -3098,23 +3123,6 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_engine_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
-        "--engine", choices=("auto", "matrix", "bfs"), default="auto",
-        help="relationship-pair enumeration engine, only consulted under "
-        "``--burden``. ``auto`` picks ``bfs`` when n is at or above the "
-        "threshold; otherwise ``matrix`` (default: %(default)s). The "
-        "``bfs`` engine is experimental — see the README's 'Choosing "
-        "an engine' section.",
-    )
-    p.add_argument(
-        "--bfs-threshold", type=int, default=_BFS_AUTO_THRESHOLD,
-        metavar="N",
-        help="auto-select threshold for the bfs engine, only consulted "
-        "under ``--burden`` (default: %(default)s).",
-    )
-
-
 def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sex-encoding", choices=("auto", "default", "plink"), default="auto",
@@ -3125,11 +3133,6 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--plink-sex", action="store_const", dest="sex_encoding", const="plink",
         help="legacy alias for --sex-encoding=plink (PLINK convention: 1=male, 2=female)",
-    )
-    p.add_argument(
-        "--zero-as-missing", action="store_true",
-        help="treat 0 in mother/father columns as missing (PLINK fam "
-        "convention). NA/blank/N/A/./? are always treated as missing.",
     )
     p.add_argument(
         "--allow-unknown-sex", action="store_true",
@@ -3170,14 +3173,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="input pedigree (.tsv or .tsv.gz)",
     )
     p_sum.add_argument(
-        "--out", dest="out_basename", required=True, type=Path, metavar="BASENAME",
-        help="output basename (no extension); writes BASENAME.summary.yaml "
-        "(slim categorised summary), BASENAME.summary.extra.yaml (per-generation "
-        "/ per-cohort / per-transition arrays and full per-individual quantiles; "
-        "suppressed under --single-file), BASENAME.summary.pedigree.tsv, "
-        "BASENAME.summary.individual.tsv, and BASENAME.annotated.tsv.gz "
-        "(input pedigree + per-individual columns; suppressed under "
-        "--safe-attempt)",
+        "--out", dest="out_dir", required=True, type=Path, metavar="DIR",
+        help="output directory (created if needed). Always writes "
+        "summary.yaml (slim categorised summary), summary.extra.yaml "
+        "(per-generation / per-cohort / per-transition arrays and full "
+        "per-individual quantiles), and annotated.tsv.gz (input pedigree "
+        "+ per-individual columns; suppressed under --safe-attempt). "
+        "Pass --tsv to also write summary.pedigree.tsv and "
+        "summary.individual.tsv.",
     )
     p_sum.add_argument(
         "--id-col", default="id", metavar="NAME",
@@ -3216,22 +3219,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p_sum.add_argument(
         "--inbreeding",
-        action="store_true",
-        help="emit per-individual F and the inbreeding summary section. "
-        "Off by default (F is the most expensive single computation in pedsum; "
-        "~minutes on 10M-row pedigrees). When `--effective-size` is also passed, "
-        "F is shared with the Ne pipeline (computed once via pedigree-graph's "
-        "Meuwissen-Luo kernel). When off, F and n_ancestors in the per-individual "
-        "table are zero-filled.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="compute per-individual F and the inbreeding summary section "
+        "(default: on; pass --no-inbreeding to skip). F is the most expensive "
+        "single computation in pedsum (~minutes on 10M-row pedigrees); pedsum "
+        "logs an INFO line above N=1,000,000 so naive runs cannot silently "
+        "hang. When `--effective-size` is also on, F is shared with the Ne "
+        "pipeline (computed once via pedigree-graph's Meuwissen-Luo kernel). "
+        "When off, F and n_ancestors in the per-individual table are "
+        "zero-filled.",
     )
     p_sum.add_argument(
         "--effective-size",
-        action="store_true",
-        help="compute eight pedigree-based effective population size estimators "
-        "(Ne_I, Ne_C, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_CT) via "
-        "pedigree-graph.compute_all_ne. Off by default. Ne_C is excluded unless "
-        "`--ne-coancestry` is also passed. Works standalone; pair with "
-        "`--inbreeding` to additionally emit the per-individual F section.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="compute seven pedigree-based effective population size "
+        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_CT) via "
+        "pedigree-graph.compute_all_ne (default: on; pass "
+        "--no-effective-size to skip). The eighth estimator (Ne_C, coancestry "
+        "rate) is opt-in via `--ne-coancestry` because its kinship DP can "
+        "blow up RAM on very large pedigrees.",
     )
     p_sum.add_argument(
         "--ne-coancestry",
@@ -3247,14 +3255,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: %(default)s; serial). No-op without `--effective-size`.",
     )
     p_sum.add_argument(
-        "--burden",
+        "--per-individual-pairs",
         action="store_true",
         help="opt into per-individual relationship-burden summary. "
-        "Requires the matrix or BFS engine to materialise full pair "
-        "lists (OOMs on pair-dense pedigrees). When unset (default), "
-        "pedsum uses count_pairs_streaming for the 23 pair counts in "
-        "O(N) memory; the burden summary is left as a stub. See the "
-        "README for the streaming-vs-matrix precision contract.",
+        "Requires the matrix engine to materialise full pair lists "
+        "(OOMs on pair-dense pedigrees with N > ~500K). When unset "
+        "(default), pedsum uses count_pairs_streaming for the 23 pair "
+        "counts in O(N) memory; the burden summary is left as a stub. "
+        "See the README for the streaming-vs-matrix precision contract.",
+    )
+    p_sum.add_argument(
+        "--tsv",
+        action="store_true",
+        help="additionally write the long-form TSV summaries "
+        "(summary.pedigree.tsv + summary.individual.tsv) inside --out. "
+        "Off by default; collaborators typically need only the YAML.",
     )
     p_sum.add_argument(
         "--safe-attempt",
@@ -3263,24 +3278,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "annotated TSV, drop min/max from distributions, and null any "
         "count or stratum below cell-size 5. Not a safe-harbor guarantee.",
     )
-    p_sum.add_argument(
-        "--single-file",
-        action="store_true",
-        help="write a single BASENAME.summary.yaml containing the deep-merge "
-        "of slim + extra (still in the categorised structure) instead of the "
-        "default two-file split. Any pre-existing BASENAME.summary.extra.yaml "
-        "at the same path is deleted to avoid stale output.",
-    )
-    _add_engine_args(p_sum)
     _add_format_args(p_sum)
     _add_logging_args(p_sum)
 
     p_val = sub.add_parser("validate", help="run all integrity checks accumulating; report issues")
     p_val.add_argument("--in", dest="in_path", required=True, type=Path, help="input pedigree TSV")
     p_val.add_argument(
-        "--out", dest="out_basename", required=True, type=Path, metavar="BASENAME",
-        help="output basename (no extension); writes BASENAME.validate.log "
-        "(per-finding TSV) and BASENAME.validate.tsv.gz (the pedigree with any "
+        "--out", dest="out_dir", required=True, type=Path, metavar="DIR",
+        help="output directory (created if needed); writes validate.log "
+        "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
         "auto-fixes applied; not written if a block is detected)",
     )
     p_val.add_argument(
@@ -3343,6 +3349,8 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
 
 
 def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
+    if _prepare_out_dir(args.out_dir) != 0:
+        return 1
     try:
         df, children_csr = load_and_validate(
             args.in_path,
@@ -3351,7 +3359,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             mother_col=args.mother_col,
             father_col=args.father_col,
             sex_encoding=args.sex_encoding,
-            zero_as_missing=args.zero_as_missing,
+            zero_as_missing=False,
             allow_unknown_sex=args.allow_unknown_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
@@ -3371,14 +3379,17 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         logger.error(
             "sex-stratified Ne / F kernel requires resolved sex for every row; "
             "remove --allow-unknown-sex, supply sex for the offending rows, or "
-            "drop --effective-size / --inbreeding",
+            "pass --no-effective-size / --no-inbreeding",
         )
         return 1
 
     # Flag-combination validation (must happen before any heavy work).
+    # --effective-size is on by default; the warning fires only when the user
+    # explicitly passed --no-effective-size alongside --ne-coancestry or a
+    # non-default --ne-threads.
     if not args.effective_size and (args.ne_coancestry or args.ne_threads != 1):
         logger.warning(
-            "--ne-coancestry / --ne-threads have no effect without --effective-size",
+            "--ne-coancestry / --ne-threads have no effect under --no-effective-size",
         )
 
     # Build the PedigreeGraph once and reuse for every primitive that
@@ -3405,11 +3416,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
 
     n_indiv = len(df)
-    if args.burden:
+    if args.per_individual_pairs:
         t0 = time.perf_counter()
         pairs = count_relationship_pairs(
-            df, engine=args.engine, threshold=args.bfs_threshold,
-            include_pair_lists=True, pg=pg,
+            df, include_pair_lists=True, pg=pg,
         )
         logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
 
@@ -3429,19 +3439,26 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "computed": False,
             "skip_reason": (
                 "per-individual relationship burden requires full pair-list "
-                "enumeration; pass --burden to compute via the matrix / BFS engine"
+                "enumeration; pass --per-individual-pairs to compute via the "
+                "matrix engine"
             ),
             "n_possible_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
 
     if args.inbreeding:
+        if n_indiv > _F_KERNEL_WARN_THRESHOLD:
+            logger.info(
+                "computing F on N=%s rows; may take several minutes — pass "
+                "--no-inbreeding to skip",
+                f"{n_indiv:,}",
+            )
         t0 = time.perf_counter()
         F_vec = pg.compute_inbreeding()
         n_anc = pg.compute_n_ancestors()
         inb_summary: dict | None = _build_inbreeding_summary(F_vec)
         logger.info("inbreeding (F + n_ancestors) in %.2fs", time.perf_counter() - t0)
     else:
-        logger.info("inbreeding: skipped (pass --inbreeding to enable)")
+        logger.info("inbreeding: skipped (--no-inbreeding)")
         inb_summary = None
         F_vec = np.zeros(n_indiv, dtype=np.float64)
         n_anc = np.zeros(n_indiv, dtype=np.int32)
@@ -3462,8 +3479,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             time.perf_counter() - t0,
         )
 
-    base = args.out_basename
-    base.parent.mkdir(parents=True, exist_ok=True)
+    out_dir: Path = args.out_dir
 
     t0 = time.perf_counter()
     idf = build_individual_df(df, id_index, F_vec, n_anc, n_desc, comp_labels)
@@ -3491,43 +3507,40 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         _apply_safe_attempt(tsv_payload, ind_data)
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
 
-    _write_long_tsv(tsv_payload, _at(base, ".summary.pedigree.tsv"))
-    _write_long_tsv(ind_data, _at(base, ".summary.individual.tsv"))
-
     slim_yaml, extra_yaml = _build_summary_data(
         tsv_payload, ind_data, yaml_extras=yaml_extras,
     )
-    slim_path = _at(base, ".summary.yaml")
-    extra_path = _at(base, ".summary.extra.yaml")
-    if args.single_file:
-        merged = _deep_merge_summary(slim_yaml, extra_yaml)
-        _write_yaml(merged, slim_path)
-        if extra_path.exists():
-            extra_path.unlink()
+    _write_yaml(slim_yaml, out_dir / "summary.yaml")
+    _write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
+    logger.info(
+        "wrote %s/{summary.yaml, summary.extra.yaml}", out_dir,
+    )
+
+    if args.tsv:
+        _write_long_tsv(tsv_payload, out_dir / "summary.pedigree.tsv")
+        _write_long_tsv(ind_data, out_dir / "summary.individual.tsv")
         logger.info(
-            "wrote %s + %s.summary.{pedigree,individual}.tsv (single-file mode)",
-            slim_path, base,
-        )
-    else:
-        _write_yaml(slim_yaml, slim_path)
-        _write_yaml(extra_yaml, extra_path)
-        logger.info(
-            "wrote %s.summary.yaml + %s.summary.extra.yaml + "
-            "%s.summary.{pedigree,individual}.tsv",
-            base, base, base,
+            "wrote %s/{summary.pedigree.tsv, summary.individual.tsv}", out_dir,
         )
 
     if args.safe_attempt:
-        logger.info("safe-attempt: skipped %s.annotated.tsv.gz (per-individual)", base)
+        logger.info(
+            "safe-attempt: skipped %s/annotated.tsv.gz (per-individual)", out_dir,
+        )
     else:
         t0 = time.perf_counter()
-        _write_annotated_tsv(args.in_path, args, idf, _at(base, ".annotated.tsv.gz"))
-        logger.info("wrote annotated pedigree to %s.annotated.tsv.gz in %.2fs", base, time.perf_counter() - t0)
+        _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
+        logger.info(
+            "wrote %s/annotated.tsv.gz in %.2fs",
+            out_dir, time.perf_counter() - t0,
+        )
 
     return 0
 
 
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
+    if _prepare_out_dir(args.out_dir) != 0:
+        return 1
     try:
         n_total, results, findings, ctx = validate_pedigree(
             args.in_path,
@@ -3536,7 +3549,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             mother_col=args.mother_col,
             father_col=args.father_col,
             sex_encoding=args.sex_encoding,
-            zero_as_missing=args.zero_as_missing,
+            zero_as_missing=False,
             allow_unknown_sex=args.allow_unknown_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
@@ -3575,9 +3588,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
 
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
-    base = args.out_basename
-    base.parent.mkdir(parents=True, exist_ok=True)
-    log_path = _at(base, ".validate.log")
+    out_dir: Path = args.out_dir
+    log_path = out_dir / "validate.log"
     _write_validate_log(findings, log_path)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
@@ -3628,7 +3640,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
                 )
                 df_out = df_out.iloc[order].reset_index(drop=True)
 
-    out_path = _at(base, ".validate.tsv.gz")
+    out_path = out_dir / "validate.tsv.gz"
     _write_validate_tsv_gz(
         df_out, added_founders,
         args.id_col, args.sex_col, args.mother_col, args.father_col,

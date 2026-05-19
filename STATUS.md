@@ -1,5 +1,38 @@
 # pedsum status — post-port
 
+## Resolved in pedsum 0.7 (collaborator-friendly CLI redesign)
+
+Breaking. Full rationale and rejected alternatives in
+[`docs/adr/0001-collaborator-cli-redesign.md`](docs/adr/0001-collaborator-cli-redesign.md);
+sequenced changes and per-test acceptance in
+[`PLAN.md`](PLAN.md); migration table in
+[`CHANGELOG.md`](CHANGELOG.md).
+
+- **`--out` is now a directory.** Files inside get fixed names
+  (`summary.yaml`, `summary.extra.yaml`, `annotated.tsv.gz`, and with
+  `--tsv` the two long-form TSVs). Passing a path that already exists
+  as a regular file exits rc=1 cleanly.
+
+- **`--inbreeding` / `--effective-size` flipped to opt-out.** Bare
+  `summarize` now produces F and the seven cheap Ne estimators by
+  default; `--no-inbreeding` / `--no-effective-size` skip them.
+  `--ne-coancestry` stays opt-in. On N > 1,000,000 pedigrees pedsum
+  logs a one-line cost-estimate before the F kernel runs.
+
+- **`--burden` renamed `--per-individual-pairs`.** The CLI flag is
+  the only thing renamed; the output schema's `relationship_burden`
+  section keeps that name.
+
+- **Flags deleted:** `--engine`, `--bfs-threshold`,
+  `--zero-as-missing`, `--single-file`. argparse runs with
+  `allow_abbrev=False` so a deleted long-option cannot be silently
+  abbreviated into a surviving one.
+
+- `_BFS_AUTO_THRESHOLD` is no longer reachable from the CLI but
+  remains as an internal default in `count_relationship_pairs`. The
+  BFS engine itself stays available via
+  `pedigree_graph.experimental.count_pairs_bfs`.
+
 ## Resolved in pedsum 0.6.x (post-0.6 follow-ups)
 
 - **Birth-year validation in `validate`.** `--birth-year-col NAME` is

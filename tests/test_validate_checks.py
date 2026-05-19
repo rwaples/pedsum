@@ -21,7 +21,7 @@ def test_validate_unknown_sex_is_hard_block(tmp_path):
     assert "BLOCKED" in r.stderr
     assert "unresolved sex" in r.stderr.lower() or "unknown" in r.stderr.lower()
     # .validate.tsv.gz must NOT be written when blocked
-    assert not (tmp_path / "out.validate.tsv.gz").exists()
+    assert not (tmp_path / "out" / "validate.tsv.gz").exists()
 
 
 def test_validate_unknown_sex_skipped_with_flag(tmp_path):
@@ -40,7 +40,7 @@ def test_validate_unknown_sex_skipped_with_flag(tmp_path):
     assert "SKIP" in r.stderr
     assert "tolerated" in r.stderr
     # Output file IS written.
-    assert (tmp_path / "out.validate.tsv.gz").exists()
+    assert (tmp_path / "out" / "validate.tsv.gz").exists()
 
 
 def test_validate_sex_role_ambiguity_is_hard_block(tmp_path):
@@ -58,7 +58,7 @@ def test_validate_sex_role_ambiguity_is_hard_block(tmp_path):
     ])
     assert r.returncode == 2, r.stderr
     assert "BLOCKED" in r.stderr
-    assert not (tmp_path / "out.validate.tsv.gz").exists()
+    assert not (tmp_path / "out" / "validate.tsv.gz").exists()
 
 
 def test_validate_summary_uses_grouped_layout(tmp_path):
@@ -96,7 +96,7 @@ def test_validate_writes_imputed_sex_in_fixed_output(tmp_path):
     base = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
     assert r.returncode == 0, r.stderr
-    with gzip.open(tmp_path / "out.validate.tsv.gz", "rt") as fh:
+    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
         fixed = pd.read_csv(fh, sep="\t", dtype=str)
     row2 = fixed.loc[fixed["id"].astype(int) == 2].iloc[0]
     assert row2["sex"] == "F"

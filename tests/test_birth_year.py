@@ -14,11 +14,14 @@ construction) and yields ~5 generations of cohorts for Hill to chew on.
 from __future__ import annotations
 
 import csv
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from conftest import EXAMPLE
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_augmented_pedigree(dest: Path) -> Path:

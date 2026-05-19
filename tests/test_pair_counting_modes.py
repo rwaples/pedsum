@@ -3,7 +3,7 @@
 The default mode uses ``pg.count_pairs_streaming`` (scalar, O(N)
 memory; bit-identical to the matrix engine for the 10 simple codes,
 ~1% approximate for the 13 cousin / collateral codes on inbred input).
-``--burden`` opts into the matrix / BFS engine to populate the
+``--per-individual-pairs`` opts into the matrix engine to populate the
 per-individual relationship-burden summary, at the cost of OOM risk
 on pair-dense pedigrees.
 """
@@ -18,19 +18,19 @@ from conftest import run_pedsum as _run
 
 def test_default_uses_streaming_engine(tmp_path):
     """Default summarize routes through the streaming scalar pair-count engine."""
-    base = tmp_path / "p"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    ped = _load_yaml(base)["pedigree"]
+    ped = _load_yaml(out_dir)["pedigree"]
     assert ped["relatedness"]["pairs"]["engine"] == "streaming_scalar"
 
 
 def test_default_populates_pair_counts(tmp_path):
     """Streaming engine emits all 23 named codes plus PO synthesis; by_degree dropped from YAML."""
-    base = tmp_path / "p"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    pairs = _load_yaml(base)["pedigree"]["relatedness"]["pairs"]
+    pairs = _load_yaml(out_dir)["pedigree"]["relatedness"]["pairs"]
     # 23 named codes + PO synthesis.
     for code in ("MZ", "MO", "FO", "FS", "MHS", "PHS",
                  "GP", "GGP", "GGGP", "G3GP", "Av", "HAv",
@@ -45,66 +45,68 @@ def test_default_populates_pair_counts(tmp_path):
 
 def test_default_relationship_summary_is_stub(tmp_path):
     """In streaming mode ``relationship_summary`` is a stub with skip_reason set."""
-    base = tmp_path / "p"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    rs = _load_yaml(base)["pedigree"]["relatedness"]["relationship_summary"]
+    rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is False
-    assert "pass --burden" in rs["skip_reason"]
+    assert "pass --per-individual-pairs" in rs["skip_reason"]
     assert rs["n_possible_pairs"] == 200 * 199 // 2
 
 
 def test_default_works_with_inbreeding_and_effective_size(tmp_path):
-    """Streaming engine composes with ``--inbreeding`` and ``--effective-size``."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    """Streaming engine composes with ``--inbreeding`` and ``--effective-size`` (now defaults)."""
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    ped = _load_yaml(base)["pedigree"]
+    ped = _load_yaml(out_dir)["pedigree"]
     assert ped["relatedness"]["pairs"]["engine"] == "streaming_scalar"
     assert ped["relatedness"]["inbreeding"] is not None
     assert len(ped["popgen"]["effective_size"]) == 8
 
 
-# ----- --burden (matrix engine) mode ----------------------------------
+# ----- --per-individual-pairs (matrix engine) mode --------------------
 
 
-def test_burden_uses_matrix_engine(tmp_path):
-    """``--burden`` routes through the matrix / BFS pair-count engine."""
-    base = tmp_path / "p"
+def test_per_individual_pairs_uses_matrix_engine(tmp_path):
+    """``--per-individual-pairs`` routes through the matrix pair-count engine."""
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base), "--burden",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--per-individual-pairs",
     ])
     assert res.returncode == 0, res.stderr
-    ped = _load_yaml(base)["pedigree"]
-    # engine field comes from count_relationship_pairs, set to "matrix" or "bfs".
+    ped = _load_yaml(out_dir)["pedigree"]
+    # engine field comes from count_relationship_pairs.
     assert ped["relatedness"]["pairs"]["engine"] in ("matrix", "bfs")
 
 
-def test_burden_populates_relationship_summary(tmp_path):
-    """``--burden`` populates the per-individual relationship-burden summary."""
-    base = tmp_path / "p"
+def test_per_individual_pairs_populates_relationship_summary(tmp_path):
+    """``--per-individual-pairs`` populates the per-individual relationship-burden summary."""
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base), "--burden",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--per-individual-pairs",
     ])
     assert res.returncode == 0, res.stderr
-    rs = _load_yaml(base)["pedigree"]["relatedness"]["relationship_summary"]
+    rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is True
     # Per-individual burden fields appear when matrix engine ran.
     assert "relatives_by_degree" in rs
     assert "n_related_pairs" in rs
 
 
-def test_burden_pair_counts_close_to_streaming(tmp_path):
-    """On the example pedigree, the two modes should give similar counts for the 10 exact codes."""
-    base_s = tmp_path / "stream"
-    base_b = tmp_path / "burden"
-    assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(base_s)]).returncode == 0
-    assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(base_b), "--burden"]).returncode == 0
-    s = _load_yaml(base_s)["pedigree"]["relatedness"]["pairs"]
-    b = _load_yaml(base_b)["pedigree"]["relatedness"]["pairs"]
+def test_per_individual_pairs_counts_close_to_streaming(tmp_path):
+    """On the example pedigree, the two modes give identical counts for the 10 exact codes."""
+    out_s = tmp_path / "stream"
+    out_b = tmp_path / "burden"
+    assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_s)]).returncode == 0
+    assert _run([
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_b),
+        "--per-individual-pairs",
+    ]).returncode == 0
+    s = _load_yaml(out_s)["pedigree"]["relatedness"]["pairs"]
+    b = _load_yaml(out_b)["pedigree"]["relatedness"]["pairs"]
     # The 10 simple codes match bit-identically.
     for code in ("MZ", "MO", "FO", "FS", "MHS", "PHS",
                  "GP", "GGP", "GGGP", "G3GP"):

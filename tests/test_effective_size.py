@@ -4,6 +4,9 @@ Drives the CLI ``_run_summarize`` path on the bundled
 ``example_pedigree.tsv`` and asserts on the resulting YAML / TSV.
 Pins the TSV/YAML split, the flag-combination warning, and the
 argparse ``--ne-threads`` guard.
+
+Pedsum 0.7: ``--effective-size`` is on by default; ``--no-effective-size``
+opts out. Long-form TSV (``summary.pedigree.tsv``) is opt-in via ``--tsv``.
 """
 from __future__ import annotations
 
@@ -24,35 +27,46 @@ from conftest import (
 )
 
 
-def test_default_run_has_no_effective_size_keys(tmp_path):
-    """Without ``--effective-size`` the YAML/TSV omit all Ne sections."""
-    base = tmp_path / "p"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
+def test_no_effective_size_omits_keys(tmp_path):
+    """``--no-effective-size`` skips the Ne sections entirely."""
+    out_dir = tmp_path / "out"
+    res = _run([
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--no-effective-size", "--tsv",
+    ])
     assert res.returncode == 0, res.stderr
 
-    yaml_data = _load_yaml(base)
-    ped = yaml_data["pedigree"]
+    ped = _load_yaml(out_dir)["pedigree"]
     # popgen category is omitted entirely when effective_size is not computed.
     assert "popgen" not in ped
     assert "effective_size_scalars" not in ped
 
-    tsv_rows = _load_tsv(base)
+    tsv_rows = _load_tsv(out_dir)
     assert not any(r[0].startswith("effective_size") for r in tsv_rows[1:])
 
 
+def test_default_run_populates_effective_size(tmp_path):
+    """Bare ``summarize`` populates Ne by default (opt-out)."""
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
+    assert res.returncode == 0, res.stderr
+
+    ped = _load_yaml(out_dir)["pedigree"]
+    assert "effective_size" in ped["popgen"]
+    assert len(ped["popgen"]["effective_size"]) == 8
+
+
 def test_effective_size_without_inbreeding_works(tmp_path):
-    """Decoupling check: --effective-size standalone, no F section emitted."""
-    base = tmp_path / "p"
+    """Decoupling check: ``--no-inbreeding`` alone keeps Ne on, omits F."""
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--no-inbreeding",
     ])
     assert res.returncode == 0, res.stderr
 
-    yaml_data = _load_yaml(base)
-    ped = yaml_data["pedigree"]
-    # Without --inbreeding, the relatedness category may still exist (pairs lives
-    # there) but the inbreeding section inside it must be absent.
+    ped = _load_yaml(out_dir)["pedigree"]
+    # Without --inbreeding, the inbreeding section is absent.
     assert "inbreeding" not in ped.get("relatedness", {})
     assert "effective_size" in ped["popgen"]
     assert len(ped["popgen"]["effective_size"]) == 8
@@ -61,16 +75,12 @@ def test_effective_size_without_inbreeding_works(tmp_path):
 
 
 def test_effective_size_with_inbreeding(tmp_path):
-    """``--inbreeding --effective-size`` populates both sections; memo_size is gone."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    """Bare run populates both sections; memo_size is gone."""
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
 
-    yaml_data = _load_yaml(base)
-    ped = yaml_data["pedigree"]
+    ped = _load_yaml(out_dir)["pedigree"]
     assert ped["relatedness"]["inbreeding"] is not None
     # memo_size dropped from the inbreeding summary in the refactor.
     assert "memo_size" not in ped["relatedness"]["inbreeding"]
@@ -79,15 +89,14 @@ def test_effective_size_with_inbreeding(tmp_path):
 
 def test_ne_coancestry_opts_in(tmp_path):
     """``--ne-coancestry`` enables the coancestry-based Ne computation."""
-    base = tmp_path / "p"
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size", "--ne-coancestry",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--ne-coancestry",
     ])
     assert res.returncode == 0, res.stderr
 
-    yaml_data = _load_yaml(base)
-    es = yaml_data["pedigree"]["popgen"]["effective_size"]
+    es = _load_yaml(out_dir)["pedigree"]["popgen"]["effective_size"]
     ne_c = es["ne_coancestry"]["ne"]
     # On the 200-row example we expect a finite scalar; if upstream changes
     # cause it to come back as None for genuine reasons, the test still
@@ -95,55 +104,54 @@ def test_ne_coancestry_opts_in(tmp_path):
     # would have produced".
     assert ne_c is None or isinstance(ne_c, float)
     # The per-gen array lives in the extra YAML.
-    extra_es = _load_extra(base)["pedigree"]["popgen"]["effective_size"]
+    extra_es = _load_extra(out_dir)["pedigree"]["popgen"]["effective_size"]
     assert all(v is not None for v in extra_es["ne_coancestry"]["mean_theta_per_gen"][1:])
 
 
 def test_tsv_split_holds(tmp_path):
-    """Only the eight scalar Ne values may appear in the long-form TSV."""
-    base = tmp_path / "p"
+    """With ``--tsv``, only the eight scalar Ne values appear in the long-form TSV."""
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--tsv",
     ])
     assert res.returncode == 0, res.stderr
 
-    tsv_rows = _load_tsv(base)
+    tsv_rows = _load_tsv(out_dir)
     scalar_rows = [r for r in tsv_rows[1:] if r[0] == "effective_size_scalars"]
     deep_rows = [r for r in tsv_rows[1:] if r[0] == "effective_size"]
     assert len(scalar_rows) == 8
     assert len(deep_rows) == 0
 
 
-def test_warning_for_orphaned_ne_flags(tmp_path, caplog):
-    """``--ne-coancestry`` without ``--effective-size`` warns on stderr."""
-    base = tmp_path / "p"
-    # Drive via subprocess to get realistic stderr capture.
+def test_warning_for_orphaned_ne_flags(tmp_path):
+    """``--ne-coancestry`` alongside ``--no-effective-size`` warns on stderr."""
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base), "--ne-coancestry",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--no-effective-size", "--ne-coancestry",
     ])
     assert res.returncode == 0
-    assert "have no effect without --effective-size" in res.stderr
+    assert "have no effect under --no-effective-size" in res.stderr
 
 
 def test_ne_threads_zero_argparse_error(tmp_path):
     """``--ne-threads 0`` is rejected by argparse and writes nothing."""
-    base = tmp_path / "p"
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size", "--ne-threads", "0",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--ne-threads", "0",
     ])
     assert res.returncode != 0
     assert "--ne-threads" in res.stderr
     # Nothing should be written when argparse rejects.
-    assert not (base.parent / f"{base.name}.summary.yaml").exists()
+    assert not (out_dir / "summary.yaml").exists()
 
 
 def test_ne_threads_accepts_positive_int(tmp_path):
     """``--ne-threads`` accepts a positive integer and runs to completion."""
-    base = tmp_path / "p"
+    out_dir = tmp_path / "out"
     res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size", "--ne-threads", "4",
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--ne-threads", "4",
     ])
     assert res.returncode == 0, res.stderr

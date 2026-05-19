@@ -28,7 +28,7 @@ def test_validate_reorders_unordered_tsv(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
     assert r.returncode == 0, r.stderr
     assert "reordering" in r.stderr.lower()
-    with gzip.open(tmp_path / "out.validate.tsv.gz", "rt") as fh:
+    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
         fixed = pd.read_csv(fh, sep="\t", dtype=str)
     # The two founders must appear before the child in row order.
     ids_in_order = fixed["id"].astype(int).tolist()

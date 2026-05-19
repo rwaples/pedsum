@@ -1,15 +1,13 @@
 """Tests for the slim/extra summary YAML split.
 
-The summary YAML is split into ``<base>.summary.yaml`` (slim, headline
-content) and ``<base>.summary.extra.yaml`` (per-generation/per-cohort
-arrays plus full per-individual quantiles). ``--single-file`` collapses
-the two back into one YAML, still in the categorised structure.
+The summary YAML is always split into ``summary.yaml`` (slim, headline
+content) and ``summary.extra.yaml`` (per-generation/per-cohort arrays
+plus full per-individual quantiles), inside the ``--out`` directory.
 
 These tests pin the split contract: each leaf appears in exactly one of
 slim / extra / intentional-drop; per-generation values that look like
-duplicates of global scalars are preserved in extra; the ``--single-file``
-mode deletes any pre-existing ``.summary.extra.yaml``; empty categories
-(e.g. ``popgen`` without ``--effective-size``) are omitted.
+duplicates of global scalars are preserved in extra; empty categories
+are omitted.
 
 The unit test for ``_split_summary`` + ``_deep_merge_summary`` imports
 pedigree_summary as a module to exercise the splitter on a fabricated
@@ -43,17 +41,12 @@ _spec.loader.exec_module(_ps)
 
 
 def test_extra_yaml_exists_by_default(tmp_path):
-    """Without ``--single-file``, both summary YAML files are written."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    """Both summary YAML files are always written."""
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    slim_path = base.parent / f"{base.name}.summary.yaml"
-    extra_path = base.parent / f"{base.name}.summary.extra.yaml"
-    assert slim_path.exists()
-    assert extra_path.exists()
+    assert (out_dir / "summary.yaml").exists()
+    assert (out_dir / "summary.extra.yaml").exists()
 
 
 def test_slim_yaml_line_budget(tmp_path):
@@ -63,74 +56,11 @@ def test_slim_yaml_line_budget(tmp_path):
     500; the example is tiny so it should comfortably fit. Catches
     regressions that re-promote a bulky section into slim.
     """
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    slim_path = base.parent / f"{base.name}.summary.yaml"
-    n_lines = len(slim_path.read_text().splitlines())
+    n_lines = len((out_dir / "summary.yaml").read_text().splitlines())
     assert n_lines <= 500, f"slim YAML budget exceeded: {n_lines} lines"
-
-
-# --------------------------------------------------------------------------
-# --single-file behaviour
-# --------------------------------------------------------------------------
-
-
-def test_single_file_combines_both(tmp_path):
-    """``--single-file`` writes one YAML whose payload equals the in-memory merge."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size", "--single-file",
-    ])
-    assert res.returncode == 0, res.stderr
-
-    single_path = base.parent / f"{base.name}.summary.yaml"
-    extra_path = base.parent / f"{base.name}.summary.extra.yaml"
-    assert single_path.exists()
-    assert not extra_path.exists()
-
-    # Re-run *without* --single-file at a new basename so we can read both
-    # slim and extra from the same source data and merge them in Python;
-    # compare the pedigree + individual subtrees (top-level meta will
-    # contain a different command string and generated_at timestamp).
-    base2 = tmp_path / "q"
-    res2 = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base2),
-        "--inbreeding", "--effective-size",
-    ])
-    assert res2.returncode == 0, res2.stderr
-    slim = _load_yaml(base2)
-    extra = _load_extra(base2)
-    merged = _ps._deep_merge_summary(slim, extra)
-
-    single = _load_yaml(base)
-    for top_key in ("pedigree", "individual"):
-        assert single[top_key] == merged[top_key], f"{top_key} differs"
-
-
-def test_single_file_removes_stale_extra(tmp_path):
-    """Running with ``--single-file`` deletes any pre-existing extra file."""
-    base = tmp_path / "p"
-    # First run: split mode — creates the extra file.
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
-    assert res.returncode == 0, res.stderr
-    extra_path = base.parent / f"{base.name}.summary.extra.yaml"
-    assert extra_path.exists(), "split run should create the extra file"
-
-    # Second run: single-file mode — must delete the stale extra file.
-    res2 = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size", "--single-file",
-    ])
-    assert res2.returncode == 0, res2.stderr
-    assert not extra_path.exists(), "stale extra file was not deleted"
 
 
 # --------------------------------------------------------------------------
@@ -140,27 +70,21 @@ def test_single_file_removes_stale_extra(tmp_path):
 
 def test_ne_coancestry_absent_when_not_requested(tmp_path):
     """Without ``--ne-coancestry``, slim has ``{ne: null}`` and extra omits it entirely."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size",
-    ])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    slim_es = _load_yaml(base)["pedigree"]["popgen"]["effective_size"]
+    slim_es = _load_yaml(out_dir)["pedigree"]["popgen"]["effective_size"]
     assert slim_es["ne_coancestry"] == {"ne": None}
-    extra_es = _load_extra(base)["pedigree"].get("popgen", {}).get("effective_size", {})
+    extra_es = _load_extra(out_dir)["pedigree"].get("popgen", {}).get("effective_size", {})
     assert "ne_coancestry" not in extra_es
 
 
 def test_per_generation_fields_preserved_in_extra(tmp_path):
     """``generation_summary[i]`` per-gen scalars survive — they're not duplicates."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    extra_gen = _load_extra(base)["pedigree"]["strata"]["generation_summary"]
+    extra_gen = _load_extra(out_dir)["pedigree"]["strata"]["generation_summary"]
     assert isinstance(extra_gen, list)
     assert len(extra_gen) > 0
     # Per-generation scalars (not duplicates of global inbreeding.mean_F etc.):
@@ -170,11 +94,14 @@ def test_per_generation_fields_preserved_in_extra(tmp_path):
 
 
 def test_empty_categories_omitted(tmp_path):
-    """Without opt-in flags, the popgen category is absent (not present as empty)."""
-    base = tmp_path / "p"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(base)])
+    """With both opt-outs, popgen and inbreeding are absent (not present as empty)."""
+    out_dir = tmp_path / "out"
+    res = _run([
+        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
+        "--no-inbreeding", "--no-effective-size",
+    ])
     assert res.returncode == 0, res.stderr
-    ped = _load_yaml(base)["pedigree"]
+    ped = _load_yaml(out_dir)["pedigree"]
     assert "popgen" not in ped
     # None of the categories that *are* present should be empty dicts.
     for cat_name, cat in ped.items():
@@ -218,14 +145,11 @@ def test_schema_no_overlap_between_slim_and_extra(tmp_path):
     fully-qualified dotted paths (with ``[i]`` for list indices), and
     asserts the intersection is empty.
     """
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    slim = _load_yaml(base)
-    extra = _load_extra(base)
+    slim = _load_yaml(out_dir)
+    extra = _load_extra(out_dir)
 
     def _leaf_paths(obj, prefix=""):
         if isinstance(obj, dict):
@@ -249,14 +173,11 @@ def test_schema_no_overlap_between_slim_and_extra(tmp_path):
 
 def test_known_yaml_drops_absent_from_both_files(tmp_path):
     """``KNOWN_YAML_DROPS`` paths must not appear in slim or extra."""
-    base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--inbreeding", "--effective-size",
-    ])
+    out_dir = tmp_path / "out"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    slim = _load_yaml(base)
-    extra = _load_extra(base)
+    slim = _load_yaml(out_dir)
+    extra = _load_extra(out_dir)
 
     # pairs.by_degree must be gone from both files.
     slim_pairs = slim["pedigree"]["relatedness"]["pairs"]

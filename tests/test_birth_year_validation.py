@@ -55,8 +55,8 @@ def test_birth_year_range_check_fails_for_typo(tmp_path):
     ])
     assert r.returncode == 1, r.stderr
     assert "birth years within sanity range ....... FAIL" in r.stderr
-    # The .validate.log row references id=1 and birth_year=19888.
-    log = (tmp_path / "out.validate.log").read_text()
+    # The validate.log row references id=1 and birth_year=19888.
+    log = (tmp_path / "out" / "validate.log").read_text()
     assert "birth_year_range" in log
     assert "19888" in log
     assert "id=1" in log
@@ -76,7 +76,7 @@ def test_birth_year_topology_check_fails_for_inversion(tmp_path):
     assert r.returncode == 1, r.stderr
     assert "Traceback" not in r.stderr
     assert "child birth_year >= parent birth_year . FAIL" in r.stderr
-    log = (tmp_path / "out.validate.log").read_text()
+    log = (tmp_path / "out" / "validate.log").read_text()
     assert "birth_year_topology" in log
     # Both mother and father edges should be flagged.
     assert log.count("birth_year_topology") >= 2
@@ -158,7 +158,7 @@ def test_birth_year_fixed_output_includes_topological_reorder(tmp_path):
         "--birth-year-col", "birth_year",
     ])
     assert r.returncode == 0, r.stderr
-    with gzip.open(tmp_path / "out.validate.tsv.gz", "rt") as fh:
+    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
         fixed = pd.read_csv(fh, sep="\t", dtype=str)
     assert "birth_year" in fixed.columns
     ids_in_order = fixed["id"].astype(int).tolist()
