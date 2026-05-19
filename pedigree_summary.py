@@ -77,7 +77,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 _BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.7"
+VERSION = "0.7.1"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
@@ -629,6 +629,22 @@ def _detect_sex_encoding(
     return "default", "ones_only"
 
 
+def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
+    """Deterministic random sample of ``k`` IDs as a comma-separated string.
+
+    Logged so collaborators can eyeball whether the id column was parsed
+    correctly (right column, not coerced to junk). Seed is fixed so reruns
+    show the same sample.
+    """
+    n = len(ids)
+    if n == 0:
+        return ""
+    sample_size = min(k, n)
+    rng = np.random.default_rng(0)
+    indices = np.sort(rng.choice(n, size=sample_size, replace=False))
+    return ", ".join(str(int(x)) for x in ids[indices])
+
+
 def _decode_sex(
     series: pd.Series,
     *,
@@ -664,7 +680,6 @@ def _decode_sex(
 
     if encoding == "auto":
         resolved, ambiguity = _detect_sex_encoding(non_missing, zero_as_missing)
-        logger.info("sex auto-detect: resolved to %s encoding", resolved)
         if ambiguity == "ones_only":
             logger.warning(
                 "sex auto-detect: only '1' tokens present; defaulting to "
@@ -707,6 +722,20 @@ def _decode_sex(
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
             f"Allowed: {allowed}",
         )
+    # Surface the literal tokens that mapped to each sex (case preserved) so
+    # collaborators can verify sex was handled correctly without re-reading
+    # the file. ADR-0001 collaborator-facing transparency.
+    tokens_female = sorted(set(str_vals[out == SEX_FEMALE].tolist()))
+    tokens_male = sorted(set(str_vals[out == SEX_MALE].tolist()))
+    logger.info(
+        "sex parsed: encoding=%s, female={%s} (n=%d), male={%s} (n=%d), unknown=%d",
+        resolved,
+        ", ".join(tokens_female),
+        int((out == SEX_FEMALE).sum()),
+        ", ".join(tokens_male),
+        int((out == SEX_MALE).sum()),
+        int((out == SEX_UNKNOWN).sum()),
+    )
     return out
 
 
@@ -905,6 +934,9 @@ def load_and_validate(
     _raise_first(_check_empty_pedigree(len(df)))
 
     ids = _as_int_col(df[id_col], id_col)
+    logger.info(
+        "parsed %d ids; five random ids: %s", len(ids), _format_id_sample(ids),
+    )
     mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
     fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
     sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
@@ -1088,6 +1120,10 @@ def validate_pedigree(
         return _as_parent_int_col(s, name, zero_as_missing=zero_as_missing)
 
     ids = _coerce_int(id_col, "id_dtype")
+    if ids is not None:
+        logger.info(
+            "parsed %d ids; five random ids: %s", len(ids), _format_id_sample(ids),
+        )
     mothers = _coerce_int(mother_col, "mother_dtype", _parent_parser)
     fathers = _coerce_int(father_col, "father_dtype", _parent_parser)
     sex: np.ndarray | None = None
