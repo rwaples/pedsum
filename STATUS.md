@@ -1,5 +1,31 @@
 # pedsum status — post-port
 
+## Resolved in pedsum 0.9 (sex-from-role override + sex_source column)
+
+Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)
+collaborator-friendly principle: pedsum tries harder to produce a
+usable pedigree, and a per-row audit column lets the user see what
+was decided.
+
+- **Imputation extended.** Pass 1 unchanged (missing→F/M from
+  unambiguous role). Pass 2 new: when the row's sex is asserted but
+  topology unambiguously implies the opposite (asserted M used only
+  as mother; asserted F used only as father), the assertion is
+  overridden to the role-implied sex. Used-as-both with asserted sex
+  remains a `_check_sex_role_consistency` hard-block — pedsum cannot
+  pick M-or-F under contradictory topology.
+- **`sex_source` per-row column** in `annotated.tsv.gz` and
+  `validate.tsv.gz`. Four values: `input` / `imputed_from_missing` /
+  `imputed_from_role` / `unresolved`. The column is the per-row
+  audit; an aggregate INFO line on stderr summarises counts.
+- **`--no-override-asserted-sex`** opts out of Pass 2; restores
+  0.8's hard-block on sex/role contradictions. Missing→F/M
+  imputation is unaffected.
+- **Grouped stderr summary** under override-on now prints
+  `sex consistent with parent role .... PASS (N overridden from role)`
+  when the override fired (`_format_check_summary` extended to render
+  PASS parentheticals).
+
 ## Resolved in pedsum 0.8 (unified missing-sex tolerance)
 
 Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)

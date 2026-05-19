@@ -77,7 +77,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 _BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.8"
+VERSION = "0.9"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
@@ -416,6 +416,8 @@ class _SexImputation:
     original_unknown_mask: np.ndarray
     mother_first_row: dict[int, int]
     father_first_row: dict[int, int]
+    overridden_mask: np.ndarray
+    sex_source: np.ndarray  # dtype=object; per-row category string
 
 
 def _impute_sex_from_roles(
@@ -423,20 +425,38 @@ def _impute_sex_from_roles(
     ids: np.ndarray,
     mothers: np.ndarray,
     fathers: np.ndarray,
+    *,
+    override_asserted_sex: bool = True,
 ) -> _SexImputation:
-    """Impute SEX_UNKNOWN rows from their usage as mother / father.
+    """Impute sex from mother / father role usage.
 
-    Rules:
-      - id used only as mother → impute F
-      - id used only as father → impute M
-      - id used as both        → leave -1, mark ambiguous (caller decides
-                                 whether to raise / tolerate via
-                                 ``--allow-missing-sex``)
-      - id used as neither     → leave -1, orphan (caller decides whether to
-                                 raise / tolerate via ``--allow-missing-sex``)
+    Two passes over each row:
+
+      1. Missing → role:
+         - id used only as mother → impute F
+         - id used only as father → impute M
+         - id used as both        → leave -1, mark ambiguous (caller decides
+                                    whether to raise / tolerate via
+                                    ``--allow-missing-sex``)
+         - id used as neither     → leave -1, orphan (caller decides whether
+                                    to raise / tolerate via
+                                    ``--allow-missing-sex``)
+
+      2. Asserted → role (0.9 default; opt out via
+         ``override_asserted_sex=False``):
+         - asserted M used only as mother → override to F
+         - asserted F used only as father → override to M
+         - asserted used as both          → leave alone; ``_check_sex_role_
+                                            consistency`` still hard-blocks
+         - asserted used as neither       → leave alone
+
+    Returns a `_SexImputation` whose `sex_source` is a per-row `dtype=object`
+    array tagging each row's provenance: ``"input"`` / ``"imputed_from_missing"``
+    / ``"imputed_from_role"`` / ``"unresolved"``.
     """
     original_unknown_mask = (sex == SEX_UNKNOWN).copy()
     imputed = sex.copy()
+    sex_source = np.full(len(sex), "input", dtype=object)
 
     # first_row dicts are only consumed to render row-X / row-Y detail in
     # sex_role_ambiguity findings.
@@ -449,12 +469,29 @@ def _impute_sex_from_roles(
 
     as_mother = np.isin(ids, unique_mids)
     as_father = np.isin(ids, unique_fids)
+
+    # Pass 1: missing → role.
     impute_f = original_unknown_mask & as_mother & ~as_father
     impute_m = original_unknown_mask & as_father & ~as_mother
     ambiguous_mask = original_unknown_mask & as_mother & as_father
     imputed[impute_f] = SEX_FEMALE
     imputed[impute_m] = SEX_MALE
+    sex_source[impute_f | impute_m] = "imputed_from_missing"
     n_imputed = int(impute_f.sum() + impute_m.sum())
+
+    # Pass 2: asserted → role (when topology is unambiguous).
+    override_to_f = (sex == SEX_MALE) & as_mother & ~as_father
+    override_to_m = (sex == SEX_FEMALE) & as_father & ~as_mother
+    if override_asserted_sex:
+        imputed[override_to_f] = SEX_FEMALE
+        imputed[override_to_m] = SEX_MALE
+        overridden_mask = override_to_f | override_to_m
+        sex_source[overridden_mask] = "imputed_from_role"
+    else:
+        overridden_mask = np.zeros(len(sex), dtype=bool)
+
+    # Final pass: anything still SEX_UNKNOWN is unresolved.
+    sex_source[imputed == SEX_UNKNOWN] = "unresolved"
 
     return _SexImputation(
         imputed_sex=imputed,
@@ -463,6 +500,8 @@ def _impute_sex_from_roles(
         original_unknown_mask=original_unknown_mask,
         mother_first_row=mother_first_row,
         father_first_row=father_first_row,
+        overridden_mask=overridden_mask,
+        sex_source=sex_source,
     )
 
 
@@ -903,6 +942,7 @@ def load_and_validate(
     sex_encoding: str = "auto",
     zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
+    override_asserted_sex: bool = True,
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
@@ -974,12 +1014,18 @@ def load_and_validate(
         _raise_first(_check_birth_year_range(ids, birth_year, birth_year_min, by_max))
         _raise_first(_check_birth_year_topology(ids, mothers, fathers, birth_year, id_index))
 
-    imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
+    imp = _impute_sex_from_roles(
+        sex, ids, mothers, fathers,
+        override_asserted_sex=override_asserted_sex,
+    )
     sex = imp.imputed_sex
-    if imp.n_imputed > 0:
+    n_overridden = int(imp.overridden_mask.sum())
+    n_unresolved = int((sex == SEX_UNKNOWN).sum())
+    if imp.n_imputed > 0 or n_overridden > 0 or n_unresolved > 0:
         logger.info(
-            "imputed sex for %d row(s) from parent role (F if used as mother, "
-            "M if used as father)", imp.n_imputed,
+            "sex imputation: %d from missing, %d overridden from role, "
+            "%d unresolved (sex_source column has per-row detail)",
+            imp.n_imputed, n_overridden, n_unresolved,
         )
     if not allow_missing_sex:
         _raise_first(_check_sex_role_ambiguity(
@@ -1027,7 +1073,8 @@ def load_and_validate(
         )
         out = pd.DataFrame(
             {"id": ids[order], "sex": sex[order],
-             "mother": mothers[order], "father": fathers[order]},
+             "mother": mothers[order], "father": fathers[order],
+             "sex_source": imp.sex_source[order]},
         )
         if birth_year is not None:
             out["birth_year"] = birth_year[order]
@@ -1036,7 +1083,8 @@ def load_and_validate(
         f_row, mask_f = _parent_rows(out["father"].to_numpy(), id_index)
     else:
         out = pd.DataFrame(
-            {"id": ids, "sex": sex, "mother": mothers, "father": fathers},
+            {"id": ids, "sex": sex, "mother": mothers, "father": fathers,
+             "sex_source": imp.sex_source},
         )
         if birth_year is not None:
             out["birth_year"] = birth_year
@@ -1066,6 +1114,7 @@ def validate_pedigree(
     sex_encoding: str = "auto",
     zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
+    override_asserted_sex: bool = True,
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
@@ -1183,7 +1232,10 @@ def validate_pedigree(
             _record("parents_distinct", _check_parents_distinct(ids, mothers, fathers))
 
             if sex is not None:
-                imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
+                imp = _impute_sex_from_roles(
+                    sex, ids, mothers, fathers,
+                    override_asserted_sex=override_asserted_sex,
+                )
                 imputed_sex = imp.imputed_sex
                 n_ambiguous = int(imp.ambiguous_mask.sum())
                 if allow_missing_sex:
@@ -1195,10 +1247,25 @@ def validate_pedigree(
                     _record("sex_role_ambiguity", _check_sex_role_ambiguity(
                         ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
                     ))
-                _record("sex_role_consistency", _check_sex_role_consistency(
-                    mothers, fathers, imputed_sex, id_index,
-                    skip_mask=imp.original_unknown_mask,
-                ))
+                if override_asserted_sex:
+                    # The override has already cleared assertions that contradict
+                    # role-implied sex; the consistency check would find zero
+                    # findings. Surface the override count directly so users see
+                    # "PASS (N overridden from role)" in the grouped summary.
+                    n_overridden = int(imp.overridden_mask.sum())
+                    results["sex_role_consistency"] = CheckResult(
+                        name="sex_role_consistency", status="PASS",
+                        count=n_overridden,
+                        skip_reason=(
+                            f"{n_overridden} overridden from role"
+                            if n_overridden > 0 else None
+                        ),
+                    )
+                else:
+                    _record("sex_role_consistency", _check_sex_role_consistency(
+                        mothers, fathers, imputed_sex, id_index,
+                        skip_mask=imp.original_unknown_mask,
+                    ))
                 n_orphan = int(((imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
                 if allow_missing_sex:
                     _skip(
@@ -1214,6 +1281,8 @@ def validate_pedigree(
                     "n_imputed": imp.n_imputed,
                     "ambiguous_mask": imp.ambiguous_mask,
                     "original_unknown_mask": imp.original_unknown_mask,
+                    "sex_source": imp.sex_source,
+                    "overridden_mask": imp.overridden_mask,
                 }
             else:
                 _skip("sex_role_ambiguity", "sex_tokens failed")
@@ -2068,6 +2137,7 @@ def build_individual_df(
     n_ancestors: np.ndarray,
     n_descendants: np.ndarray,
     component_labels: np.ndarray,
+    sex_source: np.ndarray,
 ) -> pd.DataFrame:
     """Assemble per-individual table with the maximal column set."""
     n = len(df)
@@ -2162,6 +2232,7 @@ def build_individual_df(
         {
             "id": ids_arr,
             "sex": sex.astype(np.int8),
+            "sex_source": sex_source,
             "mother": mothers,
             "father": fathers,
             "ped_depth": gen.astype(np.int32),
@@ -3052,7 +3123,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
             if r.status == "FAIL":
                 line += f" ({r.count})"
                 total_findings += r.count
-            elif r.status == "SKIP" and r.skip_reason:
+            elif (r.status == "SKIP" and r.skip_reason) or (r.status == "PASS" and r.skip_reason):
                 line += f" ({r.skip_reason})"
             lines.append(line)
     lines.append("")
@@ -3196,6 +3267,14 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         "validate-fixed output. Without this flag, either case hard-blocks. "
         "Incompatible with --effective-size / --inbreeding in summarize "
         "(sex-stratified estimators require resolved sex).",
+    )
+    p.add_argument(
+        "--no-override-asserted-sex", action="store_true",
+        help="disable the 0.9 default of overriding asserted sex when topology "
+        "unambiguously implies the opposite (asserted M used only as mother "
+        "-> F; asserted F used only as father -> M). The existing "
+        "missing->F/M imputation is unaffected. Restores 0.8's hard-block on "
+        "sex/role contradictions via the sex_role_consistency check.",
     )
 
 
@@ -3417,6 +3496,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             sex_encoding=args.sex_encoding,
             zero_as_missing=False,
             allow_missing_sex=args.allow_missing_sex,
+            override_asserted_sex=not args.no_override_asserted_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
@@ -3538,7 +3618,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     out_dir = args.out_dir
 
     t0 = time.perf_counter()
-    idf = build_individual_df(df, id_index, F_vec, n_anc, n_desc, comp_labels)
+    sex_source = df["sex_source"].to_numpy()
+    idf = build_individual_df(
+        df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
+    )
     logger.info("individual table built in %.2fs", time.perf_counter() - t0)
 
     t0 = time.perf_counter()
@@ -3607,6 +3690,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             sex_encoding=args.sex_encoding,
             zero_as_missing=False,
             allow_missing_sex=args.allow_missing_sex,
+            override_asserted_sex=not args.no_override_asserted_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
@@ -3672,10 +3756,20 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             df_out = df_out.copy()
             imputed = sex_imp["imputed_sex"]
             original_unknown = sex_imp["original_unknown_mask"]
+            overridden = sex_imp.get(
+                "overridden_mask", np.zeros(len(imputed), dtype=bool),
+            )
             sex_col_values = df_out[args.sex_col].astype(object).copy()
+            # 0.8: missing→F/M imputation surfaces in the fixed sex column.
             for i in np.where(original_unknown & (imputed == SEX_FEMALE))[0]:
                 sex_col_values.iat[int(i)] = "F"
             for i in np.where(original_unknown & (imputed == SEX_MALE))[0]:
+                sex_col_values.iat[int(i)] = "M"
+            # 0.9: asserted→role overrides replace the (now wrong) asserted
+            # token with the role-implied F/M.
+            for i in np.where(overridden & (imputed == SEX_FEMALE))[0]:
+                sex_col_values.iat[int(i)] = "F"
+            for i in np.where(overridden & (imputed == SEX_MALE))[0]:
                 sex_col_values.iat[int(i)] = "M"
             # Normalise every still-missing sex to the canonical pedsum
             # missing token "-1" so the fixed TSV is self-consistent across
@@ -3696,6 +3790,10 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
                     "validate: normalised %d unresolved-sex row(s) to -1 in fixed output",
                     n_normalised,
                 )
+            # 0.9 per-row audit: stamp sex_source onto the fixed output BEFORE
+            # the topological reorder below, so pandas reorders the column
+            # along with the rest.
+            df_out["sex_source"] = sex_imp["sex_source"]
         # Reorder so the fixed file is parents-before-children and feeds
         # back into pedsum without further auto-fixes.
         m_row, _ = _parent_rows(ctx["mothers"], id_index)

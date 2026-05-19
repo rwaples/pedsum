@@ -69,9 +69,9 @@ also adds its own `ped_depth` column (topological depth from founders)
 and the per-individual derived columns — see "Topological depth" and
 "Column preservation" below.
 
-### Migrating from 0.6 / 0.7
+### Migrating from 0.6 / 0.7 / 0.8
 
-| 0.6 / 0.7 | 0.8 |
+| Before | 0.9 |
 |---|---|
 | (0.6) `--out my_run` (basename) | `--out my_run/` (directory) |
 | (0.6) omit `--inbreeding` to skip F | pass `--no-inbreeding` to skip F |
@@ -82,6 +82,7 @@ and the per-individual derived columns — see "Topological depth" and
 | (0.6) `--zero-as-missing` | removed (preprocess input) |
 | (0.6) `--out X` then read `X.summary.pedigree.tsv` | pass `--tsv` then read `X/summary.pedigree.tsv` |
 | (0.7) `--allow-unknown-sex` | `--allow-missing-sex` (also tolerates `sex_role_ambiguity`; fixed-TSV sex column normalises to `-1`) |
+| (0.8) `sex_role_consistency` hard-blocked asserted-M-used-as-mother rows | Auto-fixed by default via the new override pass; pass `--no-override-asserted-sex` to restore the hard-block. New `sex_source` per-row column on `annotated.tsv.gz` + `validate.tsv.gz` audits each row's provenance. |
 
 ## Usage
 
@@ -157,6 +158,12 @@ Flags:
   `--no-effective-size` and/or `--no-inbreeding` if you want to keep
   `--allow-missing-sex`). *Renamed from `--allow-unknown-sex` in 0.8; the
   old name is rejected.*
+- `--no-override-asserted-sex` — disable the 0.9 default of overriding
+  asserted sex when topology unambiguously implies the opposite
+  (asserted M used only as mother → F; asserted F used only as father
+  → M). The existing missing→F/M imputation is unaffected. Restores
+  0.8's hard-block on sex/role contradictions via the
+  `sex_role_consistency` check.
 
 ### Validate a pedigree
 

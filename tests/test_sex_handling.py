@@ -227,3 +227,74 @@ def test_unknown_sex_blocks_inbreeding_in_summarize(tmp_path):
     ])
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
     assert "sex-stratified" in r.stderr.lower() or "resolved sex" in r.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# 0.9: override asserted sex when topology unambiguously implies the opposite
+# ---------------------------------------------------------------------------
+
+
+def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
+    """Row with sex=M used only as mother gets overridden to F under the default."""
+    ped = _write_ped(tmp_path / "p.tsv", [
+        {"id": 1, "sex": "M", "mother": -1, "father": -1},
+        {"id": 2, "sex": "M", "mother": -1, "father": -1},  # asserted M but used as mother
+        {"id": 3, "sex": "F", "mother": 2,  "father": 1},
+    ])
+    df, _ = ps.load_and_validate(ped)
+    row = df.loc[df["id"] == 2].iloc[0]
+    assert int(row["sex"]) == ps.SEX_FEMALE
+    assert row["sex_source"] == "imputed_from_role"
+
+
+def test_impute_overrides_asserted_f_used_as_father(tmp_path):
+    """Symmetric F→M override."""
+    ped = _write_ped(tmp_path / "p.tsv", [
+        {"id": 1, "sex": "F", "mother": -1, "father": -1},  # asserted F but used as father
+        {"id": 2, "sex": "F", "mother": -1, "father": -1},
+        {"id": 3, "sex": "F", "mother": 2,  "father": 1},
+    ])
+    df, _ = ps.load_and_validate(ped)
+    row = df.loc[df["id"] == 1].iloc[0]
+    assert int(row["sex"]) == ps.SEX_MALE
+    assert row["sex_source"] == "imputed_from_role"
+
+
+def test_no_override_asserted_sex_disables_override(tmp_path):
+    """override_asserted_sex=False makes sex_role_consistency hard-block again."""
+    ped = _write_ped(tmp_path / "p.tsv", [
+        {"id": 1, "sex": "M", "mother": -1, "father": -1},
+        {"id": 2, "sex": "M", "mother": -1, "father": -1},
+        {"id": 3, "sex": "F", "mother": 2,  "father": 1},
+    ])
+    with pytest.raises(ps.PedigreeError, match="sex_role_consistency"):
+        ps.load_and_validate(ped, override_asserted_sex=False)
+
+
+def test_asserted_sex_with_both_roles_still_hard_blocks(tmp_path):
+    """Asserted sex used as BOTH mother and father is unfixable; consistency raises."""
+    ped = _write_ped(tmp_path / "p.tsv", [
+        {"id": 7, "sex": "M", "mother": -1, "father": -1},  # M, but used as both
+        {"id": 8, "sex": "M", "mother": -1, "father": -1},
+        {"id": 9, "sex": "F", "mother": -1, "father": -1},
+        {"id": 10, "sex": "F", "mother": 7, "father": 8},  # 7 as mother (contradicts M)
+        {"id": 11, "sex": "M", "mother": 9, "father": 7},  # 7 as father (consistent with M)
+    ])
+    # Override can't choose F vs M (topology is ambiguous); the mother-role
+    # contradiction produces a consistency finding and the check hard-blocks.
+    with pytest.raises(ps.PedigreeError, match="sex_role_consistency"):
+        ps.load_and_validate(ped)
+
+
+def test_assertion_kept_when_no_role(tmp_path):
+    """An asserted-sex orphan (no role) keeps its assertion; sex_source=='input'."""
+    ped = _write_ped(tmp_path / "p.tsv", [
+        {"id": 1, "sex": "M", "mother": -1, "father": -1},
+        {"id": 2, "sex": "F", "mother": -1, "father": -1},
+        {"id": 3, "sex": "M", "mother": 2,  "father": 1},
+        {"id": 4, "sex": "M", "mother": -1, "father": -1},  # orphan, no role
+    ])
+    df, _ = ps.load_and_validate(ped)
+    row = df.loc[df["id"] == 4].iloc[0]
+    assert int(row["sex"]) == ps.SEX_MALE
+    assert row["sex_source"] == "input"

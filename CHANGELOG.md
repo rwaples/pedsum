@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.9.0 — 2026-05-19 — sex-from-role override + `sex_source` per-row audit column
+
+Breaking. Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)
+collaborator-friendly principle — pedsum tries harder to produce a
+usable pedigree, and the audit column lets you see exactly what it
+decided.
+
+### Imputation extended
+
+`_impute_sex_from_roles` now does two passes by default:
+
+1. (existing 0.8) Missing→role: unsexed used only as mother → F;
+   unsexed used only as father → M; both → ambiguous (-1); neither →
+   orphan (-1).
+2. **NEW** Asserted→role: asserted M used only as mother → override to
+   F; asserted F used only as father → override to M. Used as both
+   (topology ambiguous) → assertion preserved AND
+   `_check_sex_role_consistency` still hard-blocks (pedsum cannot
+   choose M-or-F from contradictory topology). Used as neither →
+   assertion preserved.
+
+`_check_sex_role_consistency` is re-purposed under the new default:
+the override has already cleared contradictions when topology was
+unambiguous, so the check produces zero findings. The grouped stderr
+summary now reports `sex consistent with parent role .... PASS (N
+overridden from role)`.
+
+### New column
+
+`sex_source` is a per-row string column on **both**
+`annotated.tsv.gz` (summarize) and `validate.tsv.gz` (validate),
+with four categorical values:
+
+- `input` — assertion preserved (no role conflict or no role).
+- `imputed_from_missing` — was missing in input; role implied F or M.
+- `imputed_from_role` — was asserted but topology disagreed; topology won.
+- `unresolved` — still SEX_UNKNOWN after both passes (orphan or
+  ambiguous, tolerated under `--allow-missing-sex`).
+
+### New flag
+
+- **`--no-override-asserted-sex`** (opt-out) disables the new Pass 2
+  override behaviour. Restores 0.8's hard-block on sex/role
+  contradictions via `sex_role_consistency`. The existing
+  missing→F/M imputation is unaffected.
+
+### Migrating from 0.8
+
+| 0.8 | 0.9 |
+|---|---|
+| `sex_role_consistency` hard-blocked any asserted-M-used-as-mother row | Auto-fixed by default; pass `--no-override-asserted-sex` to restore the hard-block |
+| Fixed `validate.tsv.gz` rewrote only missing-sex rows | Also rewrites overridden rows (asserted token replaced with role-implied F/M) |
+| No per-row sex provenance in outputs | `sex_source` column added to annotated.tsv.gz + validate.tsv.gz |
+| Grouped stderr summary: `sex consistent with parent role .... PASS` (always plain PASS) | `PASS (N overridden from role)` when override fired |
+
+
 ## 0.8.0 — 2026-05-19 — unified missing-sex tolerance
 
 Breaking. Same collaborator-friendly principle as 0.7
