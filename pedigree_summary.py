@@ -476,8 +476,9 @@ def _impute_sex_from_roles(
     ambiguous_mask = original_unknown_mask & as_mother & as_father
     imputed[impute_f] = SEX_FEMALE
     imputed[impute_m] = SEX_MALE
-    sex_source[impute_f | impute_m] = "imputed_from_missing"
-    n_imputed = int(impute_f.sum() + impute_m.sum())
+    imputed_from_missing = impute_f | impute_m
+    sex_source[imputed_from_missing] = "imputed_from_missing"
+    n_imputed = int(imputed_from_missing.sum())
 
     # Pass 2: asserted → role (when topology is unambiguous).
     override_to_f = (sex == SEX_MALE) & as_mother & ~as_father
@@ -3123,7 +3124,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
             if r.status == "FAIL":
                 line += f" ({r.count})"
                 total_findings += r.count
-            elif (r.status == "SKIP" and r.skip_reason) or (r.status == "PASS" and r.skip_reason):
+            elif r.skip_reason and r.status in ("SKIP", "PASS"):
                 line += f" ({r.skip_reason})"
             lines.append(line)
     lines.append("")
@@ -3759,25 +3760,16 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             overridden = sex_imp.get(
                 "overridden_mask", np.zeros(len(imputed), dtype=bool),
             )
+            # Rewrite the sex column wherever pedsum changed it: missing→F/M
+            # imputation (0.8) and asserted→role overrides (0.9). Rows still
+            # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
+            # normalise to "-1" so the fixed TSV is self-consistent.
             sex_col_values = df_out[args.sex_col].astype(object).copy()
-            # 0.8: missing→F/M imputation surfaces in the fixed sex column.
-            for i in np.where(original_unknown & (imputed == SEX_FEMALE))[0]:
-                sex_col_values.iat[int(i)] = "F"
-            for i in np.where(original_unknown & (imputed == SEX_MALE))[0]:
-                sex_col_values.iat[int(i)] = "M"
-            # 0.9: asserted→role overrides replace the (now wrong) asserted
-            # token with the role-implied F/M.
-            for i in np.where(overridden & (imputed == SEX_FEMALE))[0]:
-                sex_col_values.iat[int(i)] = "F"
-            for i in np.where(overridden & (imputed == SEX_MALE))[0]:
-                sex_col_values.iat[int(i)] = "M"
-            # Normalise every still-missing sex to the canonical pedsum
-            # missing token "-1" so the fixed TSV is self-consistent across
-            # orphan-unsexed and role-ambiguous rows. Runs even when
-            # n_imputed == 0 (orphan-only pedigrees still need normalising).
+            modified = original_unknown | overridden
             unresolved_mask = imputed == SEX_UNKNOWN
-            for i in np.where(unresolved_mask)[0]:
-                sex_col_values.iat[int(i)] = "-1"
+            sex_col_values.loc[modified & (imputed == SEX_FEMALE)] = "F"
+            sex_col_values.loc[modified & (imputed == SEX_MALE)] = "M"
+            sex_col_values.loc[unresolved_mask] = "-1"
             df_out[args.sex_col] = sex_col_values
             if sex_imp["n_imputed"] > 0:
                 logger.info(
