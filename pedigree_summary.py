@@ -77,7 +77,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 _BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.7.1"
+VERSION = "0.8"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
@@ -429,9 +429,11 @@ def _impute_sex_from_roles(
     Rules:
       - id used only as mother → impute F
       - id used only as father → impute M
-      - id used as both        → leave -1, mark ambiguous
+      - id used as both        → leave -1, mark ambiguous (caller decides
+                                 whether to raise / tolerate via
+                                 ``--allow-missing-sex``)
       - id used as neither     → leave -1, orphan (caller decides whether to
-                                 raise / tolerate via ``--allow-unknown-sex``)
+                                 raise / tolerate via ``--allow-missing-sex``)
     """
     original_unknown_mask = (sex == SEX_UNKNOWN).copy()
     imputed = sex.copy()
@@ -472,8 +474,10 @@ def _check_sex_role_ambiguity(
 ) -> list[Finding]:
     """Detect unsexed rows that are referenced as BOTH mother and father.
 
-    Always a hard block — this is a data contradiction, not just missing
-    information, and cannot be bypassed via ``--allow-unknown-sex``.
+    A hard block by default — this is a data contradiction, not just missing
+    information. Pedsum 0.8 added ``--allow-missing-sex`` which downgrades
+    this to a SKIP with a tolerated count; the fixed validate-output writes
+    these rows' sex as ``-1`` so the on-disk pedigree is self-consistent.
     """
     findings: list[Finding] = []
     for row_idx in np.where(ambiguous_mask)[0]:
@@ -898,7 +902,7 @@ def load_and_validate(
     father_col: str = "father",
     sex_encoding: str = "auto",
     zero_as_missing: bool = False,
-    allow_unknown_sex: bool = False,
+    allow_missing_sex: bool = False,
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
@@ -977,16 +981,22 @@ def load_and_validate(
             "imputed sex for %d row(s) from parent role (F if used as mother, "
             "M if used as father)", imp.n_imputed,
         )
-    _raise_first(_check_sex_role_ambiguity(
-        ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
-    ))
-    if not allow_unknown_sex:
+    if not allow_missing_sex:
+        _raise_first(_check_sex_role_ambiguity(
+            ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
+        ))
         _raise_first(_check_unknown_sex(ids, sex, imp.ambiguous_mask))
     else:
+        n_ambiguous = int(imp.ambiguous_mask.sum())
+        if n_ambiguous > 0:
+            logger.info(
+                "kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)",
+                n_ambiguous,
+            )
         n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
         if n_orphan > 0:
             logger.info(
-                "kept %d row(s) with sex=%d (--allow-unknown-sex)",
+                "kept %d row(s) with sex=%d (--allow-missing-sex)",
                 n_orphan, SEX_UNKNOWN,
             )
 
@@ -1055,7 +1065,7 @@ def validate_pedigree(
     father_col: str = "father",
     sex_encoding: str = "auto",
     zero_as_missing: bool = False,
-    allow_unknown_sex: bool = False,
+    allow_missing_sex: bool = False,
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
@@ -1175,18 +1185,25 @@ def validate_pedigree(
             if sex is not None:
                 imp = _impute_sex_from_roles(sex, ids, mothers, fathers)
                 imputed_sex = imp.imputed_sex
-                _record("sex_role_ambiguity", _check_sex_role_ambiguity(
-                    ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
-                ))
+                n_ambiguous = int(imp.ambiguous_mask.sum())
+                if allow_missing_sex:
+                    _skip(
+                        "sex_role_ambiguity",
+                        f"bypassed via --allow-missing-sex ({n_ambiguous} tolerated)",
+                    )
+                else:
+                    _record("sex_role_ambiguity", _check_sex_role_ambiguity(
+                        ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
+                    ))
                 _record("sex_role_consistency", _check_sex_role_consistency(
                     mothers, fathers, imputed_sex, id_index,
                     skip_mask=imp.original_unknown_mask,
                 ))
                 n_orphan = int(((imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-                if allow_unknown_sex:
+                if allow_missing_sex:
                     _skip(
                         "unknown_sex",
-                        f"bypassed via --allow-unknown-sex ({n_orphan} tolerated)",
+                        f"bypassed via --allow-missing-sex ({n_orphan} tolerated)",
                     )
                 else:
                     _record("unknown_sex", _check_unknown_sex(
@@ -3171,11 +3188,14 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         help="legacy alias for --sex-encoding=plink (PLINK convention: 1=male, 2=female)",
     )
     p.add_argument(
-        "--allow-unknown-sex", action="store_true",
-        help="tolerate rows whose sex is missing AND cannot be imputed from "
-        "parent role (kept as sentinel -1). Without this flag, unresolved "
-        "rows are an error. Incompatible with --effective-size / --inbreeding "
-        "in summarize.",
+        "--allow-missing-sex", action="store_true",
+        help="tolerate rows whose sex is missing after imputation — either "
+        "because the row is unsexed and not used as a parent (orphan), OR "
+        "because it is used as BOTH mother and father with unknown sex "
+        "(role-ambiguous). Such rows are auto-fixed to sex=-1 in the "
+        "validate-fixed output. Without this flag, either case hard-blocks. "
+        "Incompatible with --effective-size / --inbreeding in summarize "
+        "(sex-stratified estimators require resolved sex).",
     )
 
 
@@ -3396,7 +3416,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             father_col=args.father_col,
             sex_encoding=args.sex_encoding,
             zero_as_missing=False,
-            allow_unknown_sex=args.allow_unknown_sex,
+            allow_missing_sex=args.allow_missing_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
@@ -3414,7 +3434,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if (df["sex"].to_numpy() == SEX_UNKNOWN).any() and (args.effective_size or args.inbreeding):
         logger.error(
             "sex-stratified Ne / F kernel requires resolved sex for every row; "
-            "remove --allow-unknown-sex, supply sex for the offending rows, or "
+            "remove --allow-missing-sex, supply sex for the offending rows, or "
             "pass --no-effective-size / --no-inbreeding",
         )
         return 1
@@ -3586,7 +3606,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             father_col=args.father_col,
             sex_encoding=args.sex_encoding,
             zero_as_missing=False,
-            allow_unknown_sex=args.allow_unknown_sex,
+            allow_missing_sex=args.allow_missing_sex,
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
@@ -3618,9 +3638,12 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if by_check["parent_refs_sex_conflict"].status == "FAIL":
         blocks.append("sex conflict on missing parent(s); pass --no-sex-check to default to sex=F")
     if by_check["sex_role_ambiguity"].status == "FAIL":
-        blocks.append("present individual(s) with unknown sex used as BOTH mother and father (sex cannot be imputed)")
+        blocks.append(
+            "present individual(s) with unknown sex used as BOTH mother and father "
+            "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
+        )
     if by_check["unknown_sex"].status == "FAIL":
-        blocks.append("rows with unresolved sex; pass --allow-unknown-sex to tolerate")
+        blocks.append("rows with unresolved sex; pass --allow-missing-sex to tolerate")
 
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
@@ -3645,7 +3668,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         # Fold sex imputation into the fixed output so the user's "fixed"
         # file reflects the auto-fix instead of the original blanks.
         sex_imp = ctx.get("sex_imputation")
-        if sex_imp is not None and sex_imp["n_imputed"] > 0:
+        if sex_imp is not None:
             df_out = df_out.copy()
             imputed = sex_imp["imputed_sex"]
             original_unknown = sex_imp["original_unknown_mask"]
@@ -3654,11 +3677,25 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
                 sex_col_values.iat[int(i)] = "F"
             for i in np.where(original_unknown & (imputed == SEX_MALE))[0]:
                 sex_col_values.iat[int(i)] = "M"
+            # Normalise every still-missing sex to the canonical pedsum
+            # missing token "-1" so the fixed TSV is self-consistent across
+            # orphan-unsexed and role-ambiguous rows. Runs even when
+            # n_imputed == 0 (orphan-only pedigrees still need normalising).
+            unresolved_mask = imputed == SEX_UNKNOWN
+            for i in np.where(unresolved_mask)[0]:
+                sex_col_values.iat[int(i)] = "-1"
             df_out[args.sex_col] = sex_col_values
-            logger.info(
-                "validate: imputed sex for %d row(s) from parent role",
-                int(sex_imp["n_imputed"]),
-            )
+            if sex_imp["n_imputed"] > 0:
+                logger.info(
+                    "validate: imputed sex for %d row(s) from parent role",
+                    int(sex_imp["n_imputed"]),
+                )
+            n_normalised = int(unresolved_mask.sum())
+            if n_normalised > 0:
+                logger.info(
+                    "validate: normalised %d unresolved-sex row(s) to -1 in fixed output",
+                    n_normalised,
+                )
         # Reorder so the fixed file is parents-before-children and feeds
         # back into pedsum without further auto-fixes.
         m_row, _ = _parent_rows(ctx["mothers"], id_index)

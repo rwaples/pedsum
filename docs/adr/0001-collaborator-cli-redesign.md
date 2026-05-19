@@ -37,3 +37,7 @@ Output schemas (YAML keys, TSV columns, validation log format) do **not** change
 - **README + STATUS rewrite.** Every example command updates; STATUS gets a "Resolved in pedsum 0.7" section.
 - **Forward note on downstream consumers.** If simACE or fitACE later wire pedsum into snakemake rules, those rules use the new CLI. No migration work needed today because no programmatic consumer exists.
 - The original `PLAN.md`'s structural-split work (split `_run_summarize`, `validate_pedigree`, `_parse_args` into helpers) is **re-evaluated after** the CLI redesign. Flag deletions and default flips will shrink `_run_summarize` substantially on their own; the original Phase 2 may be largely moot.
+
+## 2026-05-19 follow-up — unified missing-sex tolerance (0.8)
+
+The same collaborator-friendly principle drove a small follow-up immediately after 0.7. `--allow-unknown-sex` was renamed to `--allow-missing-sex` and broadened to tolerate the previously-unconditional `sex_role_ambiguity` hard-block (a row used as both mother and father with unknown sex). A new auto-fix step normalises every still-`SEX_UNKNOWN` row in `validate.tsv.gz` to the canonical `"-1"` token so the fixed output is self-consistent. The collaborator's mental model is "let unsexed rows through"; pedsum's internals previously asked them to distinguish orphan from role-ambiguous, which is a pedsum-implementation distinction not a user-level one. Same hard-break / no-alias precedent as 0.7's `--burden` → `--per-individual-pairs`.

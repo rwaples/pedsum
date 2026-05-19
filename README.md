@@ -69,18 +69,19 @@ also adds its own `ped_depth` column (topological depth from founders)
 and the per-individual derived columns — see "Topological depth" and
 "Column preservation" below.
 
-### Migrating from 0.6
+### Migrating from 0.6 / 0.7
 
-| 0.6 | 0.7 |
+| 0.6 / 0.7 | 0.8 |
 |---|---|
-| `--out my_run` (basename) | `--out my_run/` (directory) |
-| omit `--inbreeding` to skip F | pass `--no-inbreeding` to skip F |
-| omit `--effective-size` to skip Ne | pass `--no-effective-size` to skip Ne |
-| `--burden` | `--per-individual-pairs` |
-| `--single-file` | removed (two-YAML split is always written) |
-| `--engine` / `--bfs-threshold` | removed (matrix engine only) |
-| `--zero-as-missing` | removed (preprocess input) |
-| `--out X` then read `X.summary.pedigree.tsv` | pass `--tsv` then read `X/summary.pedigree.tsv` |
+| (0.6) `--out my_run` (basename) | `--out my_run/` (directory) |
+| (0.6) omit `--inbreeding` to skip F | pass `--no-inbreeding` to skip F |
+| (0.6) omit `--effective-size` to skip Ne | pass `--no-effective-size` to skip Ne |
+| (0.6) `--burden` | `--per-individual-pairs` |
+| (0.6) `--single-file` | removed (two-YAML split is always written) |
+| (0.6) `--engine` / `--bfs-threshold` | removed (matrix engine only) |
+| (0.6) `--zero-as-missing` | removed (preprocess input) |
+| (0.6) `--out X` then read `X.summary.pedigree.tsv` | pass `--tsv` then read `X/summary.pedigree.tsv` |
+| (0.7) `--allow-unknown-sex` | `--allow-missing-sex` (also tolerates `sex_role_ambiguity`; fixed-TSV sex column normalises to `-1`) |
 
 ## Usage
 
@@ -146,12 +147,16 @@ Flags:
   `1 = male, 2 = female` with `0 = unknown` (PLINK fam spec). See
   "Sex auto-detection" below.
 - `--plink-sex` — legacy alias for `--sex-encoding=plink`.
-- `--allow-unknown-sex` — tolerate rows whose sex is missing AND
-  cannot be imputed from parent role (kept as the sentinel `-1`).
-  Without this flag, unresolved rows are an error. Incompatible with
-  `--effective-size` / `--inbreeding` in `summarize` (sex-stratified
-  estimators require resolved sex; pass `--no-effective-size` and/or
-  `--no-inbreeding` if you want to keep `--allow-unknown-sex`).
+- `--allow-missing-sex` — tolerate rows whose sex is missing after
+  imputation, either because the row is unsexed and not used as a parent
+  (orphan), or because it is used as BOTH mother and father with unknown
+  sex (role-ambiguous). Such rows are auto-fixed to `sex=-1` in the
+  validate-fixed output. Without this flag, either case hard-blocks.
+  Incompatible with `--effective-size` / `--inbreeding` in `summarize`
+  (sex-stratified estimators require resolved sex; pass
+  `--no-effective-size` and/or `--no-inbreeding` if you want to keep
+  `--allow-missing-sex`). *Renamed from `--allow-unknown-sex` in 0.8; the
+  old name is rejected.*
 
 ### Validate a pedigree
 
@@ -184,7 +189,7 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
   order), if the input was not already ordered.
 
 Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
-unresolved sex without `--allow-unknown-sex`, sex-role ambiguity)
+unresolved sex without `--allow-missing-sex`, sex-role ambiguity)
 cause the fixed TSV to be skipped — fix the source data first.
 
 ## Input format
@@ -231,7 +236,7 @@ an unsexed individual used as a mother is imputed F, and as a father
 is imputed M. If a present individual is referenced as BOTH mother
 and father with unknown sex, that's a data contradiction (`sex_role_ambiguity`)
 and a hard block — pedsum cannot pick a side. Truly orphan unsexed
-rows (not used as a parent) are a hard block unless `--allow-unknown-sex`
+rows (not used as a parent) are a hard block unless `--allow-missing-sex`
 is set.
 
 ## Preparing your data

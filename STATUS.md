@@ -1,5 +1,23 @@
 # pedsum status — post-port
 
+## Resolved in pedsum 0.8 (unified missing-sex tolerance)
+
+Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)
+collaborator-friendly principle that drove 0.7.
+
+- **Renamed `--allow-unknown-sex` → `--allow-missing-sex`.** Hard break,
+  no alias.
+- **Broadened scope.** The renamed flag now tolerates BOTH orphan
+  unsexed rows and role-ambiguous rows (unsexed individuals used as
+  both mother and father). 0.7 hard-blocked role-ambiguity
+  unconditionally; 0.8 makes it an opt-in tolerance like orphan rows.
+- **Fixed-TSV auto-fix.** `validate.tsv.gz` now writes `"-1"` for every
+  row whose final sex is `SEX_UNKNOWN`, regardless of provenance. The
+  rewrite no longer requires `n_imputed > 0`, so orphan-only pedigrees
+  also get the normalisation.
+- The `_run_validate` block-list messages and the sex-stratified
+  `_run_summarize` refusal now name `--allow-missing-sex`.
+
 ## Resolved in pedsum 0.7 (collaborator-friendly CLI redesign)
 
 Breaking. Full rationale and rejected alternatives in

@@ -128,7 +128,7 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
 
 
 def test_missing_sex_unresolvable_without_flag_raises(tmp_path):
-    """Orphan unsexed row without --allow-unknown-sex is an error."""
+    """Orphan unsexed row without --allow-missing-sex is an error."""
     ped = _write_ped(tmp_path / "p.tsv", [
         {"id": 1, "sex": "M", "mother": -1, "father": -1},
         {"id": 2, "sex": "F", "mother": -1, "father": -1},
@@ -139,13 +139,13 @@ def test_missing_sex_unresolvable_without_flag_raises(tmp_path):
 
 
 def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
-    """allow_unknown_sex=True keeps SEX_UNKNOWN sentinel through to df."""
+    """allow_missing_sex=True keeps SEX_UNKNOWN sentinel through to df."""
     ped = _write_ped(tmp_path / "p.tsv", [
         {"id": 1, "sex": "M", "mother": -1, "father": -1},
         {"id": 2, "sex": "F", "mother": -1, "father": -1},
         {"id": 3, "sex": "",  "mother": 2,  "father": 1},
     ])
-    df, _ = ps.load_and_validate(ped, allow_unknown_sex=True)
+    df, _ = ps.load_and_validate(ped, allow_missing_sex=True)
     assert (df["sex"] == ps.SEX_UNKNOWN).any()
 
 
@@ -156,7 +156,7 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
         {"id": 2, "sex": "F", "mother": -1, "father": -1},
         {"id": 3, "sex": "",  "mother": 2,  "father": 1},
     ])
-    df, csr = ps.load_and_validate(ped, allow_unknown_sex=True)
+    df, csr = ps.load_and_validate(ped, allow_missing_sex=True)
     # ped_depth is populated by _run_summarize from PedigreeGraph; for this
     # unit test fake it from generation order (founders depth 0, kid depth 1).
     df = df.copy()
@@ -168,29 +168,39 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
     assert summary["n_unknown_sex"] == 1
 
 
-def test_sex_role_ambiguity_raises_in_load(tmp_path):
-    """Present row with unknown sex used as BOTH mother and father blocks load."""
-    ped = _write_ped(tmp_path / "p.tsv", [
+def _ambig_pedigree(path):
+    """Pedigree where id=7 is unsexed and used as both mother and father."""
+    return _write_ped(path, [
         {"id": 7, "sex": "",  "mother": -1, "father": -1},
         {"id": 8, "sex": "M", "mother": -1, "father": -1},
         {"id": 9, "sex": "F", "mother": -1, "father": -1},
         {"id": 10, "sex": "F", "mother": 7, "father": 8},  # uses 7 as mother
         {"id": 11, "sex": "M", "mother": 9, "father": 7},  # uses 7 as father
     ])
+
+
+def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
+    """Without --allow-missing-sex, ambiguity blocks load_and_validate."""
+    ped = _ambig_pedigree(tmp_path / "p.tsv")
     with pytest.raises(ps.PedigreeError, match="sex_role_ambiguity"):
         ps.load_and_validate(ped)
-    # --allow-unknown-sex does NOT bypass ambiguity
-    with pytest.raises(ps.PedigreeError, match="sex_role_ambiguity"):
-        ps.load_and_validate(ped, allow_unknown_sex=True)
+
+
+def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
+    """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
+    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    df, _ = ps.load_and_validate(ped, allow_missing_sex=True)
+    row = df.loc[df["id"] == 7].iloc[0]
+    assert int(row["sex"]) == ps.SEX_UNKNOWN
 
 
 # ---------------------------------------------------------------------------
-# Hard-refuse: --allow-unknown-sex + --effective-size / --inbreeding
+# Hard-refuse: --allow-missing-sex + --effective-size / --inbreeding
 # ---------------------------------------------------------------------------
 
 
 def test_unknown_sex_blocks_effective_size_in_summarize(tmp_path):
-    """Summarize --allow-unknown-sex --effective-size exits 1 with clear message."""
+    """Summarize --allow-missing-sex --effective-size exits 1 with clear message."""
     ped = _write_ped(tmp_path / "p.tsv", [
         {"id": 1, "sex": "M", "mother": -1, "father": -1},
         {"id": 2, "sex": "F", "mother": -1, "father": -1},
@@ -198,14 +208,14 @@ def test_unknown_sex_blocks_effective_size_in_summarize(tmp_path):
     ])
     r = run_pedsum([
         "summarize", "--in", str(ped), "--out", str(tmp_path / "s"),
-        "--allow-unknown-sex", "--effective-size",
+        "--allow-missing-sex", "--effective-size",
     ])
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
     assert "sex-stratified" in r.stderr.lower() or "resolved sex" in r.stderr.lower()
 
 
 def test_unknown_sex_blocks_inbreeding_in_summarize(tmp_path):
-    """Summarize --allow-unknown-sex --inbreeding exits 1 with clear message."""
+    """Summarize --allow-missing-sex --inbreeding exits 1 with clear message."""
     ped = _write_ped(tmp_path / "p.tsv", [
         {"id": 1, "sex": "M", "mother": -1, "father": -1},
         {"id": 2, "sex": "F", "mother": -1, "father": -1},
@@ -213,7 +223,7 @@ def test_unknown_sex_blocks_inbreeding_in_summarize(tmp_path):
     ])
     r = run_pedsum([
         "summarize", "--in", str(ped), "--out", str(tmp_path / "s"),
-        "--allow-unknown-sex", "--inbreeding",
+        "--allow-missing-sex", "--inbreeding",
     ])
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
     assert "sex-stratified" in r.stderr.lower() or "resolved sex" in r.stderr.lower()
