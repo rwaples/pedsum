@@ -3101,7 +3101,7 @@ class _FullHelpParser(argparse.ArgumentParser):
     silently resurrected via partial-match.
     """
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
 
@@ -3479,7 +3479,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             time.perf_counter() - t0,
         )
 
-    out_dir: Path = args.out_dir
+    out_dir = args.out_dir
 
     t0 = time.perf_counter()
     idf = build_individual_df(df, id_index, F_vec, n_anc, n_desc, comp_labels)
@@ -3588,7 +3588,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
 
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
-    out_dir: Path = args.out_dir
+    out_dir = args.out_dir
     log_path = out_dir / "validate.log"
     _write_validate_log(findings, log_path)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
