@@ -809,14 +809,84 @@ def _maybe_warn_csv(df: pd.DataFrame) -> None:
     """Raise a clear error when the file looks like CSV but was read as TSV.
 
     Detected by a single column whose name contains commas (TSV reader
-    treats the entire comma-joined header as one column).
+    treats the entire comma-joined header as one column). Only fires
+    when the user has pinned ``--sep tab`` (or any non-comma separator)
+    and the file is actually comma-separated — the default ``--sep
+    auto`` sniffs the right delimiter up front.
     """
     if len(df.columns) == 1 and "," in str(df.columns[0]):
         raise PedigreeError(
             f"input appears to be CSV (single column {df.columns[0]!r}); "
-            "this script reads TSV (tab-separated). Convert with: "
-            "tr ',' '\\t' < input.csv > input.tsv"
+            "this script defaulted to a non-comma separator. Re-run "
+            "with --sep auto (the default) or --sep comma."
         )
+
+
+_SEP_CHOICES = ("auto", "tab", "comma", "semicolon", "pipe", "whitespace")
+_SEP_MAP = {
+    "tab": "\t",
+    "comma": ",",
+    "semicolon": ";",
+    "pipe": "|",
+    "whitespace": r"\s+",
+}
+_SEP_HUMAN = {"\t": "tab", ",": "comma", ";": "semicolon", "|": "pipe", r"\s+": "whitespace"}
+
+
+def _open_text_for_sniff(path: Path):
+    """Open ``path`` as text for delimiter sniffing; transparent to gzip."""
+    if path.suffix == ".gz":
+        return gzip.open(path, mode="rt", encoding="utf-8", newline="")
+    return path.open("r", encoding="utf-8", newline="")
+
+
+def _sniff_delimiter(path: Path) -> str:
+    r"""Return the most likely column delimiter for ``path``.
+
+    Counts ``\t`` / ``,`` / ``;`` / ``|`` on the first non-empty line.
+    If none appear and the line splits into >=2 whitespace-separated
+    tokens, returns ``r'\s+'`` (PLINK fam-style). Otherwise falls back
+    to ``\t`` and lets downstream validation surface the column
+    mismatch.
+    """
+    with _open_text_for_sniff(path) as fh:
+        first = ""
+        for line in fh:
+            stripped = line.strip()
+            if stripped:
+                first = stripped
+                break
+    if not first:
+        raise PedigreeError(f"input file {path} is empty or contains only blank lines")
+    counts = {sep: first.count(sep) for sep in ("\t", ",", ";", "|")}
+    best = max(counts, key=lambda k: counts[k])
+    if counts[best] > 0:
+        return best
+    if len(first.split()) >= 2:
+        return r"\s+"
+    return "\t"
+
+
+def _read_pedigree_table(
+    path: Path, sep: str = "auto", *, dtype: object | None = None,
+) -> pd.DataFrame:
+    r"""Read a pedigree table, sniffing the delimiter when ``sep == 'auto'``.
+
+    ``sep`` accepts the argparse keywords in ``_SEP_CHOICES`` or a
+    literal delimiter (``"\t"``, ``","``, ...). When auto-sniff resolves
+    to anything other than tab, an INFO log records the chosen
+    delimiter so the routing is visible in the run log.
+    """
+    if not path.exists():
+        raise PedigreeError(f"input file not found: {path}")
+    if sep == "auto":
+        chosen = _sniff_delimiter(path)
+        if chosen != "\t":
+            logger.info("input: sniffed %s-separated", _SEP_HUMAN[chosen])
+    else:
+        chosen = _SEP_MAP.get(sep, sep)
+    engine = "python" if chosen == r"\s+" else None
+    return pd.read_csv(path, sep=chosen, dtype=dtype, engine=engine)
 
 
 def _as_parent_int_col(
@@ -947,6 +1017,7 @@ def load_and_validate(
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
+    sep: str = "auto",
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC, return (df, children_csr).
 
@@ -957,11 +1028,8 @@ def load_and_validate(
     across the generations / components / descendants / inbreeding
     passes.
     """
-    if not path.exists():
-        raise PedigreeError(f"input file not found: {path}")
-
     t0 = time.perf_counter()
-    df = pd.read_csv(path, sep="\t", dtype=str)
+    df = _read_pedigree_table(path, sep=sep, dtype=str)
     logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
     _maybe_warn_csv(df)
 
@@ -1119,6 +1187,7 @@ def validate_pedigree(
     birth_year_col: str | None = None,
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
+    sep: str = "auto",
 ) -> tuple[int, list[CheckResult], list[Finding], dict]:
     """Run every integrity check accumulating.
 
@@ -1127,10 +1196,7 @@ def validate_pedigree(
     every per-individual finding, and ``ctx`` carries the coerced arrays and
     raw DataFrame for downstream auto-fix.
     """
-    if not path.exists():
-        raise PedigreeError(f"input file not found: {path}")
-
-    df = pd.read_csv(path, sep="\t", dtype=str)
+    df = _read_pedigree_table(path, sep=sep, dtype=str)
     _maybe_warn_csv(df)
     n = len(df)
     findings: list[Finding] = []
@@ -1146,15 +1212,19 @@ def validate_pedigree(
     def _skip(name: str, reason: str) -> None:
         results[name] = CheckResult(name=name, status="SKIP", skip_reason=reason)
 
+    def _skip_many(names: tuple[str, ...], reason: str) -> None:
+        for name in names:
+            _skip(name, reason)
+
     needed = {id_col, sex_col, mother_col, father_col}
     miss_cols = needed - set(df.columns)
     if miss_cols:
         msg = f"missing required columns: {sorted(miss_cols)}; file has {list(df.columns)}"
         findings.append(Finding(check="required_columns", detail=msg))
         results["required_columns"] = CheckResult(name="required_columns", status="FAIL", count=1)
-        for name in _CHECK_ORDER:
-            if name != "required_columns" and results[name].status == "SKIP":
-                results[name].skip_reason = "required_columns failed"
+        for name, result in results.items():
+            if name != "required_columns" and result.status == "SKIP":
+                result.skip_reason = "required_columns failed"
         return n, list(results.values()), findings, ctx
     results["required_columns"] = CheckResult(name="required_columns", status="PASS")
 
@@ -1309,20 +1379,21 @@ def validate_pedigree(
             _skip("unknown_sex", "mother_dtype or father_dtype failed")
             _skip("acyclic", "mother_dtype or father_dtype failed")
     else:
-        for name in (
-            "parent_refs_present_mother", "parent_refs_present_father",
-            "parent_refs_sex_conflict", "sex_role_ambiguity",
-            "self_loops", "parents_distinct",
-            "sex_role_consistency", "unknown_sex", "acyclic",
-        ):
-            _skip(name, "id_dtype/negative_ids/duplicate_ids failed")
+        _skip_many(
+            (
+                "parent_refs_present_mother", "parent_refs_present_father",
+                "parent_refs_sex_conflict", "sex_role_ambiguity",
+                "self_loops", "parents_distinct",
+                "sex_role_consistency", "unknown_sex", "acyclic",
+            ),
+            "id_dtype/negative_ids/duplicate_ids failed",
+        )
 
+    birth_year_checks = ("birth_year_dtype", "birth_year_range", "birth_year_topology")
     if birth_year_col is None:
-        for name in ("birth_year_dtype", "birth_year_range", "birth_year_topology"):
-            _skip(name, "no --birth-year-col specified")
+        _skip_many(birth_year_checks, "no --birth-year-col specified")
     elif birth_year_col not in df.columns:
-        for name in ("birth_year_dtype", "birth_year_range", "birth_year_topology"):
-            _skip(name, f"column {birth_year_col!r} not present in file")
+        _skip_many(birth_year_checks, f"column {birth_year_col!r} not present in file")
     else:
         by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
         try:
@@ -3052,7 +3123,7 @@ def _write_annotated_tsv(
     encoding (0=female, 1=male). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
-    raw = pd.read_csv(in_path, sep="\t")
+    raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"))
     rename_map = {
         args.id_col: "id",
         args.sex_col: "sex",
@@ -3249,6 +3320,13 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
 
 
 def _add_format_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--sep", choices=_SEP_CHOICES, default="auto",
+        help="input column delimiter. 'auto' (default) sniffs the first "
+        "non-empty line for tab/comma/semicolon/pipe; falls back to "
+        "whitespace (PLINK fam-style) when none are present. Pass an "
+        "explicit choice to opt out of sniffing.",
+    )
     p.add_argument(
         "--sex-encoding", choices=("auto", "default", "plink"), default="auto",
         help="how to decode the sex column: 'default' = 0=female, 1=male "
@@ -3501,6 +3579,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
+            sep=args.sep,
         )
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
@@ -3695,6 +3774,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
+            sep=args.sep,
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
