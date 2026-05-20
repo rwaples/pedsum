@@ -5,50 +5,29 @@ Ne_V (``collapses_to_ne_v: true`` with a null cohort window). With the
 flag, pedigree-graph's overlapping-generation kernel takes over and
 populates the cohort window plus the sex-decomposed Ne_m / Ne_f scalars.
 
-The bundled ``example_pedigree.tsv`` lacks a birth-year column, so each
-test materialises a small augmented TSV in ``tmp_path`` by deriving
-``birth_year = 2000 + 5 * generation``. That keeps every parent-child
-edge topologically consistent (child.birth_year > parent.birth_year by
-construction) and yields ~5 generations of cohorts for Hill to chew on.
+The bundled ``example_pedigree.tsv`` ships a ``birth_year`` column
+derived from ``generation`` (``2000 + 5 * generation``). The collapse
+baseline below materialises a stripped TSV in ``tmp_path`` so we can
+exercise the no-birth-year path against an otherwise-identical pedigree.
 """
 
 from __future__ import annotations
 
-import csv
-from typing import TYPE_CHECKING
-
 from conftest import EXAMPLE
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
-def _write_augmented_pedigree(dest: Path) -> Path:
-    """Copy the example pedigree adding a ``birth_year`` column from ``generation``."""
-    with EXAMPLE.open() as fh:
-        rows = list(csv.reader(fh, delimiter="\t"))
-    header = rows[0] + ["birth_year"]
-    out_rows = [header]
-    gen_idx = rows[0].index("generation")
-    for row in rows[1:]:
-        gen = int(row[gen_idx])
-        out_rows.append([*row, str(2000 + 5 * gen)])
-    with dest.open("w") as fh:
-        writer = csv.writer(fh, delimiter="\t")
-        writer.writerows(out_rows)
-    return dest
+from conftest import write_stripped_pedigree as _strip
 
 
 def test_hill_collapses_without_birth_year(tmp_path):
     """Baseline: without ``--birth-year-col`` Hill collapses to Ne_V."""
+    pedigree = _strip(tmp_path / "no_birth_year.tsv")
     base = tmp_path / "p"
     res = _run(
         [
             "summarize",
             "--in",
-            str(EXAMPLE),
+            str(pedigree),
             "--out",
             str(base),
             "--effective-size",
@@ -66,13 +45,12 @@ def test_hill_collapses_without_birth_year(tmp_path):
 
 def test_hill_populated_with_birth_year(tmp_path):
     """``--birth-year-col`` feeds birth years through so Hill uses cohorts."""
-    pedigree = _write_augmented_pedigree(tmp_path / "augmented.tsv")
     base = tmp_path / "p"
     res = _run(
         [
             "summarize",
             "--in",
-            str(pedigree),
+            str(EXAMPLE),
             "--out",
             str(base),
             "--effective-size",

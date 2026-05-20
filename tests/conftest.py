@@ -31,6 +31,17 @@ def write_ped(path, rows):
     return path
 
 
+def write_stripped_pedigree(dest: Path) -> Path:
+    """Write ``example_pedigree.tsv`` to ``dest`` with ``birth_year`` dropped."""
+    with EXAMPLE.open() as fh:
+        rows = list(csv.reader(fh, delimiter="\t"))
+    by_idx = rows[0].index("birth_year")
+    keep = [[c for i, c in enumerate(row) if i != by_idx] for row in rows]
+    with dest.open("w") as fh:
+        csv.writer(fh, delimiter="\t").writerows(keep)
+    return dest
+
+
 def load_summary_yaml(out_dir: Path) -> dict:
     """Parse ``summary.yaml`` produced by a ``summarize`` run."""
     import yaml
