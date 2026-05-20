@@ -185,7 +185,7 @@ Default pair-counting engine flipped from the matrix path to the streaming path.
 - The opt-in `--burden` flag restores the matrix / BFS engine path with full pair-list output (and the per-individual burden summary). OOMs on pair-dense pedigrees; use only when burden is required.
 - The previous `--no-pairs` flag is removed.
 
-See [`../pedigree-graph/LIMITATIONS.md`](../pedigree-graph/LIMITATIONS.md) for the precision contract and what would unlock exact matrix-engine semantics at scale.
+See [`pedigree-graph`'s `LIMITATIONS.md`](https://github.com/rwaples/pedigree-graph/blob/main/LIMITATIONS.md) for the precision contract and what would unlock exact matrix-engine semantics at scale.
 
 
 ## 0.4.0 — 2026-05-13 — pedigree-graph v0.5.0 consolidation + BFS engine port

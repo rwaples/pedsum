@@ -329,20 +329,24 @@ from this README's inline notes — no new numbers are introduced here):
 
 - The F kernel logs a one-line INFO above `N=1,000,000` so naive runs
   cannot silently hang (see Usage above).
-- `--per-individual-pairs` requires the matrix engine to materialise
-  full pair lists, which OOMs on *pair-dense* pedigrees with `N >
-  ~500K` (stallion-heavy livestock, large half-sib clusters). The
+- Default pair counting uses `count_pairs_streaming` (scalar, `O(N)`
+  memory) and is unaffected by these limits at any pedigree size.
+- `--per-individual-pairs` opts into the pair-list path, which
+  materialises full pair lists and OOMs on *pair-dense* pedigrees with
+  `N > ~500K` (stallion-heavy livestock, large half-sib clusters). The
   "pair-dense" qualifier is load-bearing — a million unrelated founders
-  will not OOM at 500K.
+  will not OOM at 500K. The default streaming path is *not* affected by
+  this flag.
+- Within the `--per-individual-pairs` path only, the *experimental*
+  BFS engine auto-selects at `N >= 5M`. It has not been demonstrated to
+  beat the matrix engine at any size pedsum cares about — see open
+  [pedigree-graph#2](https://github.com/rwaples/pedigree-graph/issues/2)
+  and
+  [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3).
+  Without `--per-individual-pairs`, BFS is never reached.
 - `Ne_C` (opt-in via `--ne-coancestry`) can blow up RAM on `>~500K-row`
   pedigrees because its kinship DP scales with the cumulative ancestor
   set.
-- The BFS engine auto-selects at `N >= 5M` but is *experimental* and
-  has not been demonstrated to beat the matrix engine at any size
-  pedsum cares about (see open
-  [pedigree-graph#2](https://github.com/rwaples/pedigree-graph/issues/2)
-  and
-  [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3)).
 
 These are documented opt-outs you type, not size-tiered defaults
 pedsum applies on your behalf.
