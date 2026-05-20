@@ -77,7 +77,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 _BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.9"
+VERSION = "0.9.1"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
