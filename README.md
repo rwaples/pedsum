@@ -1,88 +1,62 @@
-# pedsum — standalone pedigree summary CLI
+# pedsum — pedigree summary CLI
 
 Source: <https://github.com/rwaples/pedsum>
 
-A single-file Python CLI for validating pedigrees and producing
-machine-readable summaries: size, structure, family-size distribution,
-relationship-pair counts (23 named codes through degree 5 plus
-`by_degree` rollup), mating-pair structure, founder contribution,
+A Python command line tool for summarizing and validating pedigrees. 
+Reports the size, structure, family-size distribution,
+relationship-pair counts (up to degree 5), mating-pair structure, founder contributions,
 component/lineage/sex/generation aggregates, and per-individual
 statistics.
 
-Both relationship-pair engines (matrix and an experimental BFS path)
-delegate to the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph)
-package — pedsum is a thin CLI wrapper plus pedigree validation, family-size
-distribution, and per-individual outputs.
+Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package for relationship-pair detection.
+Both a fast (matrix) and a memory-efficient (breadth-first search) engines are available. 
 
 ## Install
 
-Python ≥ 3.13 required (matches `pedigree-graph`).
+Python ≥ 3.13 required. 
 
 ### Get the code
 
 ```bash
+# clone from git 
 git clone https://github.com/rwaples/pedsum.git
 cd pedsum
-```
-
-pedsum is distributed as a single script (`pedigree_summary.py`) — it
-is not on PyPI. Run it directly from the cloned directory.
-
-Upgrading from an earlier version? See [CHANGELOG.md](CHANGELOG.md) for
-breaking changes per release.
-
-### Install dependencies
-
-Activate your env (`conda activate myenv` or `source venv/bin/activate`)
-and install:
-
-**conda / mamba:**
-
-```bash
-conda install -c conda-forge numpy scipy pandas pyyaml
-pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.0"
-```
-
-**pip:**
-
-```bash
-pip install numpy scipy pandas pyyaml
-pip install "pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.0"
-```
-
-(`pedigree-graph` brings in `numba` transitively for the BFS engine's
-parallel kernel.)
-
-Optional: install `pigz` for ~3× faster `.tsv.gz` writes (the script
-falls back to gzip-1 when absent):
-
-```bash
-conda install -c conda-forge pigz   # cross-platform, into the conda env
-apt-get install pigz                # Debian/Ubuntu
-brew install pigz                   # macOS
-dnf install pigz                    # Fedora/RHEL
+# Install dependencies in a conda environment
+conda env install -f environment.yml
+# activate conda environment
+conda activate pedsum
 ```
 
 ## Quick start
+
+```bash 
+# run like this:
+python pedigree_summary.py validate --in ...
+python pedigree_summary.py summarize --in ...
+```
+
+```bash 
+# help:
+python pedigree_summary.py --help 
+```
 
 A 200-individual, 5-generation example pedigree
 (`example_pedigree.tsv`) ships with the repo. Try it:
 
 ```bash
-python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo
-python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo --tsv
 python pedigree_summary.py validate  --in example_pedigree.tsv --out /tmp/demo-validate
+python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo
 ```
 
 `--out` is a directory (created if needed). The bare `summarize` writes
 three files inside: `summary.yaml`, `summary.extra.yaml`, and
-`annotated.tsv.gz`. F (inbreeding) and the seven cheap Ne estimators
-are computed by default in 0.7 — pass `--no-inbreeding` or
-`--no-effective-size` to skip them.
+`annotated.tsv.gz`. Estimators of inbreeding (F) and Effective population size (Ne) are computed by default. 
+Pass `--no-inbreeding` or `--no-effective-size` to skip them.
 
 The example has columns `id, sex, mother, father, generation,
-liability`. Only the first four are required; `generation` and
-`liability` are preserved unchanged in `annotated.tsv.gz`. The script
+liability, birth_year`. Only the first four are required; the rest are
+preserved unchanged in `annotated.tsv.gz`. Pass `--birth-year-col
+birth_year` to include a birth year for each individual. The script
 also adds its own `ped_depth` column (topological depth from founders)
 and the per-individual derived columns — see "Topological depth" and
 "Column preservation" below.
@@ -114,15 +88,12 @@ Flags:
   INFO above N=1,000,000 so naive runs cannot silently hang. When
   `--effective-size` is also on (the default), F is shared with the Ne
   pipeline and the cost is paid once.
-- `--effective-size` / `--no-effective-size` — compute the seven cheap
-  pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
-  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`) via
-  `pedigree-graph.compute_all_ne`. **On by default in 0.7.** The
+- `--no-effective-size` — skip seven pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
+  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`).  The
   eighth estimator (`Ne_C`, coancestry rate) is opt-in via
-  `--ne-coancestry` because its kinship DP can blow up RAM on very
-  large pedigrees.
+  `--ne-coancestry`..
 - `--ne-coancestry` — additionally compute `Ne_C`. Off by default
-  because the kinship DP can blow up RAM on >~500K-row pedigrees.
+  because it requires a large amount of RAM on large pedigrees (100K+).
 - `--ne-threads N` — number of threads for independent Ne estimator
   dispatch (default `1`, serial). Validated `>= 1` by argparse.
 - `--per-individual-pairs` — opt into per-individual relationship-
@@ -204,29 +175,51 @@ cause the fixed TSV to be skipped — fix the source data first.
 
 ## Input format
 
-TSV (tab-separated; `.tsv` or `.tsv.gz`) with at minimum the columns
-`id`, `sex`, `mother`, `father` — header row required. Column names
-are overridable via `--id-col` / `--sex-col` / `--mother-col` /
-`--father-col`.
+Header-row required, one individual per line. By default `--sep auto`
+sniffs the first non-empty line for `\t`, `,`, `;`, or `|`; if none
+are present and the line splits into multiple whitespace-separated
+tokens, it routes through whitespace mode (PLINK fam-style). Override
+with `--sep {tab,comma,semicolon,pipe,whitespace}` if you want to pin
+it. Gzip is auto-detected from a `.gz` extension. A minimal pedigree:
 
-- `id`: non-negative integer, unique per row. **Strings (e.g.
-  `"P001"`) are not accepted** — see "Preparing your data" below.
-- `sex`: `M`/`F` (any case), `Male`/`Female`, or numeric tokens whose
-  meaning depends on the resolved encoding (see "Sex auto-detection"
-  below). The default pedsum encoding is `0 = female, 1 = male`;
-  PLINK's encoding is `1 = male, 2 = female` with `0 = unknown`.
-  Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`,
-  `-1`, `U`, `Unknown`, any case) are recognised and are either
-  imputed from parent role (F if used as a mother, M if used as a
-  father) or surfaced as findings.
-- `mother`, `father`: parent IDs; `-1` for unknown/founder. The
-  tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any
-  case) are also recognised as missing. If your file uses literal `0`
-  to mean "missing parent" (PLINK fam convention), preprocess the
-  parent columns to replace `0` with `-1` before running pedsum.
+```
+id	sex	mother	father
+1	F	-1	-1
+2	M	-1	-1
+3	F	1	2
+4	M	1	2
+5	F	3	2
+```
 
-Half-founders (one parent missing, the other a valid ID) are
-accepted.
+### Required columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int ≥ 0, unique | **Strings (e.g. `"P001"`) are not accepted** — see "Preparing your data" below. |
+| `sex` | `M`/`F`/`Male`/`Female` (any case) or numeric token | Numeric meaning depends on the resolved encoding (see "Sex auto-detection" below); default pedsum is `0 = female, 1 = male`, PLINK is `1 = male, 2 = female` with `0 = unknown`. Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
+| `mother` | int parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
+| `father` | int parent ID or missing | Same conventions as `mother`. |
+
+Required column names are overridable via `--id-col` / `--sex-col` /
+`--mother-col` / `--father-col`. Half-founders (one parent missing,
+the other a valid ID) are accepted.
+
+### Optional columns
+
+| Column | Recognised when | Effect |
+|---|---|---|
+| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). Threads into the Hill overlapping-generation Ne estimator — without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year >= parent.birth_year` on every known edge). |
+| *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
+
+### Row order
+
+Out-of-order rows are tolerated. Both `summarize` and `validate` run a
+depth sweep up front; if any row is out of topological order pedsum
+logs an INFO line and re-sorts parents-before-children for downstream
+processing. `validate` writes the sorted pedigree to
+`DIR/validate.tsv.gz`; `summarize` keeps the re-sorted frame
+in-memory. Only cycles or rows that cannot be reached from any root
+raise a `PedigreeError` (hard block) — fix the source data first.
 
 ### Sex auto-detection
 
@@ -244,43 +237,50 @@ Under the resolved encoding, missing-sex tokens decode to a sentinel
 `-1`. pedsum then imputes those rows from parent role where possible:
 an unsexed individual used as a mother is imputed F, and as a father
 is imputed M. If a present individual is referenced as BOTH mother
-and father with unknown sex, that's a data contradiction (`sex_role_ambiguity`)
+and father with unknown sex, that's a data contradiction (`
+sex_role_ambiguity`)
 and a hard block — pedsum cannot pick a side. Truly orphan unsexed
 rows (not used as a parent) are a hard block unless `--allow-missing-sex`
 is set.
 
 ## Preparing your data
 
-Most real-world pedigree files need a small preprocessing step to fit
-the input format. Common cases:
+The remaining real-world preprocessing usually comes down to (a)
+giving the file a header row, (b) remapping non-standard missing
+tokens, or (c) integerising string IDs. `--sep auto` removes the
+common "convert to TSV first" step.
 
 ### PLINK `.fam` files
 
-A PLINK `.fam` file is whitespace-separated, has six columns
+A PLINK `.fam` is whitespace-separated, has six columns
 (`FID IID PAT MAT SEX PHENO`), no header, uses `0` for missing
-parents, and encodes sex as `1 = male, 2 = female`. To run pedsum on
-it directly:
+parents, and encodes sex as `1 = male, 2 = female`. Pedsum's
+`--sep auto` reads the whitespace fine — you only need to add a
+header and remap `0 → -1` in the parent columns:
 
 ```bash
-# Add a header, convert spaces → tabs, and replace 0-as-missing in
-# parent columns with -1 (pedsum's missing token):
-{ printf 'FID\tIID\tPAT\tMAT\tSEX\tPHENO\n'; tr -s ' ' '\t' < cohort.fam; } \
-    | awk 'BEGIN{OFS="\t"} NR==1{print; next} {if($3==0)$3=-1; if($4==0)$4=-1; print}' \
-    > cohort.tsv
+{ printf 'FID IID PAT MAT SEX PHENO\n'; \
+  awk 'BEGIN{OFS=" "} {if($3==0)$3=-1; if($4==0)$4=-1; print}' cohort.fam; } \
+    > cohort.fam.headed
 
 python pedigree_summary.py summarize \
-    --in cohort.tsv --out cohort/ \
+    --in cohort.fam.headed --out cohort/ \
     --id-col IID --mother-col MAT --father-col PAT --sex-col SEX \
     --plink-sex
 ```
 
 ### CSV (comma-separated)
 
-```bash
-tr ',' '\t' < input.csv > input.tsv
-```
+Pass directly — `--sep auto` will route through comma mode. If you
+want to be explicit, pass `--sep comma`. No conversion needed.
 
-(or `python -c "import pandas as pd; pd.read_csv('input.csv').to_csv('input.tsv', sep='\t', index=False)"` if quoted commas matter.)
+If your CSV has quoted commas inside fields (rare for pedigree data
+but possible with text columns), the simple `tr ',' '\t'` substitution
+won't survive the quoting. In that case re-export through pandas:
+
+```bash
+python -c "import pandas as pd; pd.read_csv('input.csv').to_csv('input.tsv', sep='\t', index=False)"
+```
 
 ### String IDs (`"P001"`, `"FAM01-003"`, …)
 
@@ -355,7 +355,7 @@ pedsum applies on your behalf.
 
 | Error | Likely cause | Fix |
 |---|---|---|
-| `input appears to be CSV` | comma-separated input | convert as above |
+| `input appears to be CSV` | pinned `--sep tab` on a comma-separated file | drop the pinning (default `--sep auto` sniffs) or pass `--sep comma` |
 | `column 'id' must be integer-valued` | string/alphanumeric IDs | map to ints |
 | `sex column has N invalid value(s)` showing `'2'` | PLINK 1/2 encoding | add `--plink-sex` |
 | `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
@@ -370,9 +370,9 @@ Since pedsum 0.4 the depth is sourced from `PedigreeGraph.generation`
 in the upstream `pedigree-graph` library — semantics are unchanged,
 output dtype is still `int32`, and it remains the grouping variable
 for `f_by_generation`, `gen_counts`, and the per-individual ancestor
-/ descendant columns.  Inputs must be in topological row order
-(parents precede children); rows that violate this raise a clear
-`PedigreeError`.
+/ descendant columns. Inputs need not be in topological row order —
+pedsum re-sorts automatically (see "Row order" above). Only cycles or
+unreachable rows raise a `PedigreeError`.
 
 You do not need to supply a depth column at all. If your input
 already has a column named `ped_depth`, it is treated as a
