@@ -9,7 +9,6 @@ component/lineage/sex/generation aggregates, and per-individual
 statistics.
 
 Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package for relationship-pair detection.
-Both a fast (matrix) and a memory-efficient (breadth-first search) engines are available. 
 
 ## Install
 
@@ -58,86 +57,9 @@ liability, birth_year`. Only the first four are required; the rest are
 preserved unchanged in `annotated.tsv.gz`. Pass `--birth-year-col
 birth_year` to include a birth year for each individual. The script
 also adds its own `ped_depth` column (topological depth from founders)
-and the per-individual derived columns — see "Topological depth" and
-"Column preservation" below.
+and the per-individual derived columns.
 
 ## Usage
-
-### Summarize a pedigree
-
-```bash
-python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
-```
-
-`--out DIR` is a directory (created if needed). Files written inside:
-
-| File | When | Contents |
-|---|---|---|
-| `summary.yaml` | always | slim categorised summary (~500 lines) |
-| `summary.extra.yaml` | always | per-generation / per-cohort arrays + full per-individual quantiles |
-| `annotated.tsv.gz` | always (unless `--safe-attempt`) | input pedigree + per-individual columns |
-| `summary.pedigree.tsv` | with `--tsv` | long-form pedigree-level summary |
-| `summary.individual.tsv` | with `--tsv` | long-form per-individual distribution |
-
-Flags:
-
-- `--inbreeding` / `--no-inbreeding` — compute per-individual `F` and
-  the inbreeding summary section. **On by default in 0.7.** F is the
-  single most expensive computation in pedsum (~minutes on 10M rows
-  even with the upstream Meuwissen-Luo kernel); pedsum logs a one-line
-  INFO above N=1,000,000 so naive runs cannot silently hang. When
-  `--effective-size` is also on (the default), F is shared with the Ne
-  pipeline and the cost is paid once.
-- `--no-effective-size` — skip seven pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
-  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`).  The
-  eighth estimator (`Ne_C`, coancestry rate) is opt-in via
-  `--ne-coancestry`..
-- `--ne-coancestry` — additionally compute `Ne_C`. Off by default
-  because it requires a large amount of RAM on large pedigrees (100K+).
-- `--ne-threads N` — number of threads for independent Ne estimator
-  dispatch (default `1`, serial). Validated `>= 1` by argparse.
-- `--per-individual-pairs` — opt into per-individual relationship-
-  burden summary (`relationship_summary.relatives_total`,
-  `.relatives_by_degree`, closest-degree distribution, etc.).
-  Requires the matrix engine to materialise full pair lists, which
-  OOMs on pair-dense pedigrees (stallion-heavy livestock, large
-  half-sib clusters). Without this flag pedsum uses
-  `pedigree_graph.PedigreeGraph.count_pairs_streaming` (scalar,
-  O(N) memory) to populate the 23 pair counts and leaves the burden
-  summary as a stub. The streaming counts are bit-identical to the
-  matrix engine for the 10 simple codes
-  (`MO`, `FO`, `FS`, `MHS`, `PHS`, `MZ`, `GP`, `GGP`, `GGGP`,
-  `G3GP`); ~1% scalar approximation on the 13 cousin / collateral
-  codes when the pedigree has inbreeding, twins, or shallow depth.
-- `--tsv` — additionally write the long-form `summary.pedigree.tsv`
-  and `summary.individual.tsv`. Off by default; collaborators
-  typically need only the YAML outputs.
-- `--safe-attempt` — best-effort GDPR-style redaction: skip the
-  per-individual `annotated.tsv.gz`, drop `min`/`max` from
-  distributions, and null any count or stratum below cell-size 5.
-  **Not a safe-harbor guarantee** — review before sharing.
-- `--sex-encoding {auto,default,plink}` — how to decode the sex
-  column. `auto` (default) detects from the observed tokens; `default`
-  forces `0 = female, 1 = male` (pedsum convention); `plink` forces
-  `1 = male, 2 = female` with `0 = unknown` (PLINK fam spec). See
-  "Sex auto-detection" below.
-- `--plink-sex` — legacy alias for `--sex-encoding=plink`.
-- `--allow-missing-sex` — tolerate rows whose sex is missing after
-  imputation, either because the row is unsexed and not used as a parent
-  (orphan), or because it is used as BOTH mother and father with unknown
-  sex (role-ambiguous). Such rows are auto-fixed to `sex=-1` in the
-  validate-fixed output. Without this flag, either case hard-blocks.
-  Incompatible with `--effective-size` / `--inbreeding` in `summarize`
-  (sex-stratified estimators require resolved sex; pass
-  `--no-effective-size` and/or `--no-inbreeding` if you want to keep
-  `--allow-missing-sex`). *Renamed from `--allow-unknown-sex` in 0.8; the
-  old name is rejected.*
-- `--no-override-asserted-sex` — disable the 0.9 default of overriding
-  asserted sex when topology unambiguously implies the opposite
-  (asserted M used only as mother → F; asserted F used only as father
-  → M). The existing missing→F/M imputation is unaffected. Restores
-  0.8's hard-block on sex/role contradictions via the
-  `sex_role_consistency` check.
 
 ### Validate a pedigree
 
@@ -172,6 +94,72 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
 Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
 unresolved sex without `--allow-missing-sex`, sex-role ambiguity)
 cause the fixed TSV to be skipped — fix the source data first.
+
+### Summarize a pedigree
+
+```bash
+python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
+```
+
+`--out DIR` is a directory (created if needed). Files written inside:
+
+| File | When | Contents |
+|---|---|---|
+| `summary.yaml` | always | slim categorised summary (~500 lines) |
+| `summary.extra.yaml` | always | per-generation / per-cohort arrays + full per-individual quantiles |
+| `annotated.tsv.gz` | always (unless `--safe-attempt`) | input pedigree + per-individual columns |
+| `summary.pedigree.tsv` | with `--tsv` | long-form pedigree-level summary |
+| `summary.individual.tsv` | with `--tsv` | long-form per-individual distribution |
+
+Flags:
+
+- `--inbreeding` / `--no-inbreeding` — compute per-individual `F` and
+  the inbreeding summary section. On by default. F is the single most
+  expensive computation in pedsum (~minutes on 10M-row pedigrees);
+  when `--effective-size` is also on, F is shared with the Ne pipeline
+  and the cost is paid once.
+- `--no-effective-size` — skip seven pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
+  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`).  The
+  eighth estimator (`Ne_C`, coancestry rate) is opt-in via
+  `--ne-coancestry`..
+- `--ne-coancestry` — additionally compute `Ne_C`. Off by default —
+  its kinship DP can blow up RAM on pedigrees larger than ~500K rows.
+- `--ne-threads N` — number of threads for independent Ne estimator
+  dispatch (default `1`, serial). Validated `>= 1` by argparse.
+- `--per-individual-pairs` — opt into the per-individual
+  relationship-burden summary (`relationship_summary.relatives_total`,
+  `.relatives_by_degree`, closest-degree distribution). Requires
+  materialising full pair lists, which OOMs on pair-dense pedigrees
+  above ~500K rows (stallion-heavy livestock, large half-sib clusters).
+  Off by default; the 23 pair counts and the standard summary are
+  produced without it.
+- `--tsv` — additionally write the long-form `summary.pedigree.tsv`
+  and `summary.individual.tsv`. Off by default; collaborators
+  typically need only the YAML outputs.
+- `--safe-attempt` — best-effort GDPR-style redaction: skip the
+  per-individual `annotated.tsv.gz`, drop `min`/`max` from
+  distributions, and null any count or stratum below cell-size 5.
+  **Not a safe-harbor guarantee** — review before sharing.
+- `--sex-encoding {auto,default,plink}` — how to decode the sex
+  column. `auto` (default) detects from the observed tokens; `default`
+  forces `0 = female, 1 = male` (pedsum convention); `plink` forces
+  `1 = male, 2 = female` with `0 = unknown` (PLINK fam spec). See
+  "Sex auto-detection" below.
+- `--plink-sex` — legacy alias for `--sex-encoding=plink`.
+- `--allow-missing-sex` — tolerate rows whose sex is missing after
+  imputation, either because the row is unsexed and not used as a
+  parent (orphan), or because it is used as BOTH mother and father
+  with unknown sex (role-ambiguous). Such rows are auto-fixed to
+  `sex=-1` in the validate-fixed output. Without this flag, either
+  case hard-blocks. Incompatible with `--effective-size` /
+  `--inbreeding` in `summarize` (sex-stratified estimators require
+  resolved sex; pass `--no-effective-size` and/or `--no-inbreeding`
+  if you want to keep `--allow-missing-sex`).
+- `--no-override-asserted-sex` — disable the default behavior of
+  overriding asserted sex when topology unambiguously implies the
+  opposite (asserted M used only as mother → F; asserted F used only
+  as father → M). The missing→F/M imputation is unaffected. Reverts
+  to hard-blocking on sex/role contradictions.
 
 ## Input format
 
@@ -233,30 +221,22 @@ in the sex column:
 | only `M`/`F`/`Male`/`Female` | `default` (encoding choice is moot) |
 | only `1` tokens | `default` + WARNING — pass `--sex-encoding=plink` if the file is actually PLINK-encoded |
 
-Under the resolved encoding, missing-sex tokens decode to a sentinel
-`-1`. pedsum then imputes those rows from parent role where possible:
-an unsexed individual used as a mother is imputed F, and as a father
-is imputed M. If a present individual is referenced as BOTH mother
-and father with unknown sex, that's a data contradiction (`
-sex_role_ambiguity`)
-and a hard block — pedsum cannot pick a side. Truly orphan unsexed
-rows (not used as a parent) are a hard block unless `--allow-missing-sex`
-is set.
+Missing-sex tokens decode to a sentinel `-1`. pedsum then imputes
+from parent role: F if used as mother, M if used as father. Two
+cases hard-block unless `--allow-missing-sex` is set — an individual
+used as BOTH mother and father (pedsum cannot pick a side), and an
+unsexed row not used as a parent at all.
 
 ## Preparing your data
 
-The remaining real-world preprocessing usually comes down to (a)
-giving the file a header row, (b) remapping non-standard missing
-tokens, or (c) integerising string IDs. `--sep auto` removes the
-common "convert to TSV first" step.
+Common preprocessing comes down to (a) adding a header row,
+(b) remapping non-standard missing tokens, or (c) integerising
+string IDs. `--sep auto` handles delimiter routing automatically.
 
 ### PLINK `.fam` files
 
-A PLINK `.fam` is whitespace-separated, has six columns
-(`FID IID PAT MAT SEX PHENO`), no header, uses `0` for missing
-parents, and encodes sex as `1 = male, 2 = female`. Pedsum's
-`--sep auto` reads the whitespace fine — you only need to add a
-header and remap `0 → -1` in the parent columns:
+No header, `0` for missing parents, sex `1=male, 2=female`. Add a
+header and remap `0 → -1`:
 
 ```bash
 { printf 'FID IID PAT MAT SEX PHENO\n'; \
@@ -269,43 +249,30 @@ python pedigree_summary.py summarize \
     --plink-sex
 ```
 
-### CSV (comma-separated)
+### Non-TSV inputs (CSV, Excel)
 
-Pass directly — `--sep auto` will route through comma mode. If you
-want to be explicit, pass `--sep comma`. No conversion needed.
-
-If your CSV has quoted commas inside fields (rare for pedigree data
-but possible with text columns), the simple `tr ',' '\t'` substitution
-won't survive the quoting. In that case re-export through pandas:
+CSV: pass directly — `--sep auto` reads commas (or `--sep comma` to
+be explicit). For Excel, or CSVs with quoted commas inside fields,
+re-export through pandas:
 
 ```bash
-python -c "import pandas as pd; pd.read_csv('input.csv').to_csv('input.tsv', sep='\t', index=False)"
+python -c "import pandas as pd; pd.read_excel('input.xlsx').to_csv('input.tsv', sep='\t', index=False)"
 ```
 
 ### String IDs (`"P001"`, `"FAM01-003"`, …)
 
-The relationship enumerator requires integer IDs. Map them to ints
-once and keep a lookup table:
+The relationship enumerator requires integer IDs. Map them once and
+keep a lookup table:
 
 ```python
 import pandas as pd
 df = pd.read_csv("clinical.tsv", sep="\t", dtype=str)
 all_ids = pd.unique(df[["id", "mother", "father"]].values.ravel())
-all_ids = all_ids[all_ids != "-1"]
-lut = {sid: i for i, sid in enumerate(sorted(all_ids))}
+lut = {sid: i for i, sid in enumerate(sorted(all_ids[all_ids != "-1"]))}
 for col in ("id", "mother", "father"):
     df[col] = df[col].map(lambda x: lut.get(x, -1)).astype(int)
 df.to_csv("clinical_int.tsv", sep="\t", index=False)
 pd.Series(lut).to_csv("id_lookup.tsv", sep="\t")
-```
-
-### Excel (`.xlsx`)
-
-Open in Excel/LibreOffice and "Save As" → tab-delimited, or:
-
-```python
-import pandas as pd
-pd.read_excel("input.xlsx").to_csv("input.tsv", sep="\t", index=False)
 ```
 
 ## Large pedigrees
@@ -324,38 +291,10 @@ python pedigree_summary.py summarize \
 Once that pass succeeds, re-run without `--no-inbreeding
 --no-effective-size` to add F and the cheap Ne estimators.
 
-What "very large" means for each expensive code path (thresholds quoted
-from this README's inline notes — no new numbers are introduced here):
-
-- The F kernel logs a one-line INFO above `N=1,000,000` so naive runs
-  cannot silently hang (see Usage above).
-- Default pair counting uses `count_pairs_streaming` (scalar, `O(N)`
-  memory) and is unaffected by these limits at any pedigree size.
-- `--per-individual-pairs` opts into the pair-list path, which
-  materialises full pair lists and OOMs on *pair-dense* pedigrees with
-  `N > ~500K` (stallion-heavy livestock, large half-sib clusters). The
-  "pair-dense" qualifier is load-bearing — a million unrelated founders
-  will not OOM at 500K. The default streaming path is *not* affected by
-  this flag.
-- Within the `--per-individual-pairs` path only, the *experimental*
-  BFS engine auto-selects at `N >= 5M`. It has not been demonstrated to
-  beat the matrix engine at any size pedsum cares about — see open
-  [pedigree-graph#2](https://github.com/rwaples/pedigree-graph/issues/2)
-  and
-  [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3).
-  Without `--per-individual-pairs`, BFS is never reached.
-- `Ne_C` (opt-in via `--ne-coancestry`) can blow up RAM on `>~500K-row`
-  pedigrees because its kinship DP scales with the cumulative ancestor
-  set.
-
-These are documented opt-outs you type, not size-tiered defaults
-pedsum applies on your behalf.
-
 ## Troubleshooting
 
 | Error | Likely cause | Fix |
 |---|---|---|
-| `input appears to be CSV` | pinned `--sep tab` on a comma-separated file | drop the pinning (default `--sep auto` sniffs) or pass `--sep comma` |
 | `column 'id' must be integer-valued` | string/alphanumeric IDs | map to ints |
 | `sex column has N invalid value(s)` showing `'2'` | PLINK 1/2 encoding | add `--plink-sex` |
 | `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
@@ -364,20 +303,15 @@ pedsum applies on your behalf.
 
 ### Topological depth (`ped_depth`)
 
-The script **always computes** a topological-depth column called
-`ped_depth` (founders = 0, offspring = `max(parent_depth) + 1`).
-Since pedsum 0.4 the depth is sourced from `PedigreeGraph.generation`
-in the upstream `pedigree-graph` library — semantics are unchanged,
-output dtype is still `int32`, and it remains the grouping variable
-for `f_by_generation`, `gen_counts`, and the per-individual ancestor
-/ descendant columns. Inputs need not be in topological row order —
-pedsum re-sorts automatically (see "Row order" above). Only cycles or
-unreachable rows raise a `PedigreeError`.
+The script always computes a topological-depth column called
+`ped_depth` (founders = 0, offspring = `max(parent_depth) + 1`,
+dtype `int32`). It is the grouping variable for `f_by_generation`,
+`gen_counts`, and the per-individual ancestor/descendant columns.
 
-You do not need to supply a depth column at all. If your input
-already has a column named `ped_depth`, it is treated as a
-*user-supplied extra* (see Column preservation, below) — it is **not**
-trusted as ground truth and the script computes its own depth.
+You do not need to supply a depth column. If your input already has
+a column named `ped_depth`, it is treated as a *user-supplied extra*
+(see Column preservation below) — it is **not** trusted as ground
+truth and the script computes its own depth.
 
 ### Column preservation
 
@@ -403,46 +337,26 @@ id	sex	mother	father
 
 ## Output highlights
 
-The `summary.yaml` contains:
+Sections in `summary.yaml`:
 
-- `size_structure` — counts, generation depth, connected components.
-- `family_size` — sibship and per-person offspring distributions.
-- `mating_pairs` — mating-pair counts, children-per-pair distribution,
-  mate-count distributions, and effective pair count.
-- `relationship_summary` — unique related/unrelated pair counts,
-  related-pair density, closest-degree and relatives-by-degree
-  distributions, and within-generation related-pair density. These
-  pair-list-derived fields are exact for the matrix engine and marked
-  unavailable for the experimental BFS engine.
-- `lineage` — reproductive, terminal, and descendant distributions;
-  ancestor distributions are populated only with `--inbreeding`.
-- `founder_contribution` — founder descendant-path contribution and
-  effective founder count.
-- `founder_generation` — active founder lines and effective founder
-  contribution by generation, plus simple bottleneck minima. This
-  section is skipped on very large founder × individual products to
-  avoid memory blow-ups.
-- `components`, `sex_summary`, `generation_summary` — aggregate
-  component, sex-stratified, and depth-stratified summaries, including
-  generation-level offspring and mate-count distributions.
-- `pairs` — 23 named relationship codes (MZ, MO, FO, FS, MHS, PHS, GP,
-  Av, GGP, HAv, GAv, 1C, GGGP, HGAv, GGAv, H1C, 1C1R, G3GP, HGGAv,
-  G3Av, H1C1R, 1C2R, 2C) plus `PO = MO + FO` and `by_degree[0..5]`
-  rollup.
-- `inbreeding` — distribution of F (only when `--inbreeding`).
-- `effective_size` — scenario-level Ne from eight pedigree-based
-  estimators (`Ne_I`, `Ne_C`, `Ne_V`, `Ne_sr`, `Ne_iΔF`, `Ne_LTC`,
-  `Ne_H`, `Ne_CT`).  Each estimator emits its scalar `ne` plus a
-  per-generation (or per-transition) breakdown vector.  Only present
-  when `--effective-size` is passed; `Ne_C` carries `ne: null` unless
-  `--ne-coancestry` is also passed.
-- `individual.distributions` — mean/std/quartiles/`nz` (non-zero
-  count) for each per-individual numeric column.
+| Section | Contents |
+|---|---|
+| `size_structure` | counts, generation depth, connected components |
+| `family_size` | sibship and per-person offspring distributions |
+| `mating_pairs` | pair counts, children-per-pair, mate-count distributions, effective pair count |
+| `relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
+| `lineage` | reproductive, terminal, and descendant distributions (ancestor distributions only with `--inbreeding`) |
+| `founder_contribution` | founder descendant-path contribution + effective founder count |
+| `founder_generation` | active founder lines and effective founder contribution by generation, plus bottleneck minima (may be skipped on very large pedigrees) |
+| `components`, `sex_summary`, `generation_summary` | aggregate component, sex-stratified, and depth-stratified summaries |
+| `pairs` | 23 named relationship codes through degree 5 plus `PO = MO + FO` and `by_degree[0..5]` rollup |
+| `inbreeding` | distribution of F (only with `--inbreeding`) |
+| `effective_size` | scalar `ne` plus per-generation breakdown for eight estimators (`Ne_I`, `Ne_C`, `Ne_V`, `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`); `Ne_C` is null without `--ne-coancestry` |
+| `individual.distributions` | mean/std/quartiles/`nz` for each per-individual numeric column |
 
-Floats are rounded to 4 decimal places. When `--tsv` is passed, Ne
-scalar values also appear in `DIR/summary.pedigree.tsv` under the
-`effective_size_scalars` section (the per-generation vectors live only
-in the YAML, to keep the long-form TSV scannable).
+Floats are rounded to 4 decimal places. With `--tsv`, Ne scalar
+values also appear in `summary.pedigree.tsv` under
+`effective_size_scalars`; per-generation vectors stay YAML-only.
 
 ## Logging
 
@@ -451,28 +365,6 @@ in the YAML, to keep the long-form TSV scannable).
   diagnostics from the relationship enumerator.
 - `-q` / `--quiet`: warnings only.
 
-## Notes
+---
 
-- Both engines delegate to the `pedigree-graph` package; bug fixes
-  there propagate automatically on `pip install -U`.
-- For pedigrees with sparse/non-contiguous IDs the script
-  internally compacts to dense `0..n-1` before enumeration, so the
-  underlying machinery never allocates `max(id)+1`-sized arrays.
-- **Choosing an engine**:
-    - The `matrix` engine (default for n < 5M) uses sparse matrix
-      powers `A^k`. Fastest when its intermediate sparse products fit
-      in RAM.
-    - The `bfs` engine is **experimental** — auto-selected for
-      n ≥ 5M. It uses boolean (set-union) sparse matmul plus a parallel
-      numba kernel. Its scalability advantage at very large pedigrees
-      (where the matrix engine OOMs) is unverified — at n=2M the
-      matrix engine actually wins head-to-head (see open
-      [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3)).
-      The engine may change or be removed in any
-      `pedigree-graph` minor release; both pedsum's CLI warning and
-      the package's `FutureWarning` fire on selection.
-    - Both engines emit identical counts on non-inbred pedigrees. On
-      inbred pedigrees they disagree on cousin-style codes (`1C1R`,
-      `H1C1R`, `1C2R`, `2C`): matrix counts *paths* (multiplicity),
-      bfs counts *distinct shared ancestors*. The YAML
-      `pairs_engine` field records which engine produced each summary.
+Internals, engine semantics, and performance thresholds: see [DESIGN.md](DESIGN.md).
