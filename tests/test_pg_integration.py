@@ -9,6 +9,7 @@ pin is later bumped:
 - The compact PG preserves sex (catches a silent regression of the
   ``from_arrays(sex=...)`` extension).
 """
+
 from __future__ import annotations
 
 import sys
@@ -73,7 +74,8 @@ def test_sex_preserved_through_compaction():
     # Compact ordering matches input ordering (compaction preserves
     # row order, only IDs are remapped to 0..n-1).
     np.testing.assert_array_equal(
-        pg.sex.astype(np.int64), df["sex"].to_numpy().astype(np.int64),
+        pg.sex.astype(np.int64),
+        df["sex"].to_numpy().astype(np.int64),
     )
     # Spot-check the male/female totals match (a silent zeros default
     # would make pg.sex.sum() == 0).

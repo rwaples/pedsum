@@ -13,6 +13,7 @@ The unit test for ``_split_summary`` + ``_deep_merge_summary`` imports
 pedigree_summary as a module to exercise the splitter on a fabricated
 list-of-dict section.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -28,7 +29,8 @@ from conftest import run_pedsum as _run
 # directly. Doing this via importlib avoids requiring an editable install
 # of pedsum as a package (which the rest of the suite does not assume).
 _spec = importlib.util.spec_from_file_location(
-    "pedigree_summary", REPO / "pedigree_summary.py",
+    "pedigree_summary",
+    REPO / "pedigree_summary.py",
 )
 _ps = importlib.util.module_from_spec(_spec)
 sys.modules["pedigree_summary"] = _ps
@@ -96,10 +98,17 @@ def test_per_generation_fields_preserved_in_extra(tmp_path):
 def test_empty_categories_omitted(tmp_path):
     """With both opt-outs, popgen and inbreeding are absent (not present as empty)."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--no-inbreeding", "--no-effective-size",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--no-inbreeding",
+            "--no-effective-size",
+        ]
+    )
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
     assert "popgen" not in ped
@@ -126,7 +135,8 @@ def test_list_of_dict_split_zips_by_index():
     slim, extra = _ps._split_summary(nested)
     # Slim rows keep only the slim_keys ("gen", "n").
     assert slim["strata"]["generation_summary"] == [
-        {"gen": 0, "n": 50}, {"gen": 1, "n": 75},
+        {"gen": 0, "n": 50},
+        {"gen": 1, "n": 75},
     ]
     # Extra rows carry the residue, aligned by index.
     extra_rows = extra["strata"]["generation_summary"]
@@ -165,10 +175,7 @@ def test_schema_no_overlap_between_slim_and_extra(tmp_path):
         slim_leaves = set(_leaf_paths(slim.get(top, {}), top))
         extra_leaves = set(_leaf_paths(extra.get(top, {}), top))
         overlap = slim_leaves & extra_leaves
-        assert not overlap, (
-            f"{top}: {len(overlap)} leaf(s) appear in both slim and extra: "
-            f"{sorted(overlap)[:5]}"
-        )
+        assert not overlap, f"{top}: {len(overlap)} leaf(s) appear in both slim and extra: {sorted(overlap)[:5]}"
 
 
 def test_known_yaml_drops_absent_from_both_files(tmp_path):

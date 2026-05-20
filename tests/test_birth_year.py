@@ -11,6 +11,7 @@ test materialises a small augmented TSV in ``tmp_path`` by deriving
 edge topologically consistent (child.birth_year > parent.birth_year by
 construction) and yields ~5 generations of cohorts for Hill to chew on.
 """
+
 from __future__ import annotations
 
 import csv
@@ -43,10 +44,16 @@ def _write_augmented_pedigree(dest: Path) -> Path:
 def test_hill_collapses_without_birth_year(tmp_path):
     """Baseline: without ``--birth-year-col`` Hill collapses to Ne_V."""
     base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(base),
+            "--effective-size",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     hill = _load_yaml(base)["pedigree"]["popgen"]["effective_size"]["ne_hill_overlapping"]
@@ -61,10 +68,18 @@ def test_hill_populated_with_birth_year(tmp_path):
     """``--birth-year-col`` feeds birth years through so Hill uses cohorts."""
     pedigree = _write_augmented_pedigree(tmp_path / "augmented.tsv")
     base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(pedigree), "--out", str(base),
-        "--effective-size", "--birth-year-col", "birth_year",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(pedigree),
+            "--out",
+            str(base),
+            "--effective-size",
+            "--birth-year-col",
+            "birth_year",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     hill = _load_yaml(base)["pedigree"]["popgen"]["effective_size"]["ne_hill_overlapping"]
@@ -82,10 +97,18 @@ def test_hill_populated_with_birth_year(tmp_path):
 def test_birth_year_missing_column_errors(tmp_path):
     """Naming a non-existent column fails with the standard missing-cols error."""
     base = tmp_path / "p"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(base),
-        "--effective-size", "--birth-year-col", "does_not_exist",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(base),
+            "--effective-size",
+            "--birth-year-col",
+            "does_not_exist",
+        ]
+    )
     assert res.returncode == 1
     assert "missing required columns" in res.stderr
     assert "does_not_exist" in res.stderr

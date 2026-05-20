@@ -4,6 +4,7 @@ Pin that the default summarize path leaves the per-individual
 ``n_ancestors`` distribution and the lineage/generation ancestor
 aggregates empty, and that ``--inbreeding`` flips them on.
 """
+
 from __future__ import annotations
 
 import sys

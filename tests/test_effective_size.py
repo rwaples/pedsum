@@ -8,6 +8,7 @@ argparse ``--ne-threads`` guard.
 Pedsum 0.7: ``--effective-size`` is on by default; ``--no-effective-size``
 opts out. Long-form TSV (``summary.pedigree.tsv``) is opt-in via ``--tsv``.
 """
+
 from __future__ import annotations
 
 from conftest import (
@@ -30,10 +31,17 @@ from conftest import (
 def test_no_effective_size_omits_keys(tmp_path):
     """``--no-effective-size`` skips the Ne sections entirely."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--no-effective-size", "--tsv",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--no-effective-size",
+            "--tsv",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     ped = _load_yaml(out_dir)["pedigree"]
@@ -59,10 +67,16 @@ def test_default_run_populates_effective_size(tmp_path):
 def test_effective_size_without_inbreeding_works(tmp_path):
     """Decoupling check: ``--no-inbreeding`` alone keeps Ne on, omits F."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--no-inbreeding",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--no-inbreeding",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     ped = _load_yaml(out_dir)["pedigree"]
@@ -90,10 +104,16 @@ def test_effective_size_with_inbreeding(tmp_path):
 def test_ne_coancestry_opts_in(tmp_path):
     """``--ne-coancestry`` enables the coancestry-based Ne computation."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--ne-coancestry",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--ne-coancestry",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     es = _load_yaml(out_dir)["pedigree"]["popgen"]["effective_size"]
@@ -111,9 +131,16 @@ def test_ne_coancestry_opts_in(tmp_path):
 def test_tsv_split_holds(tmp_path):
     """With ``--tsv``, only the eight scalar Ne values appear in the long-form TSV."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--tsv",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--tsv",
+        ]
+    )
     assert res.returncode == 0, res.stderr
 
     tsv_rows = _load_tsv(out_dir)
@@ -126,10 +153,17 @@ def test_tsv_split_holds(tmp_path):
 def test_warning_for_orphaned_ne_flags(tmp_path):
     """``--ne-coancestry`` alongside ``--no-effective-size`` warns on stderr."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--no-effective-size", "--ne-coancestry",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--no-effective-size",
+            "--ne-coancestry",
+        ]
+    )
     assert res.returncode == 0
     assert "have no effect under --no-effective-size" in res.stderr
 
@@ -137,10 +171,17 @@ def test_warning_for_orphaned_ne_flags(tmp_path):
 def test_ne_threads_zero_argparse_error(tmp_path):
     """``--ne-threads 0`` is rejected by argparse and writes nothing."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--ne-threads", "0",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--ne-threads",
+            "0",
+        ]
+    )
     assert res.returncode != 0
     assert "--ne-threads" in res.stderr
     # Nothing should be written when argparse rejects.
@@ -150,8 +191,15 @@ def test_ne_threads_zero_argparse_error(tmp_path):
 def test_ne_threads_accepts_positive_int(tmp_path):
     """``--ne-threads`` accepts a positive integer and runs to completion."""
     out_dir = tmp_path / "out"
-    res = _run([
-        "summarize", "--in", str(EXAMPLE), "--out", str(out_dir),
-        "--ne-threads", "4",
-    ])
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(out_dir),
+            "--ne-threads",
+            "4",
+        ]
+    )
     assert res.returncode == 0, res.stderr

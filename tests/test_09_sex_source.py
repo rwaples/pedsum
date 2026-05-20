@@ -6,6 +6,7 @@ Verifies the four sex_source categories end-to-end:
 - ``imputed_from_role`` — asserted but topology disagreed; override fired.
 - ``unresolved`` — still SEX_UNKNOWN after both imputation passes.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -24,25 +25,36 @@ def _mixed_pedigree(path):
     id=7 input F (used as child).
     id=8 unsexed orphan -> unresolved (requires --allow-missing-sex).
     """
-    return _write_ped(path, [
-        {"id": 1, "sex": "M", "mother": -1, "father": -1},
-        {"id": 2, "sex": "F", "mother": -1, "father": -1},
-        {"id": 5, "sex": "",  "mother": -1, "father": -1},
-        {"id": 6, "sex": "M", "mother": -1, "father": -1},
-        {"id": 8, "sex": "",  "mother": -1, "father": -1},
-        {"id": 3, "sex": "M", "mother": 5,  "father": 1},
-        {"id": 7, "sex": "F", "mother": 6,  "father": 1},
-    ])
+    return _write_ped(
+        path,
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1},
+            {"id": 5, "sex": "", "mother": -1, "father": -1},
+            {"id": 6, "sex": "M", "mother": -1, "father": -1},
+            {"id": 8, "sex": "", "mother": -1, "father": -1},
+            {"id": 3, "sex": "M", "mother": 5, "father": 1},
+            {"id": 7, "sex": "F", "mother": 6, "father": 1},
+        ],
+    )
 
 
 def test_annotated_tsv_has_sex_source_column(tmp_path):
     """Summarize emits a per-row sex_source column in annotated.tsv.gz."""
     ped = _mixed_pedigree(tmp_path / "ped.tsv")
     out_dir = tmp_path / "out"
-    r = run_pedsum([
-        "summarize", "--in", str(ped), "--out", str(out_dir),
-        "--allow-missing-sex", "--no-inbreeding", "--no-effective-size",
-    ])
+    r = run_pedsum(
+        [
+            "summarize",
+            "--in",
+            str(ped),
+            "--out",
+            str(out_dir),
+            "--allow-missing-sex",
+            "--no-inbreeding",
+            "--no-effective-size",
+        ]
+    )
     assert r.returncode == 0, r.stderr
     with gzip.open(out_dir / "annotated.tsv.gz", "rt") as fh:
         ann = pd.read_csv(fh, sep="\t")
@@ -58,9 +70,16 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
     """Validate emits sex_source in validate.tsv.gz."""
     ped = _mixed_pedigree(tmp_path / "ped.tsv")
     out_dir = tmp_path / "out"
-    r = run_pedsum([
-        "validate", "--in", str(ped), "--out", str(out_dir), "--allow-missing-sex",
-    ])
+    r = run_pedsum(
+        [
+            "validate",
+            "--in",
+            str(ped),
+            "--out",
+            str(out_dir),
+            "--allow-missing-sex",
+        ]
+    )
     assert r.returncode == 0, r.stderr
     with gzip.open(out_dir / "validate.tsv.gz", "rt") as fh:
         fixed = pd.read_csv(fh, sep="\t", dtype=str)
@@ -77,36 +96,47 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
 
 def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
     """--no-override-asserted-sex restores 0.8's hard-block on sex/role contradictions."""
-    ped = _write_ped(tmp_path / "ped.tsv", [
-        {"id": 1, "sex": "M", "mother": -1, "father": -1},
-        {"id": 2, "sex": "M", "mother": -1, "father": -1},  # asserted M used as mother
-        {"id": 3, "sex": "F", "mother": 2,  "father": 1},
-    ])
+    ped = _write_ped(
+        tmp_path / "ped.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},  # asserted M used as mother
+            {"id": 3, "sex": "F", "mother": 2, "father": 1},
+        ],
+    )
     out_dir = tmp_path / "out"
-    r = run_pedsum([
-        "summarize", "--in", str(ped), "--out", str(out_dir),
-        "--no-override-asserted-sex", "--no-inbreeding", "--no-effective-size",
-    ])
+    r = run_pedsum(
+        [
+            "summarize",
+            "--in",
+            str(ped),
+            "--out",
+            str(out_dir),
+            "--no-override-asserted-sex",
+            "--no-inbreeding",
+            "--no-effective-size",
+        ]
+    )
     assert r.returncode == 1, r.stderr
     assert "sex_role_consistency" in r.stderr
 
 
 def test_override_count_in_grouped_summary(tmp_path):
     """Validate's grouped stderr summary shows PASS (N overridden from role)."""
-    ped = _write_ped(tmp_path / "ped.tsv", [
-        {"id": 1, "sex": "M", "mother": -1, "father": -1},
-        {"id": 2, "sex": "M", "mother": -1, "father": -1},  # overridden to F
-        {"id": 3, "sex": "F", "mother": 2,  "father": 1},
-    ])
+    ped = _write_ped(
+        tmp_path / "ped.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},  # overridden to F
+            {"id": 3, "sex": "F", "mother": 2, "father": 1},
+        ],
+    )
     out_dir = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir)])
     assert r.returncode == 0, r.stderr
     # One row overrides; expect "PASS (1 overridden from role)" on the
     # sex_role_consistency line in the grouped summary.
-    lines = [
-        line for line in r.stderr.splitlines()
-        if "sex consistent with parent role" in line
-    ]
+    lines = [line for line in r.stderr.splitlines() if "sex consistent with parent role" in line]
     assert lines, "expected sex_role_consistency line in grouped summary"
     assert "PASS" in lines[0]
     assert "1 overridden from role" in lines[0]
