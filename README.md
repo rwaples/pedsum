@@ -1,5 +1,7 @@
 # pedsum — standalone pedigree summary CLI
 
+Source: <https://github.com/rwaples/pedsum>
+
 A single-file Python CLI for validating pedigrees and producing
 machine-readable summaries: size, structure, family-size distribution,
 relationship-pair counts (23 named codes through degree 5 plus
@@ -14,9 +16,25 @@ distribution, and per-individual outputs.
 
 ## Install
 
-Python ≥ 3.13 required (matches `pedigree-graph`). Activate your env
-(`conda activate myenv` or `source venv/bin/activate`) and install
-dependencies:
+Python ≥ 3.13 required (matches `pedigree-graph`).
+
+### Get the code
+
+```bash
+git clone https://github.com/rwaples/pedsum.git
+cd pedsum
+```
+
+pedsum is distributed as a single script (`pedigree_summary.py`) — it
+is not on PyPI. Run it directly from the cloned directory.
+
+Upgrading from an earlier version? See [CHANGELOG.md](CHANGELOG.md) for
+breaking changes per release.
+
+### Install dependencies
+
+Activate your env (`conda activate myenv` or `source venv/bin/activate`)
+and install:
 
 **conda / mamba:**
 
@@ -68,21 +86,6 @@ liability`. Only the first four are required; `generation` and
 also adds its own `ped_depth` column (topological depth from founders)
 and the per-individual derived columns — see "Topological depth" and
 "Column preservation" below.
-
-### Migrating from 0.6 / 0.7 / 0.8
-
-| Before | 0.9 |
-|---|---|
-| (0.6) `--out my_run` (basename) | `--out my_run/` (directory) |
-| (0.6) omit `--inbreeding` to skip F | pass `--no-inbreeding` to skip F |
-| (0.6) omit `--effective-size` to skip Ne | pass `--no-effective-size` to skip Ne |
-| (0.6) `--burden` | `--per-individual-pairs` |
-| (0.6) `--single-file` | removed (two-YAML split is always written) |
-| (0.6) `--engine` / `--bfs-threshold` | removed (matrix engine only) |
-| (0.6) `--zero-as-missing` | removed (preprocess input) |
-| (0.6) `--out X` then read `X.summary.pedigree.tsv` | pass `--tsv` then read `X/summary.pedigree.tsv` |
-| (0.7) `--allow-unknown-sex` | `--allow-missing-sex` (also tolerates `sex_role_ambiguity`; fixed-TSV sex column normalises to `-1`) |
-| (0.8) `sex_role_consistency` hard-blocked asserted-M-used-as-mother rows | Auto-fixed by default via the new override pass; pass `--no-override-asserted-sex` to restore the hard-block. New `sex_source` per-row column on `annotated.tsv.gz` + `validate.tsv.gz` audits each row's provenance. |
 
 ## Usage
 
@@ -305,6 +308,45 @@ import pandas as pd
 pd.read_excel("input.xlsx").to_csv("input.tsv", sep="\t", index=False)
 ```
 
+## Large pedigrees
+
+pedsum's defaults include the most expensive computations in the tool
+— per-individual inbreeding (F) and the seven cheap effective-size
+estimators. For very large pedigrees, the recommended first pass skips
+both and produces size + structure only:
+
+```bash
+python pedigree_summary.py summarize \
+    --in cohort.tsv --out cohort/ \
+    --no-inbreeding --no-effective-size
+```
+
+Once that pass succeeds, re-run without `--no-inbreeding
+--no-effective-size` to add F and the cheap Ne estimators.
+
+What "very large" means for each expensive code path (thresholds quoted
+from this README's inline notes — no new numbers are introduced here):
+
+- The F kernel logs a one-line INFO above `N=1,000,000` so naive runs
+  cannot silently hang (see Usage above).
+- `--per-individual-pairs` requires the matrix engine to materialise
+  full pair lists, which OOMs on *pair-dense* pedigrees with `N >
+  ~500K` (stallion-heavy livestock, large half-sib clusters). The
+  "pair-dense" qualifier is load-bearing — a million unrelated founders
+  will not OOM at 500K.
+- `Ne_C` (opt-in via `--ne-coancestry`) can blow up RAM on `>~500K-row`
+  pedigrees because its kinship DP scales with the cumulative ancestor
+  set.
+- The BFS engine auto-selects at `N >= 5M` but is *experimental* and
+  has not been demonstrated to beat the matrix engine at any size
+  pedsum cares about (see open
+  [pedigree-graph#2](https://github.com/rwaples/pedigree-graph/issues/2)
+  and
+  [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3)).
+
+These are documented opt-outs you type, not size-tiered defaults
+pedsum applies on your behalf.
+
 ## Troubleshooting
 
 | Error | Likely cause | Fix |
@@ -420,8 +462,9 @@ in the YAML, to keep the long-form TSV scannable).
       n ≥ 5M. It uses boolean (set-union) sparse matmul plus a parallel
       numba kernel. Its scalability advantage at very large pedigrees
       (where the matrix engine OOMs) is unverified — at n=2M the
-      matrix engine actually wins head-to-head (see
-      `STATUS.md`). The engine may change or be removed in any
+      matrix engine actually wins head-to-head (see open
+      [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3)).
+      The engine may change or be removed in any
       `pedigree-graph` minor release; both pedsum's CLI warning and
       the package's `FutureWarning` fire on selection.
     - Both engines emit identical counts on non-inbred pedigrees. On
