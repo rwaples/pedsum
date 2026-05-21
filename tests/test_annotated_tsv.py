@@ -48,13 +48,13 @@ def test_annotated_tsv_realigns_to_topological_order(tmp_path):
 
 
 def test_annotated_tsv_renames_colliding_input_column(tmp_path):
-    """Input ``n_descendants`` column → kept as ``n_descendants_input``."""
+    """Input ``n_descendant_paths`` column → kept as ``n_descendant_paths_input``."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1, "n_descendants": "alpha"},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1, "n_descendants": "beta"},
-            {"id": 3, "sex": "M", "mother": 2, "father": 1, "n_descendants": "gamma"},
+            {"id": 1, "sex": "M", "mother": -1, "father": -1, "n_descendant_paths": "alpha"},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1, "n_descendant_paths": "beta"},
+            {"id": 3, "sex": "M", "mother": 2, "father": 1, "n_descendant_paths": "gamma"},
         ],
     )
     out_dir = tmp_path / "out"
@@ -72,20 +72,20 @@ def test_annotated_tsv_renames_colliding_input_column(tmp_path):
     assert r.returncode == 0, r.stderr
     ann = load_annotated_tsv_gz(out_dir)
     # Both columns present: the derived integer column and the renamed input.
-    assert "n_descendants" in ann.columns
-    assert "n_descendants_input" in ann.columns
+    assert "n_descendant_paths" in ann.columns
+    assert "n_descendant_paths_input" in ann.columns
     by_id = dict(
-        zip(ann["id"].tolist(), ann["n_descendants_input"].tolist(), strict=True),
+        zip(ann["id"].tolist(), ann["n_descendant_paths_input"].tolist(), strict=True),
     )
     assert by_id == {1: "alpha", 2: "beta", 3: "gamma"}
-    # Derived column carries actual descendant counts (founders have 1, child has 0).
-    derived = dict(zip(ann["id"].tolist(), ann["n_descendants"].tolist(), strict=True))
+    # Derived column carries actual descendant-path counts (founders have 1, child has 0).
+    derived = dict(zip(ann["id"].tolist(), ann["n_descendant_paths"].tolist(), strict=True))
     assert derived[3] == 0  # child has no descendants
     assert derived[1] >= 1  # both founders have at least one descendant
     assert derived[2] >= 1
     # Warning logged for the rename.
-    assert "n_descendants" in r.stderr
-    assert "n_descendants_input" in r.stderr
+    assert "n_descendant_paths" in r.stderr
+    assert "n_descendant_paths_input" in r.stderr
 
 
 def test_annotated_tsv_renames_component_id_collision(tmp_path):

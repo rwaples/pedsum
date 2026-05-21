@@ -81,18 +81,18 @@ def test_ne_coancestry_absent_when_not_requested(tmp_path):
     assert "ne_coancestry" not in extra_es
 
 
-def test_per_generation_fields_preserved_in_extra(tmp_path):
-    """``generation_summary[i]`` per-gen scalars survive — they're not duplicates."""
+def test_per_depth_fields_preserved_in_extra(tmp_path):
+    """``depth_summary[i]`` per-depth scalars survive — they're not duplicates."""
     out_dir = tmp_path / "out"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
-    extra_gen = _load_extra(out_dir)["pedigree"]["strata"]["generation_summary"]
-    assert isinstance(extra_gen, list)
-    assert len(extra_gen) > 0
-    # Per-generation scalars (not duplicates of global inbreeding.mean_F etc.):
-    sample = extra_gen[0]
+    extra_depth = _load_extra(out_dir)["pedigree"]["strata"]["depth_summary"]
+    assert isinstance(extra_depth, list)
+    assert len(extra_depth) > 0
+    # Per-depth scalars (not duplicates of global inbreeding.mean_F etc.):
+    sample = extra_depth[0]
     for key in ("n_male", "n_female", "n_inbred", "mean_F", "max_F"):
-        assert key in sample, f"per-gen {key} missing from extra.strata.generation_summary[0]"
+        assert key in sample, f"per-depth {key} missing from extra.strata.depth_summary[0]"
 
 
 def test_empty_categories_omitted(tmp_path):
@@ -126,20 +126,20 @@ def test_list_of_dict_split_zips_by_index():
     """A list-of-dict section splits row-by-row; deep-merge zips by index."""
     nested = {
         "strata": {
-            "generation_summary": [
-                {"gen": 0, "n": 50, "mean_F": 0.0, "n_inbred": 0},
-                {"gen": 1, "n": 75, "mean_F": 0.012, "n_inbred": 5},
+            "depth_summary": [
+                {"depth": 0, "n": 50, "mean_F": 0.0, "n_inbred": 0},
+                {"depth": 1, "n": 75, "mean_F": 0.012, "n_inbred": 5},
             ],
         },
     }
     slim, extra = _ps._split_summary(nested)
-    # Slim rows keep only the slim_keys ("gen", "n").
-    assert slim["strata"]["generation_summary"] == [
-        {"gen": 0, "n": 50},
-        {"gen": 1, "n": 75},
+    # Slim rows keep only the slim_keys ("depth", "n").
+    assert slim["strata"]["depth_summary"] == [
+        {"depth": 0, "n": 50},
+        {"depth": 1, "n": 75},
     ]
     # Extra rows carry the residue, aligned by index.
-    extra_rows = extra["strata"]["generation_summary"]
+    extra_rows = extra["strata"]["depth_summary"]
     assert extra_rows[0] == {"mean_F": 0.0, "n_inbred": 0}
     assert extra_rows[1] == {"mean_F": 0.012, "n_inbred": 5}
     # Round-trip: deep-merge restores the original.
@@ -186,9 +186,9 @@ def test_known_yaml_drops_absent_from_both_files(tmp_path):
     slim = _load_yaml(out_dir)
     extra = _load_extra(out_dir)
 
-    # pairs.by_degree must be gone from both files.
-    slim_pairs = slim["pedigree"]["relatedness"]["pairs"]
-    extra_pairs = extra["pedigree"].get("relatedness", {}).get("pairs", {})
+    # relationship_pairs.by_degree must be gone from both files.
+    slim_pairs = slim["pedigree"]["relatedness"]["relationship_pairs"]
+    extra_pairs = extra["pedigree"].get("relatedness", {}).get("relationship_pairs", {})
     assert "by_degree" not in slim_pairs
     assert "by_degree" not in extra_pairs
 

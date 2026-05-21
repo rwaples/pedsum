@@ -2,10 +2,10 @@
 
 The subprocess test pins the CLI contract (no annotated.tsv.gz written,
 INFO lines on stderr). The direct unit test pins the headline branches
-of ``_apply_safe_attempt`` — size_structure / pairs / sex_summary /
-inbreeding / ind_data.distributions. Sections deliberately not covered:
-family_size, mating_pairs, lineage, founder_contribution,
-founder_generation, components, generation_summary.
+of ``_apply_safe_attempt`` — size_structure / relationship_pairs /
+sex_summary / inbreeding / ind_data.distributions. Sections deliberately
+not covered: sibship_size, mating_pairs, reproduction, genealogy,
+founder_contribution, founder_summary, components, depth_summary.
 """
 
 from __future__ import annotations
@@ -55,10 +55,10 @@ def test_apply_safe_attempt_headline_branches():
         "n_total": 100,
         "size_structure": {
             "next_components": [3, 7],
-            "gen_counts": [2, 6],
+            "depth_counts": [2, 6],
             "largest_component": 4,
         },
-        "pairs": {"by_degree": {"1": 3, "2": 12}, "FS": 2},
+        "relationship_pairs": {"by_degree": {"1": 3, "2": 12}, "FS": 2},
         "sex_summary": {
             "M": {"n": 3, "n_founders": 3},
             "F": {"n": 10, "n_founders": 2},
@@ -80,16 +80,16 @@ def test_apply_safe_attempt_headline_branches():
 
     ps._apply_safe_attempt(ped_data, ind_data, min_cell=5)
 
-    # size_structure: small components dropped; small gen counts nulled;
+    # size_structure: small components dropped; small depth counts nulled;
     # small largest_component nulled.
     assert ped_data["size_structure"]["next_components"] == [7]
-    assert ped_data["size_structure"]["gen_counts"] == [None, 6]
+    assert ped_data["size_structure"]["depth_counts"] == [None, 6]
     assert ped_data["size_structure"]["largest_component"] is None
 
-    # pairs: small by_degree buckets and small bare counts nulled.
-    assert ped_data["pairs"]["by_degree"]["1"] is None
-    assert ped_data["pairs"]["by_degree"]["2"] == 12
-    assert ped_data["pairs"]["FS"] is None
+    # relationship_pairs: small by_degree buckets and small bare counts nulled.
+    assert ped_data["relationship_pairs"]["by_degree"]["1"] is None
+    assert ped_data["relationship_pairs"]["by_degree"]["2"] == 12
+    assert ped_data["relationship_pairs"]["FS"] is None
 
     # sex_summary: M (n=3 < min_cell) nulls everything except n;
     # F (n=10) enters the else branch and nulls n_founders=2 (< min_cell).

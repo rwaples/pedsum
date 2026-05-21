@@ -7,6 +7,10 @@ collaborator-facing surface; this file is for maintainers.
 
 See [docs/adr/0001-collaborator-cli-redesign.md](docs/adr/0001-collaborator-cli-redesign.md).
 
+## Output schema
+
+Output schema follows [CONTEXT.md](CONTEXT.md) as of 0.10. The glossary fixes section names, key names, and the convention for distribution naming (`<noun>_count` / `<noun>_count_hist` / `<noun>_count_<sex>`). When extending the output, add the term to CONTEXT.md first, then emit keys that match it.
+
 ## Flag and behavior version history
 
 See [CHANGELOG.md](CHANGELOG.md). Notable:

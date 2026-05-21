@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.10.0 — output schema renamed to match CONTEXT.md glossary
+
+**Breaking** — `summary.yaml`, `summary.extra.yaml`, `summary.pedigree.tsv` and `annotated.tsv.gz` all rename sections, keys, and per-individual columns to match the canonical terminology fixed in [CONTEXT.md](CONTEXT.md). The flat dict that feeds both YAML and long-form TSV is rewritten, so TSV column headers change too.
+
+### Behavior change (separate from rename)
+
+- `reproduction.mate_count_male` / `reproduction.mate_count_female` are summary-stats distributions over **all** males / all females respectively (zero-included for the unmated). The previous fields `mating_pairs.male_mate_count` / `female_mate_count` summed only over parents-with-children. Means, quantiles, and totals will shift. Use `n_mates == 0` count if you want the old denominator.
+
+### Section renames
+
+| 0.9 | 0.10 |
+|---|---|
+| `pedigree.demography.family_size` | `pedigree.demography.sibship_size` (per-Sibship stats only; per-individual contents moved out) |
+| `pedigree.lineage.lineage` | split into `pedigree.reproduction.reproduction` and `pedigree.genealogy.genealogy` |
+| `pedigree.lineage.founder_generation` | `pedigree.founders.founder_summary` |
+| `pedigree.lineage.founder_contribution` | `pedigree.founders.founder_contribution` |
+| `pedigree.relatedness.pairs` | `pedigree.relatedness.relationship_pairs` |
+| `pedigree.strata.generation_summary` | `pedigree.strata.depth_summary` |
+
+### Field renames (selected)
+
+| 0.9 | 0.10 |
+|---|---|
+| `size_structure.gen_counts` | `size_structure.depth_counts` |
+| `family_size.n_families` | `sibship_size.n_sibships` |
+| `family_size.person_dist*` | `reproduction.offspring_count_hist*` (now over all individuals) |
+| `family_size.frac_with_full_sib` | `reproduction.frac_with_full_sib` (same denominator) |
+| `lineage.offspring` | `reproduction.offspring_count` |
+| `lineage.mates` | `reproduction.mate_count` |
+| `lineage.descendants` | `genealogy.descendant_paths` |
+| `lineage.ancestors` | `genealogy.distinct_ancestors` |
+| `founder_contribution.descendants_per_founder` | `founder_contribution.descendant_paths_per_founder` |
+| `founder_generation.by_generation[*].gen` | `founder_summary.by_depth[*].depth` |
+| `founder_generation.by_generation[*].founder_lines_per_individual` | `founder_summary.by_depth[*].founder_ancestors` |
+| `founder_generation.bottleneck.min_active_generations` | `founder_summary.bottleneck.min_active_depths` |
+| `founder_generation.bottleneck.min_effective_generations` | `founder_summary.bottleneck.min_effective_depths` |
+| `relationship_summary.n_possible_pairs` | `relationship_summary.n_individual_pairs` |
+| `relationship_summary.related_pair_density_by_generation[*].gen` | `relationship_summary.related_pair_density_by_depth[*].depth` |
+| `pairs_engine` (sibling of `pairs`) | folded into `relationship_pairs.engine` |
+| `generation_summary[*].gen` | `depth_summary[*].depth` |
+| `sex_summary.<sex>.n_without_children` | `sex_summary.<sex>.n_terminal` |
+| upstream `ne_inbreeding.n_generations_used` (and `ne_caballero_toro`) | normalised to `n_depths_used` inside pedsum |
+
+### Fields dropped
+
+- `mating_pairs.female_mate_count`, `male_mate_count`, `n_females_with_multiple_mates`, `n_males_with_multiple_mates` (per-individual mate-count stats moved to `reproduction:` as `mate_count` / `mate_count_male` / `mate_count_female`).
+- `family_size.mates_female_mean`, `mates_male_mean` (derivable from `reproduction.mate_count`).
+- `founder_contribution.descendant_count_semantics` (the new field names carry the semantics).
+
+### Per-individual column renames in `annotated.tsv.gz`
+
+| 0.9 | 0.10 |
+|---|---|
+| `n_descendants` | `n_descendant_paths` (path counts; same values) |
+| `n_ancestors` | `n_distinct_ancestors` (distinct-individual counts; same values) |
+| — | `n_founder_ancestors` (new — count of distinct **Founder Ancestors** per individual) |
+
+### Migration
+
+- Zero downstream consumers parse pedsum YAML/TSV today (verified against fitACE and simACE). No grace period is provided.
+- If you have scripts that read these outputs, rewrite the paths per the tables above. A complete diff of expected keys lives in `tests/test_07_redesign.py` and `tests/test_summary_split.py`.
+
 ## 0.9.0 — 2026-05-19 — sex-from-role override + `sex_source` per-row audit column
 
 Breaking. Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)

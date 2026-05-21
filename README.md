@@ -2,11 +2,12 @@
 
 Source: <https://github.com/rwaples/pedsum>
 
-A Python command line tool for summarizing and validating pedigrees. 
-Reports the size, structure, family-size distribution,
-relationship-pair counts (up to degree 5), mating-pair structure, founder contributions,
-component/lineage/sex/generation aggregates, and per-individual
-statistics.
+A Python command line tool for summarizing and validating pedigrees.
+Reports the size, structure, sibship-size distribution, relationship-pair
+counts (up to degree 5), mating-pair structure, founder contributions,
+per-individual reproduction and genealogy aggregates, depth- and
+sex-stratified summaries, and per-individual statistics. Output
+terminology follows [CONTEXT.md](CONTEXT.md).
 
 Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package for relationship-pair detection.
 
@@ -106,7 +107,7 @@ python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
 | File | When | Contents |
 |---|---|---|
 | `summary.yaml` | always | slim categorised summary (~500 lines) |
-| `summary.extra.yaml` | always | per-generation / per-cohort arrays + full per-individual quantiles |
+| `summary.extra.yaml` | always | per-depth / per-cohort arrays + full per-individual quantiles |
 | `annotated.tsv.gz` | always (unless `--safe-attempt`) | input pedigree + per-individual columns |
 | `summary.pedigree.tsv` | with `--tsv` | long-form pedigree-level summary |
 | `summary.individual.tsv` | with `--tsv` | long-form per-individual distribution |
@@ -305,8 +306,9 @@ Once that pass succeeds, re-run without `--no-inbreeding
 
 The script always computes a topological-depth column called
 `ped_depth` (founders = 0, offspring = `max(parent_depth) + 1`,
-dtype `int32`). It is the grouping variable for `f_by_generation`,
-`gen_counts`, and the per-individual ancestor/descendant columns.
+dtype `int32`). It is the grouping variable for `depth_summary`,
+`depth_counts`, and the per-individual `n_distinct_ancestors` /
+`n_descendant_paths` / `n_founder_ancestors` columns.
 
 You do not need to supply a depth column. If your input already has
 a column named `ped_depth`, it is treated as a *user-supplied extra*
@@ -337,26 +339,29 @@ id	sex	mother	father
 
 ## Output highlights
 
-Sections in `summary.yaml`:
+`summary.yaml` is organised under the categories defined by `SUMMARY_SCHEMA`. Every key follows the glossary in [CONTEXT.md](CONTEXT.md) — see that document for term definitions and the naming convention (`n_<noun>` for per-individual columns, `<noun>_count` for summary-stats distributions, `<noun>_count_hist` for binned PMFs).
 
-| Section | Contents |
+| Category → Section | Contents |
 |---|---|
-| `size_structure` | counts, generation depth, connected components |
-| `family_size` | sibship and per-person offspring distributions |
-| `mating_pairs` | pair counts, children-per-pair, mate-count distributions, effective pair count |
-| `relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
-| `lineage` | reproductive, terminal, and descendant distributions (ancestor distributions only with `--inbreeding`) |
-| `founder_contribution` | founder descendant-path contribution + effective founder count |
-| `founder_generation` | active founder lines and effective founder contribution by generation, plus bottleneck minima (may be skipped on very large pedigrees) |
-| `components`, `sex_summary`, `generation_summary` | aggregate component, sex-stratified, and depth-stratified summaries |
-| `pairs` | 23 named relationship codes through degree 5 plus `PO = MO + FO` and `by_degree[0..5]` rollup |
-| `inbreeding` | distribution of F (only with `--inbreeding`) |
-| `effective_size` | scalar `ne` plus per-generation breakdown for eight estimators (`Ne_I`, `Ne_C`, `Ne_V`, `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`); `Ne_C` is null without `--ne-coancestry` |
+| `structure.size_structure` | counts, max/mean/median depth, `depth_counts`, connected-component aggregates |
+| `structure.components` | component-size distribution and singleton stats |
+| `demography.sibship_size` | per-Sibship size distribution (n_sibships, mean/median, size_dist) |
+| `demography.mating_pairs` | Mating Pair count, children-per-pair, effective pair count |
+| `reproduction.reproduction` | per-individual offspring/mate counts and Reproductive/Terminal classification (`offspring_count`, `offspring_count_hist`, `mate_count`, sex-stratified variants, `frac_with_full_sib`) |
+| `genealogy.genealogy` | per-individual `descendant_paths` summary; `distinct_ancestors` summary when `--inbreeding` is set |
+| `founders.founder_contribution` | Founders with descendants + `descendant_paths_per_founder` distribution + `effective_founders_by_descendant_paths` |
+| `founders.founder_summary` | active Founders and effective-Founder contribution by depth, `founder_ancestors` per-depth distribution, bottleneck minima (may be skipped on very large pedigrees) |
+| `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only) |
+| `relatedness.relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
+| `relatedness.inbreeding` | distribution of F (only with `--inbreeding`) |
+| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_caballero_toro`); `ne_coancestry` is null without `--ne-coancestry` |
+| `strata.sex_summary` | per-sex sub-aggregates (n, n_founders, n_reproductive, n_terminal, …) |
+| `strata.depth_summary` | per-depth sub-aggregates (one row per depth) |
 | `individual.distributions` | mean/std/quartiles/`nz` for each per-individual numeric column |
 
 Floats are rounded to 4 decimal places. With `--tsv`, Ne scalar
 values also appear in `summary.pedigree.tsv` under
-`effective_size_scalars`; per-generation vectors stay YAML-only.
+`effective_size_scalars`; per-depth vectors stay YAML-only.
 
 ## Logging
 

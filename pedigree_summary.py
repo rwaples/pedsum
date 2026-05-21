@@ -77,7 +77,7 @@ from pedigree_graph.experimental import count_pairs_bfs
 _BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.9.1"
+VERSION = "0.10.0"
 SEX_FEMALE = 0
 SEX_MALE = 1
 SEX_UNKNOWN = -1
@@ -1491,7 +1491,7 @@ def compute_size_structure(
         "max_depth": max_depth,
         "mean_depth": float(gen.mean()) if n else 0.0,
         "median_depth": float(np.median(gen)) if n else 0.0,
-        "gen_counts": gen_counts,
+        "depth_counts": gen_counts,
         "n_components": int(n_components),
         "largest_component": int(sorted_sizes[0]) if len(sorted_sizes) else 0,
         "largest_component_frac": (int(sorted_sizes[0]) / n) if len(sorted_sizes) and n else 0.0,
@@ -1529,15 +1529,18 @@ def _effective_count_from_weights(weights: np.ndarray) -> float:
 
 
 def compute_mating_pair_summary(df: pd.DataFrame) -> dict | None:
-    """Aggregate children-per-mating-pair and mate-count summaries."""
+    """Aggregate per-Mating-Pair statistics: count, children-per-pair, effective pairs.
+
+    Per-individual mate counts live in :func:`compute_aggregate_sections` under
+    ``reproduction:`` (over **all** individuals, zero-included). This section is
+    reserved for per-Mating-Pair quantities only.
+    """
     both_present = (df["mother"] != -1) & (df["father"] != -1)
     children = df.loc[both_present]
     if len(children) == 0:
         return None
 
     pair_sizes = children.groupby(["mother", "father"]).size()
-    mates_female = children.groupby("mother")["father"].nunique()
-    mates_male = children.groupby("father")["mother"].nunique()
 
     return {
         "n_pairs": len(pair_sizes),
@@ -1545,10 +1548,6 @@ def compute_mating_pair_summary(df: pd.DataFrame) -> dict | None:
         "frac_pairs_with_multiple_children": float((pair_sizes >= 2).sum()) / len(pair_sizes),
         "children_per_pair": _numeric_distribution(pair_sizes.to_numpy()),
         "effective_pairs_by_children": _effective_count_from_weights(pair_sizes.to_numpy()),
-        "female_mate_count": _numeric_distribution(mates_female.to_numpy()),
-        "male_mate_count": _numeric_distribution(mates_male.to_numpy()),
-        "n_females_with_multiple_mates": int((mates_female >= 2).sum()),
-        "n_males_with_multiple_mates": int((mates_male >= 2).sum()),
     }
 
 
@@ -1562,30 +1561,36 @@ def _offspring_dist(counts: np.ndarray, n: int) -> dict:
     return out
 
 
-def compute_founder_generation_summary(
+def compute_founder_summary(
     idf: pd.DataFrame,
     max_lineage_cells: int = 5_000_000,
-) -> dict:
-    """Founder contribution by generation using unique founder-line sets.
+) -> tuple[dict, np.ndarray]:
+    """Founder-contribution-by-depth using unique **Founder Ancestor** sets.
 
-    This is intentionally bounded: carrying founder sets per row can become
-    large on very large pedigrees, so the section reports ``computed: false``
-    instead of risking a memory blow-up.
+    Returns a ``(summary, n_founder_ancestors)`` tuple. The second element
+    is the per-individual count of distinct **Founder Ancestors** (zero
+    for **Founders** themselves; zeros when the section is skipped).
+
+    Bounded: carrying founder sets per row can become large on very large
+    pedigrees, so the section reports ``computed: false`` instead of
+    risking a memory blow-up.
     """
     n = len(idf)
     founders = idf["is_founder"].to_numpy(dtype=bool)
     founder_rows = np.where(founders)[0]
     n_founders = len(founder_rows)
+    n_founder_ancestors_zeros = np.zeros(n, dtype=np.int32)
     if n == 0 or n_founders == 0:
-        return {"computed": True, "by_generation": [], "bottleneck": None}
+        return ({"computed": True, "by_depth": [], "bottleneck": None},
+                n_founder_ancestors_zeros)
     if n * n_founders > max_lineage_cells:
-        return {
+        return ({
             "computed": False,
             "skip_reason": (
                 f"n_individuals * n_founders = {n * n_founders} exceeds "
                 f"max_lineage_cells={max_lineage_cells}"
             ),
-        }
+        }, n_founder_ancestors_zeros)
 
     row_to_founder = {int(row): i for i, row in enumerate(founder_rows)}
     id_index = pd.Index(idf["id"].to_numpy())
@@ -1608,8 +1613,12 @@ def compute_founder_generation_summary(
             s.update(founder_sets[int(f_row[i_int])])
         founder_sets[i_int] = s
 
-    by_generation = []
-    for gen, sub in idf.groupby("ped_depth", sort=True):
+    n_founder_ancestors = np.array(
+        [len(fs) for fs in founder_sets], dtype=np.int32,
+    )
+
+    by_depth = []
+    for depth, sub in idf.groupby("ped_depth", sort=True):
         rows = sub.index.to_numpy()
         active: set[int] = set()
         counts = np.zeros(n_founders, dtype=np.int64)
@@ -1622,28 +1631,28 @@ def compute_founder_generation_summary(
             active.update(fs)
             counts[list(fs)] += 1
         active_counts = counts[counts > 0]
-        by_generation.append({
-            "gen": int(gen),
+        by_depth.append({
+            "depth": int(depth),
             "n": len(rows),
             "active_founders": len(active),
             "active_founder_frac": len(active) / n_founders,
             "effective_founders_by_descendants": _effective_count_from_weights(active_counts),
-            "founder_lines_per_individual": _numeric_distribution(line_counts),
+            "founder_ancestors": _numeric_distribution(line_counts),
         })
 
-    nonempty = [row for row in by_generation if row["n"] > 0]
+    nonempty = [row for row in by_depth if row["n"] > 0]
     if nonempty:
         min_active = min(row["active_founders"] for row in nonempty)
         min_eff = min(row["effective_founders_by_descendants"] for row in nonempty)
         bottleneck = {
             "min_active_founders": int(min_active),
             "min_active_founder_frac": min_active / n_founders,
-            "min_active_generations": [
-                int(row["gen"]) for row in nonempty if row["active_founders"] == min_active
+            "min_active_depths": [
+                int(row["depth"]) for row in nonempty if row["active_founders"] == min_active
             ],
             "min_effective_founders_by_descendants": float(min_eff),
-            "min_effective_generations": [
-                int(row["gen"])
+            "min_effective_depths": [
+                int(row["depth"])
                 for row in nonempty
                 if row["effective_founders_by_descendants"] == min_eff
             ],
@@ -1651,56 +1660,101 @@ def compute_founder_generation_summary(
     else:
         bottleneck = None
 
-    return {"computed": True, "by_generation": by_generation, "bottleneck": bottleneck}
+    return (
+        {"computed": True, "by_depth": by_depth, "bottleneck": bottleneck},
+        n_founder_ancestors,
+    )
 
 
 def compute_aggregate_sections(
     idf: pd.DataFrame,
+    founder_summary: dict,
     include_inbreeding: bool,
 ) -> dict:
-    """Pedigree-level aggregate sections derived from the individual table."""
+    """Pedigree-level aggregate sections derived from the individual table.
+
+    ``founder_summary`` is the dict returned by :func:`compute_founder_summary`;
+    it is computed beforehand so that its per-individual
+    ``n_founder_ancestors`` vector can be added to ``idf`` before this
+    function is called.
+    """
     n = len(idf)
     if n == 0:
         return {
-            "lineage": {},
+            "reproduction": {},
+            "genealogy": {},
             "founder_contribution": {},
-            "founder_generation": {},
+            "founder_summary": founder_summary,
             "components": {},
             "sex_summary": {},
-            "generation_summary": [],
+            "depth_summary": [],
         }
 
     reproductive = idf["n_offspring"] > 0
     no_children = ~reproductive
     founders = idf["is_founder"].astype(bool)
-    descendant_counts = idf.loc[founders, "n_descendants"].to_numpy()
+    descendant_path_counts = idf.loc[founders, "n_descendant_paths"].to_numpy()
 
-    lineage = {
+    n_offspring_arr = idf["n_offspring"].to_numpy()
+    n_mates_arr = idf["n_mates"].to_numpy()
+    sex_arr = idf["sex"].to_numpy()
+    male_mask = sex_arr == SEX_MALE
+    female_mask = sex_arr == SEX_FEMALE
+    n_male = int(male_mask.sum())
+    n_female = int(female_mask.sum())
+
+    # frac_with_full_sib: fraction of individuals WITH BOTH PARENTS present
+    # who share their (mother, father) with at least one other individual.
+    both_parents = (idf["mother"] != -1) & (idf["father"] != -1)
+    n_both = int(both_parents.sum())
+    if n_both:
+        frac_with_full_sib = float(
+            (idf.loc[both_parents, "n_full_sibs"] >= 1).sum()
+        ) / n_both
+    else:
+        frac_with_full_sib = 0.0
+
+    # Per-Individual reproductive output: offspring counts, mate counts,
+    # reproductive/terminal classification. Distributions follow the
+    # CONTEXT.md naming convention: <noun>_count for summary stats;
+    # <noun>_count_hist for binned PMF; _male / _female stratify either.
+    reproduction = {
         "n_reproductive": int(reproductive.sum()),
         "frac_reproductive": float(reproductive.sum()) / n,
         "n_terminal": int(no_children.sum()),
         "frac_terminal": float(no_children.sum()) / n,
-        "offspring": _numeric_distribution(idf["n_offspring"]),
-        "mates": _numeric_distribution(idf["n_mates"]),
-        "descendants": _numeric_distribution(idf["n_descendants"]),
+        "frac_with_full_sib": frac_with_full_sib,
+        "offspring_count": _numeric_distribution(n_offspring_arr),
+        "offspring_count_hist": _offspring_dist(n_offspring_arr, n),
+        "offspring_count_hist_male": _offspring_dist(n_offspring_arr[male_mask], n_male),
+        "offspring_count_hist_female": _offspring_dist(n_offspring_arr[female_mask], n_female),
+        # mate_count_* are over ALL males / ALL females (zero-included), a
+        # behavior change from 0.9's `female_mate_count` / `male_mate_count`
+        # which only summed over parents-with-children. See CHANGELOG 0.10.0.
+        "mate_count": _numeric_distribution(n_mates_arr),
+        "mate_count_male": _numeric_distribution(n_mates_arr[male_mask]) if n_male else None,
+        "mate_count_female": _numeric_distribution(n_mates_arr[female_mask]) if n_female else None,
+    }
+
+    # Per-individual ancestry. Asymmetric semantics today (paths for
+    # descendants, distinct for ancestors) — see CONTEXT.md.
+    genealogy = {
+        "descendant_paths": _numeric_distribution(idf["n_descendant_paths"]),
     }
     if include_inbreeding:
-        lineage["ancestors"] = _numeric_distribution(idf["n_ancestors"])
+        genealogy["distinct_ancestors"] = _numeric_distribution(idf["n_distinct_ancestors"])
     else:
-        lineage["ancestors"] = None
+        genealogy["distinct_ancestors"] = None
 
     n_founders = int(founders.sum())
-    founders_with_desc = int((descendant_counts > 0).sum()) if n_founders else 0
+    founders_with_desc = int((descendant_path_counts > 0).sum()) if n_founders else 0
     founder_contribution = {
         "n_founders_with_descendants": founders_with_desc,
         "n_founders_without_descendants": n_founders - founders_with_desc,
         "frac_founders_with_descendants": (founders_with_desc / n_founders) if n_founders else 0.0,
-        "descendants_per_founder": _numeric_distribution(descendant_counts),
-        "effective_founders_by_descendant_paths": _effective_count_from_weights(descendant_counts),
-        "descendant_count_semantics": "path_count",
+        "descendant_paths_per_founder": _numeric_distribution(descendant_path_counts),
+        "effective_founders_by_descendant_paths": _effective_count_from_weights(descendant_path_counts),
     }
-    founder_generation = compute_founder_generation_summary(idf)
-
     sizes = idf.groupby("component_id").size()
     component_dist = _numeric_distribution(sizes.to_numpy())
     singletons = int((sizes == 1).sum())
@@ -1728,9 +1782,9 @@ def compute_aggregate_sections(
             "n_founders": int(sub["is_founder"].sum()),
             "n_reproductive": int(sx_reproductive.sum()),
             "frac_reproductive": float(sx_reproductive.sum()) / len(sub),
-            "n_without_children": int((~sx_reproductive).sum()),
-            "offspring": _numeric_distribution(sub["n_offspring"]),
-            "mates": _numeric_distribution(sub["n_mates"]),
+            "n_terminal": int((~sx_reproductive).sum()),
+            "offspring_count": _numeric_distribution(sub["n_offspring"]),
+            "mate_count": _numeric_distribution(sub["n_mates"]),
             "depth": _numeric_distribution(sub["ped_depth"]),
         }
         if include_inbreeding:
@@ -1738,38 +1792,39 @@ def compute_aggregate_sections(
             row["n_inbred"] = int((sub["F"] > INBRED_TOL).sum())
         sex_summary[label] = row
 
-    generation_summary = []
-    for gen, sub in idf.groupby("ped_depth", sort=True):
-        gen_reproductive = sub["n_offspring"] > 0
+    depth_summary = []
+    for depth, sub in idf.groupby("ped_depth", sort=True):
+        d_reproductive = sub["n_offspring"] > 0
         row = {
-            "gen": int(gen),
+            "depth": int(depth),
             "n": len(sub),
             "n_male": int((sub["sex"] == SEX_MALE).sum()),
             "n_female": int((sub["sex"] == SEX_FEMALE).sum()),
             "n_founders": int(sub["is_founder"].sum()),
-            "n_reproductive": int(gen_reproductive.sum()),
-            "frac_reproductive": float(gen_reproductive.sum()) / len(sub),
-            "n_terminal": int((~gen_reproductive).sum()),
-            "offspring": _numeric_distribution(sub["n_offspring"]),
-            "offspring_dist": _offspring_dist(sub["n_offspring"].to_numpy(), len(sub)),
-            "mates": _numeric_distribution(sub["n_mates"]),
-            "mean_ancestors": None,
-            "mean_descendants": float(sub["n_descendants"].mean()),
+            "n_reproductive": int(d_reproductive.sum()),
+            "frac_reproductive": float(d_reproductive.sum()) / len(sub),
+            "n_terminal": int((~d_reproductive).sum()),
+            "offspring_count": _numeric_distribution(sub["n_offspring"]),
+            "offspring_count_hist": _offspring_dist(sub["n_offspring"].to_numpy(), len(sub)),
+            "mate_count": _numeric_distribution(sub["n_mates"]),
+            "mean_distinct_ancestors": None,
+            "mean_descendant_paths": float(sub["n_descendant_paths"].mean()),
         }
         if include_inbreeding:
-            row["mean_ancestors"] = float(sub["n_ancestors"].mean())
+            row["mean_distinct_ancestors"] = float(sub["n_distinct_ancestors"].mean())
             row["mean_F"] = float(sub["F"].mean())
             row["max_F"] = float(sub["F"].max())
             row["n_inbred"] = int((sub["F"] > INBRED_TOL).sum())
-        generation_summary.append(row)
+        depth_summary.append(row)
 
     return {
-        "lineage": lineage,
+        "reproduction": reproduction,
+        "genealogy": genealogy,
         "founder_contribution": founder_contribution,
-        "founder_generation": founder_generation,
+        "founder_summary": founder_summary,
         "components": components,
         "sex_summary": sex_summary,
-        "generation_summary": generation_summary,
+        "depth_summary": depth_summary,
     }
 
 
@@ -1778,53 +1833,32 @@ def compute_aggregate_sections(
 # ---------------------------------------------------------------------------
 
 
-def compute_family_sizes(df: pd.DataFrame) -> dict:
-    """Sibship size distribution and offspring/mate counts (per simace conv.)."""
+def compute_sibship_sizes(df: pd.DataFrame) -> dict:
+    """Per-**Sibship** size statistics.
+
+    A **Sibship** is the offspring set of one **Mating Pair**. This function
+    only emits per-Sibship aggregates; per-individual offspring counts
+    (binned and sex-stratified) live in :func:`compute_aggregate_sections`
+    under ``reproduction:``.
+    """
     both_present = (df["mother"] != -1) & (df["father"] != -1)
     children = df.loc[both_present]
     if len(children) == 0:
         return {"empty": True}
 
-    family_sizes = children.groupby(["mother", "father"]).size()
-    families_with_sibs = family_sizes[family_sizes >= 2].index
-    has_sib = children.set_index(["mother", "father"]).index.isin(families_with_sibs)
-    frac_with_full_sib = float(has_sib.sum()) / len(children)
-
-    n_fam = len(family_sizes)
-    size_dist = {str(k): float((family_sizes == k).sum()) / n_fam for k in (1, 2, 3)}
-    size_dist["4+"] = float((family_sizes >= 4).sum()) / n_fam
-
-    n_total = len(df)
-    ids = df["id"].to_numpy()
-    id_index = pd.Index(ids)
-    m_rows = id_index.get_indexer(children["mother"].to_numpy())
-    f_rows = id_index.get_indexer(children["father"].to_numpy())
-    counts = np.bincount(m_rows, minlength=n_total) + np.bincount(f_rows, minlength=n_total)
-
-    person_dist = _offspring_dist(counts, n_total)
-    sex = df["sex"].to_numpy()
-    male_mask = sex == SEX_MALE
-    female_mask = sex == SEX_FEMALE
-    person_dist_male = _offspring_dist(counts[male_mask], int(male_mask.sum()))
-    person_dist_female = _offspring_dist(counts[female_mask], int(female_mask.sum()))
-
-    mates_female = children.groupby("mother")["father"].nunique()
-    mates_male = children.groupby("father")["mother"].nunique()
+    sibship_sizes = children.groupby(["mother", "father"]).size()
+    n_sib = len(sibship_sizes)
+    size_dist = {str(k): float((sibship_sizes == k).sum()) / n_sib for k in (1, 2, 3)}
+    size_dist["4+"] = float((sibship_sizes >= 4).sum()) / n_sib
 
     return {
         "empty": False,
-        "n_families": int(n_fam),
-        "mean": float(family_sizes.mean()),
-        "median": float(family_sizes.median()),
-        "q1": float(family_sizes.quantile(0.25)),
-        "q3": float(family_sizes.quantile(0.75)),
-        "frac_with_full_sib": frac_with_full_sib,
+        "n_sibships": int(n_sib),
+        "mean": float(sibship_sizes.mean()),
+        "median": float(sibship_sizes.median()),
+        "q1": float(sibship_sizes.quantile(0.25)),
+        "q3": float(sibship_sizes.quantile(0.75)),
         "size_dist": size_dist,
-        "person_dist": person_dist,
-        "person_dist_male": person_dist_male,
-        "person_dist_female": person_dist_female,
-        "mates_female_mean": float(mates_female.mean()) if len(mates_female) else 0.0,
-        "mates_male_mean": float(mates_male.mean()) if len(mates_male) else 0.0,
     }
 
 
@@ -2052,21 +2086,21 @@ def compute_relationship_summary(
         str(degree): int((closest_degree == degree).sum()) for degree in range(1, 6)
     })
 
-    gen = df["ped_depth"].to_numpy()
-    gen_rows = []
-    for g in range(int(gen.max()) + 1 if n else 0):
-        n_gen = int((gen == g).sum())
-        possible = n_gen * (n_gen - 1) // 2
+    depth = df["ped_depth"].to_numpy()
+    depth_rows = []
+    for d in range(int(depth.max()) + 1 if n else 0):
+        n_d = int((depth == d).sum())
+        possible = n_d * (n_d - 1) // 2
         if possible:
-            related = int(((gen[lo] == g) & (gen[hi] == g)).sum())
+            related = int(((depth[lo] == d) & (depth[hi] == d)).sum())
             density = related / possible
         else:
             related = 0
             density = 0.0
-        gen_rows.append({
-            "gen": int(g),
-            "n": n_gen,
-            "n_possible_pairs": int(possible),
+        depth_rows.append({
+            "depth": int(d),
+            "n": n_d,
+            "n_individual_pairs": int(possible),
             "n_related_pairs": related,
             "n_unrelated_pairs": int(possible - related),
             "related_pair_density": float(density),
@@ -2075,7 +2109,7 @@ def compute_relationship_summary(
     return {
         "computed": True,
         "max_degree": 5,
-        "n_possible_pairs": int(n_possible),
+        "n_individual_pairs": int(n_possible),
         "n_related_pairs": n_related,
         "n_unrelated_pairs": int(n_possible - n_related),
         "related_pair_density": (n_related / n_possible) if n_possible else 0.0,
@@ -2083,7 +2117,7 @@ def compute_relationship_summary(
         "closest_relationship_per_individual": closest_dist,
         "relatives_by_degree": counts_by_degree,
         "relatives_total": _numeric_distribution(total_relatives),
-        "related_pair_density_by_generation": gen_rows,
+        "related_pair_density_by_depth": depth_rows,
     }
 
 
@@ -2166,7 +2200,26 @@ def compute_effective_size(
         skip_ne_coancestry=not ne_coancestry,
         n_threads=n_threads,
     )
-    return {name: result.to_dict() for name, result in raw.items()}
+    return {
+        name: _normalise_effective_size_keys(result.to_dict())
+        for name, result in raw.items()
+    }
+
+
+def _normalise_effective_size_keys(d: dict) -> dict:
+    """Rename upstream ``n_generations_used`` → ``n_depths_used`` on the way out.
+
+    pedigree-graph emits ``n_generations_used`` in ``ne_inbreeding`` and
+    ``ne_caballero_toro``; pedsum's CONTEXT.md treats "generation" as a
+    temporal/birth-cohort term, distinct from topological **Depth**.
+    This shim renames the key in pedsum's output without touching the
+    upstream package. Delete this helper when pedigree-graph itself
+    adopts the depth-based name.
+    """
+    if "n_generations_used" in d:
+        d = {("n_depths_used" if k == "n_generations_used" else k): v
+             for k, v in d.items()}
+    return d
 
 
 def _build_inbreeding_summary(F: np.ndarray) -> dict:
@@ -2206,8 +2259,9 @@ def build_individual_df(
     df: pd.DataFrame,
     id_index: pd.Index,
     F: np.ndarray,
-    n_ancestors: np.ndarray,
-    n_descendants: np.ndarray,
+    n_distinct_ancestors: np.ndarray,
+    n_descendant_paths: np.ndarray,
+    n_founder_ancestors: np.ndarray,
     component_labels: np.ndarray,
     sex_source: np.ndarray,
 ) -> pd.DataFrame:
@@ -2320,8 +2374,9 @@ def build_individual_df(
             "n_grandchildren": n_gc,
             "n_uncles_aunts": n_ua,
             "n_first_cousins": n_fc,
-            "n_ancestors": n_ancestors,
-            "n_descendants": n_descendants.astype(np.int32),
+            "n_founder_ancestors": n_founder_ancestors.astype(np.int32),
+            "n_distinct_ancestors": n_distinct_ancestors,
+            "n_descendant_paths": n_descendant_paths.astype(np.int32),
         }
     )
 
@@ -2342,8 +2397,9 @@ _NUMERIC_COLS = (
     "n_grandchildren",
     "n_uncles_aunts",
     "n_first_cousins",
-    "n_ancestors",
-    "n_descendants",
+    "n_founder_ancestors",
+    "n_distinct_ancestors",
+    "n_descendant_paths",
 )
 
 
@@ -2392,16 +2448,21 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
         SectionSpec("max_degree_enumerated"),
     )),
     CategorySpec("demography", (
-        SectionSpec("family_size"),
+        SectionSpec("sibship_size"),
         SectionSpec("mating_pairs"),
     )),
-    CategorySpec("lineage", (
-        SectionSpec("lineage"),
+    CategorySpec("reproduction", (
+        SectionSpec("reproduction"),
+    )),
+    CategorySpec("genealogy", (
+        SectionSpec("genealogy"),
+    )),
+    CategorySpec("founders", (
         SectionSpec("founder_contribution"),
-        SectionSpec("founder_generation"),
+        SectionSpec("founder_summary"),
     )),
     CategorySpec("relatedness", (
-        SectionSpec("pairs", slim_keys=_PAIRS_SLIM_KEYS),
+        SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS),
         SectionSpec("relationship_summary"),
         SectionSpec("inbreeding"),
     )),
@@ -2410,7 +2471,7 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
     )),
     CategorySpec("strata", (
         SectionSpec("sex_summary"),     # per-stratum special handling
-        SectionSpec("generation_summary", list_of_dict_slim_keys=("gen", "n")),
+        SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n")),
     )),
 )
 
@@ -2421,21 +2482,21 @@ _SEX_SUMMARY_SLIM_KEYS: tuple[str, ...] = (
 )
 
 # Per-individual distribution split: only headline columns in slim, and within
-# each column only mean+median; extra carries all 12 columns × 8 quantile keys.
-INDIVIDUAL_SLIM_COLS: tuple[str, ...] = ("n_offspring", "n_mates", "F", "n_ancestors")
+# each column only mean+median; extra carries all columns × all quantile keys.
+INDIVIDUAL_SLIM_COLS: tuple[str, ...] = ("n_offspring", "n_mates", "F", "n_distinct_ancestors")
 INDIVIDUAL_SLIM_DIST_KEYS: tuple[str, ...] = ("mean", "median")
 
 # YAML-only drops (paths within the categorised dict). Constructed in the
 # flat dict and visible in the TSV; excluded from both slim and extra YAML.
 KNOWN_YAML_DROPS: frozenset[str] = frozenset({
-    "pedigree.relatedness.pairs.by_degree",
+    "pedigree.relatedness.relationship_pairs.by_degree",
     "individual.distributions.F.max",
 })
 
 # Schema renames from flat → categorised path. Used by the totality test so
 # renamed fields aren't flagged as missing.
 RENAMES: dict[str, str] = {
-    "pedigree.pairs_engine": "pedigree.relatedness.pairs.engine",
+    "pedigree.pairs_engine": "pedigree.relatedness.relationship_pairs.engine",
 }
 
 
@@ -2444,19 +2505,20 @@ def _categorise_pedigree(flat_ped: dict) -> dict:
 
     Pure function. Reads ``SUMMARY_SCHEMA`` to bucket sections by
     category, drops empty categories, and folds the sibling
-    ``pairs_engine`` into ``pairs.engine`` so it lives inside the
-    relatedness.pairs subtree (matches ``RENAMES``).
+    ``pairs_engine`` into ``relationship_pairs.engine`` so it lives
+    inside the relatedness.relationship_pairs subtree (matches
+    ``RENAMES``).
 
     Does NOT apply slim/extra splitting — that is ``_split_summary``'s
     job. Does NOT apply ``KNOWN_YAML_DROPS`` — splitter handles them.
     """
     sections = dict(flat_ped)
-    pairs = sections.get("pairs")
+    pairs = sections.get("relationship_pairs")
     pairs_engine = sections.pop("pairs_engine", None)
     if pairs is not None and pairs_engine is not None:
         # Non-destructive: build a new dict so the caller's flat payload
         # (which the TSV writer also reads) is not mutated.
-        sections["pairs"] = {**pairs, "engine": pairs_engine}
+        sections["relationship_pairs"] = {**pairs, "engine": pairs_engine}
 
     nested: dict = {}
     for cat in SUMMARY_SCHEMA:
@@ -2694,7 +2756,7 @@ def _build_pedigree_data(
     path: Path,
     cmd: str,
     size: dict,
-    family: dict,
+    sibships: dict,
     pairs: dict,
     inbreeding: dict | None,
     mating_pairs: dict | None,
@@ -2713,16 +2775,17 @@ def _build_pedigree_data(
       should NOT be flattened to TSV.  Currently always returned empty
       from this helper — populated by the caller after Ne computation.
     """
-    family_section: dict | None
-    if family.get("empty"):
-        family_section = None
+    sibship_section: dict | None
+    if sibships.get("empty"):
+        sibship_section = None
     else:
-        family_section = {
-            "frac_with_full_sib": float(family["frac_with_full_sib"]),
-            "size_dist": {str(k): float(v) for k, v in family["size_dist"].items()},
-            "person_dist": {str(k): float(v) for k, v in family["person_dist"].items()},
-            "person_dist_male": {str(k): float(v) for k, v in family["person_dist_male"].items()},
-            "person_dist_female": {str(k): float(v) for k, v in family["person_dist_female"].items()},
+        sibship_section = {
+            "n_sibships": int(sibships["n_sibships"]),
+            "mean": float(sibships["mean"]),
+            "median": float(sibships["median"]),
+            "q1": float(sibships["q1"]),
+            "q3": float(sibships["q3"]),
+            "size_dist": {str(k): float(v) for k, v in sibships["size_dist"].items()},
         }
     inb_section: dict | None
     if inbreeding is None:
@@ -2759,23 +2822,24 @@ def _build_pedigree_data(
             "max_depth": int(size["max_depth"]),
             "mean_depth": float(size["mean_depth"]),
             "median_depth": float(size["median_depth"]),
-            "gen_counts": [int(x) for x in size["gen_counts"]],
+            "depth_counts": [int(x) for x in size["depth_counts"]],
             "n_components": int(size["n_components"]),
             "largest_component": int(size["largest_component"]),
             "largest_component_frac": float(size["largest_component_frac"]),
             "next_components": [int(x) for x in size["next_components"]],
         },
-        "family_size": family_section,
+        "sibship_size": sibship_section,
         "mating_pairs": mating_pairs,
         "relationship_summary": relationship_summary,
-        "lineage": (aggregates or {}).get("lineage", {}),
+        "reproduction": (aggregates or {}).get("reproduction", {}),
+        "genealogy": (aggregates or {}).get("genealogy", {}),
         "founder_contribution": (aggregates or {}).get("founder_contribution", {}),
-        "founder_generation": (aggregates or {}).get("founder_generation", {}),
+        "founder_summary": (aggregates or {}).get("founder_summary", {}),
         "components": (aggregates or {}).get("components", {}),
         "sex_summary": (aggregates or {}).get("sex_summary", {}),
-        "generation_summary": (aggregates or {}).get("generation_summary", []),
+        "depth_summary": (aggregates or {}).get("depth_summary", []),
         "pairs_engine": str(pairs.get("_engine", "matrix")),
-        "pairs": {
+        "relationship_pairs": {
             k: ({str(deg): int(c) for deg, c in v.items()} if k == "by_degree" else int(v))
             for k, v in pairs.items()
             if not k.startswith("_")
@@ -2796,7 +2860,7 @@ def _build_individual_data(
     n = len(idf)
     distributions: dict[str, dict] = {}
     for col in _NUMERIC_COLS:
-        if col in {"F", "n_ancestors"} and not include_inbreeding:
+        if col in {"F", "n_distinct_ancestors"} and not include_inbreeding:
             continue
         if col not in idf.columns:
             continue
@@ -2846,10 +2910,11 @@ def _drop_distribution_extrema(obj: object) -> None:
 def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
-    - Pedigree-level: nulls ``pairs`` codes and ``inbreeding`` fields below
-      ``min_cell``; suppresses ``hist`` buckets whose implied count
-      (``frac × n_total``) is below the threshold; drops ``next_components``
-      entries below it; nulls positional ``gen_counts`` entries below it.
+    - Pedigree-level: nulls ``relationship_pairs`` codes and ``inbreeding``
+      fields below ``min_cell``; suppresses ``hist`` buckets whose implied
+      count (``frac × n_total``) is below the threshold; drops
+      ``next_components`` entries below it; nulls positional ``depth_counts``
+      entries below it.
     - Individual-level: drops ``min``/``max`` from every distribution, nulls
       ``nz`` below threshold.
     """
@@ -2859,31 +2924,28 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
     sizes["next_components"] = [
         s for s in sizes.get("next_components", []) if s >= min_cell
     ]
-    sizes["gen_counts"] = [
-        (g if g >= min_cell else None) for g in sizes.get("gen_counts", [])
+    sizes["depth_counts"] = [
+        (g if g >= min_cell else None) for g in sizes.get("depth_counts", [])
     ]
     if 0 < int(sizes.get("largest_component", 0)) < min_cell:
         sizes["largest_component"] = None
 
     _drop_distribution_extrema(ped_data)
 
-    fam = ped_data.get("family_size")
+    sibship = ped_data.get("sibship_size")
     mating = ped_data.get("mating_pairs")
-    n_families = int(mating.get("n_pairs", 0)) if mating is not None else 0
-    if fam is not None and 0 < n_families < min_cell:
-        for k in ("frac_with_full_sib",):
-            if k in fam:
-                fam[k] = None
-        for k in ("size_dist", "person_dist", "person_dist_male", "person_dist_female"):
-            if k in fam and isinstance(fam[k], dict):
-                fam[k] = dict.fromkeys(fam[k])
+    n_pairs = int(mating.get("n_pairs", 0)) if mating is not None else 0
+    if sibship is not None and 0 < n_pairs < min_cell:
+        for k in ("size_dist",):
+            if k in sibship and isinstance(sibship[k], dict):
+                sibship[k] = dict.fromkeys(sibship[k])
 
     if mating is not None:
         if 0 < int(mating.get("n_pairs", 0)) < min_cell:
             for k in list(mating):
                 if k != "n_pairs":
                     mating[k] = None
-        for k in ("n_pairs_with_multiple_children", "n_females_with_multiple_mates", "n_males_with_multiple_mates"):
+        for k in ("n_pairs_with_multiple_children",):
             if 0 < int(mating.get(k, 0) or 0) < min_cell:
                 mating[k] = None
 
@@ -2897,37 +2959,37 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
             for k, v in list(vals.items()):
                 if isinstance(v, int) and 0 < v < min_cell:
                     vals[k] = None
-    for row in rel_summary.get("related_pair_density_by_generation", []):
+    for row in rel_summary.get("related_pair_density_by_depth", []):
         if int(row.get("n", 0)) < min_cell:
             for k in list(row):
-                if k not in ("gen", "n"):
+                if k not in ("depth", "n"):
                     row[k] = None
         else:
-            for k in ("n_possible_pairs", "n_related_pairs", "n_unrelated_pairs"):
+            for k in ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"):
                 if 0 < int(row.get(k, 0) or 0) < min_cell:
                     row[k] = None
 
-    lineage = ped_data.get("lineage", {})
+    reproduction = ped_data.get("reproduction", {})
     for k in ("n_reproductive", "n_terminal"):
-        if 0 < int(lineage.get(k, 0) or 0) < min_cell:
-            lineage[k] = None
+        if 0 < int(reproduction.get(k, 0) or 0) < min_cell:
+            reproduction[k] = None
 
     founder = ped_data.get("founder_contribution", {})
     for k in ("n_founders_with_descendants", "n_founders_without_descendants"):
         if 0 < int(founder.get(k, 0) or 0) < min_cell:
             founder[k] = None
 
-    founder_generation = ped_data.get("founder_generation", {})
-    for row in founder_generation.get("by_generation", []):
+    founder_summary = ped_data.get("founder_summary", {})
+    for row in founder_summary.get("by_depth", []):
         if int(row.get("n", 0)) < min_cell:
             for k in list(row):
-                if k not in ("gen", "n"):
+                if k not in ("depth", "n"):
                     row[k] = None
         else:
             for k in ("active_founders",):
                 if 0 < int(row.get(k, 0) or 0) < min_cell:
                     row[k] = None
-    bottleneck = founder_generation.get("bottleneck")
+    bottleneck = founder_summary.get("bottleneck")
     if isinstance(bottleneck, dict):
         for k in ("min_active_founders",):
             if 0 < int(bottleneck.get(k, 0) or 0) < min_cell:
@@ -2945,21 +3007,21 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
                 if k != "n":
                     stats[k] = None
         else:
-            for k in ("n_founders", "n_reproductive", "n_without_children", "n_inbred"):
+            for k in ("n_founders", "n_reproductive", "n_terminal", "n_inbred"):
                 if 0 < int(stats.get(k, 0) or 0) < min_cell:
                     stats[k] = None
 
-    for row in ped_data.get("generation_summary", []):
+    for row in ped_data.get("depth_summary", []):
         if int(row.get("n", 0)) < min_cell:
             for k in list(row):
-                if k not in ("gen", "n"):
+                if k not in ("depth", "n"):
                     row[k] = None
         else:
             for k in ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"):
                 if 0 < int(row.get(k, 0) or 0) < min_cell:
                     row[k] = None
 
-    pairs = ped_data.get("pairs", {})
+    pairs = ped_data.get("relationship_pairs", {})
     for code, count in list(pairs.items()):
         if code == "by_degree":
             for d, c in pairs[code].items():
@@ -3624,8 +3686,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     logger.info("size+structure in %.2fs", time.perf_counter() - t0)
 
     t0 = time.perf_counter()
-    family = compute_family_sizes(df)
-    logger.info("family sizes in %.2fs", time.perf_counter() - t0)
+    sibships = compute_sibship_sizes(df)
+    logger.info("sibship sizes in %.2fs", time.perf_counter() - t0)
 
     t0 = time.perf_counter()
     mating_pairs = compute_mating_pair_summary(df)
@@ -3658,7 +3720,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
                 "enumeration; pass --per-individual-pairs to compute via the "
                 "matrix engine"
             ),
-            "n_possible_pairs": int(n_indiv * (n_indiv - 1) // 2),
+            "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
 
     if args.inbreeding:
@@ -3699,17 +3761,26 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     t0 = time.perf_counter()
     sex_source = df["sex_source"].to_numpy()
+    # Build a temporary idf without n_founder_ancestors so compute_founder_summary
+    # has something to read; we then rebuild with the founder-ancestor vector.
+    idf_tmp = build_individual_df(
+        df, id_index, F_vec, n_anc, n_desc,
+        np.zeros(n_indiv, dtype=np.int32), comp_labels, sex_source,
+    )
+    founder_summary, n_founder_anc = compute_founder_summary(idf_tmp)
     idf = build_individual_df(
-        df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
+        df, id_index, F_vec, n_anc, n_desc, n_founder_anc, comp_labels, sex_source,
     )
     logger.info("individual table built in %.2fs", time.perf_counter() - t0)
 
     t0 = time.perf_counter()
-    aggregates = compute_aggregate_sections(idf, include_inbreeding=args.inbreeding)
+    aggregates = compute_aggregate_sections(
+        idf, founder_summary=founder_summary, include_inbreeding=args.inbreeding,
+    )
     logger.info("aggregate pedigree sections in %.2fs", time.perf_counter() - t0)
 
     tsv_payload, yaml_extras = _build_pedigree_data(
-        args.in_path, cmd, size, family, pairs, inb_summary, mating_pairs,
+        args.in_path, cmd, size, sibships, pairs, inb_summary, mating_pairs,
         relationship_summary, aggregates,
     )
     if effective_size is not None:
