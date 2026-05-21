@@ -13,7 +13,7 @@
 | 0.9 | 0.10 |
 |---|---|
 | `pedigree.demography.family_size` | `pedigree.demography.sibship_size` (per-Sibship stats only; per-individual contents moved out) |
-| `pedigree.lineage.lineage` | split into `pedigree.reproduction.reproduction` and `pedigree.genealogy.genealogy` |
+| `pedigree.lineage.lineage` | split into `pedigree.individuals.reproduction` and `pedigree.individuals.genealogy` |
 | `pedigree.lineage.founder_generation` | `pedigree.founders.founder_summary` |
 | `pedigree.lineage.founder_contribution` | `pedigree.founders.founder_contribution` |
 | `pedigree.relatedness.pairs` | `pedigree.relatedness.relationship_pairs` |

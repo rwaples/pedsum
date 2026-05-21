@@ -2453,10 +2453,8 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
         SectionSpec("sibship_size"),
         SectionSpec("mating_pairs"),
     )),
-    CategorySpec("reproduction", (
+    CategorySpec("individuals", (
         SectionSpec("reproduction"),
-    )),
-    CategorySpec("genealogy", (
         SectionSpec("genealogy"),
     )),
     CategorySpec("founders", (

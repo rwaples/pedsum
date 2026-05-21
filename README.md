@@ -347,8 +347,8 @@ id	sex	mother	father
 | `structure.components` | component-size distribution and singleton stats |
 | `demography.sibship_size` | per-Sibship size distribution (n_sibships, mean/median, size_dist) |
 | `demography.mating_pairs` | Mating Pair count, children-per-pair, effective pair count |
-| `reproduction.reproduction` | per-individual offspring/mate counts and Reproductive/Terminal classification (`offspring_count`, `offspring_count_hist`, `mate_count`, sex-stratified variants, `frac_with_full_sib`) |
-| `genealogy.genealogy` | per-individual `descendant_paths` summary; `distinct_ancestors` summary when `--inbreeding` is set |
+| `individuals.reproduction` | per-individual offspring/mate counts and Reproductive/Terminal classification (`offspring_count`, `offspring_count_hist`, `mate_count`, sex-stratified variants, `frac_with_full_sib`) |
+| `individuals.genealogy` | per-individual `descendant_paths` summary; `distinct_ancestors` summary when `--inbreeding` is set |
 | `founders.founder_contribution` | Founders with descendants + `descendant_paths_per_founder` distribution + `effective_founders_by_descendant_paths` |
 | `founders.founder_summary` | active Founders and effective-Founder contribution by depth, `founder_ancestors` per-depth distribution, bottleneck minima (may be skipped on very large pedigrees) |
 | `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only) |
