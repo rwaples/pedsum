@@ -2261,11 +2261,14 @@ def build_individual_df(
     F: np.ndarray,
     n_distinct_ancestors: np.ndarray,
     n_descendant_paths: np.ndarray,
-    n_founder_ancestors: np.ndarray,
     component_labels: np.ndarray,
     sex_source: np.ndarray,
 ) -> pd.DataFrame:
-    """Assemble per-individual table with the maximal column set."""
+    """Assemble per-individual table with the maximal column set.
+
+    ``n_founder_ancestors`` is added by the caller after
+    :func:`compute_founder_summary` runs against this table.
+    """
     n = len(df)
     ids_arr = df["id"].to_numpy()
     mothers = df["mother"].to_numpy()
@@ -2374,7 +2377,6 @@ def build_individual_df(
             "n_grandchildren": n_gc,
             "n_uncles_aunts": n_ua,
             "n_first_cousins": n_fc,
-            "n_founder_ancestors": n_founder_ancestors.astype(np.int32),
             "n_distinct_ancestors": n_distinct_ancestors,
             "n_descendant_paths": n_descendant_paths.astype(np.int32),
         }
@@ -3761,16 +3763,11 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     t0 = time.perf_counter()
     sex_source = df["sex_source"].to_numpy()
-    # Build a temporary idf without n_founder_ancestors so compute_founder_summary
-    # has something to read; we then rebuild with the founder-ancestor vector.
-    idf_tmp = build_individual_df(
-        df, id_index, F_vec, n_anc, n_desc,
-        np.zeros(n_indiv, dtype=np.int32), comp_labels, sex_source,
-    )
-    founder_summary, n_founder_anc = compute_founder_summary(idf_tmp)
     idf = build_individual_df(
-        df, id_index, F_vec, n_anc, n_desc, n_founder_anc, comp_labels, sex_source,
+        df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
     )
+    founder_summary, n_founder_anc = compute_founder_summary(idf)
+    idf["n_founder_ancestors"] = n_founder_anc
     logger.info("individual table built in %.2fs", time.perf_counter() - t0)
 
     t0 = time.perf_counter()
