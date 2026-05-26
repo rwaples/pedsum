@@ -830,7 +830,7 @@ _SEP_MAP = {
     "pipe": "|",
     "whitespace": r"\s+",
 }
-_SEP_HUMAN = {"\t": "tab", ",": "comma", ";": "semicolon", "|": "pipe", r"\s+": "whitespace"}
+_SEP_HUMAN = {v: k for k, v in _SEP_MAP.items()}
 
 
 def _open_text_for_sniff(path: Path):
@@ -858,9 +858,8 @@ def _sniff_delimiter(path: Path) -> str:
                 break
     if not first:
         raise PedigreeError(f"input file {path} is empty or contains only blank lines")
-    counts = {sep: first.count(sep) for sep in ("\t", ",", ";", "|")}
-    best = max(counts, key=lambda k: counts[k])
-    if counts[best] > 0:
+    best = max(("\t", ",", ";", "|"), key=first.count)
+    if first.count(best) > 0:
         return best
     if len(first.split()) >= 2:
         return r"\s+"
@@ -1579,18 +1578,18 @@ def compute_founder_summary(
     founders = idf["is_founder"].to_numpy(dtype=bool)
     founder_rows = np.where(founders)[0]
     n_founders = len(founder_rows)
-    n_founder_ancestors_zeros = np.zeros(n, dtype=np.int32)
+    zeros = np.zeros(n, dtype=np.int32)
     if n == 0 or n_founders == 0:
-        return ({"computed": True, "by_depth": [], "bottleneck": None},
-                n_founder_ancestors_zeros)
+        return {"computed": True, "by_depth": [], "bottleneck": None}, zeros
     if n * n_founders > max_lineage_cells:
-        return ({
+        skip = {
             "computed": False,
             "skip_reason": (
                 f"n_individuals * n_founders = {n * n_founders} exceeds "
                 f"max_lineage_cells={max_lineage_cells}"
             ),
-        }, n_founder_ancestors_zeros)
+        }
+        return skip, zeros
 
     row_to_founder = {int(row): i for i, row in enumerate(founder_rows)}
     id_index = pd.Index(idf["id"].to_numpy())
@@ -1660,10 +1659,8 @@ def compute_founder_summary(
     else:
         bottleneck = None
 
-    return (
-        {"computed": True, "by_depth": by_depth, "bottleneck": bottleneck},
-        n_founder_ancestors,
-    )
+    summary = {"computed": True, "by_depth": by_depth, "bottleneck": bottleneck}
+    return summary, n_founder_ancestors
 
 
 def compute_aggregate_sections(
