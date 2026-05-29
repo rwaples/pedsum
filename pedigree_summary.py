@@ -61,6 +61,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -72,9 +73,7 @@ import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import yaml
 from pedigree_graph import REL_REGISTRY, PedigreeGraph
-from pedigree_graph.experimental import count_pairs_bfs
 
-_BFS_AUTO_THRESHOLD = 5_000_000
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
 VERSION = "0.10.0"
@@ -1867,8 +1866,8 @@ def compute_sibship_sizes(df: pd.DataFrame) -> dict:
 def _augment_pair_counts(named: dict[str, int]) -> dict:
     """Add ``PO`` (= MO + FO) and ``by_degree`` aggregates to a named-codes dict.
 
-    Both engine wrappers (``_count_pairs_matrix`` and ``_count_pairs_bfs``)
-    share this so the YAML output schema is identical regardless of engine.
+    Shared by the matrix pair-list enumerator and the streaming-scalar
+    counter so the YAML output schema is identical regardless of source.
     """
     out = {code: int(count) for code, count in named.items()}
     out["PO"] = int(named.get("MO", 0) + named.get("FO", 0))
@@ -1879,21 +1878,13 @@ def _augment_pair_counts(named: dict[str, int]) -> dict:
     return out
 
 
-def count_relationship_pairs(
-    df: pd.DataFrame,
-    engine: str = "auto",
-    threshold: int = _BFS_AUTO_THRESHOLD,
-    include_pair_lists: bool = False,
-    pg: PedigreeGraph | None = None,
-) -> dict:
-    """Dispatch to the matrix or BFS relationship-pair enumerator.
+def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
+    """Sparse matrix enumerator that retains pair lists for richer summaries.
 
-    Returns a dict with the 23 named relationship codes through degree
-    5 plus ``PO`` (= MO + FO, synthetic alias), ``by_degree`` (a
-    map keyed 0..5 summing named counts by kinship degree), and
-    ``_engine`` (the engine that produced the counts; consumed by
-    ``_build_pedigree_data`` and emitted as ``pairs_engine`` in the
-    summary).
+    Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``;
+    when ``pg`` is None this wrapper compacts IDs to ``0..n-1`` first
+    because ``PedigreeGraph`` allocates an ``id_to_row`` table sized to
+    ``max(id)+1``.
 
     Assumes every non-``-1`` parent ID appears in ``df['id']``; this is
     enforced by ``load_and_validate``'s ``parent_refs_present_*`` checks
@@ -1904,51 +1895,6 @@ def count_relationship_pairs(
     caller already needed a graph for other primitives (F, lineage,
     effective size).
     """
-    chosen = _select_engine(len(df), engine, threshold)
-    logger.info("relationship engine: %s (n=%d)", chosen, len(df))
-    if chosen == "bfs":
-        out = _count_pairs_bfs(df, pg=pg)
-    else:
-        out = (
-            _count_pairs_matrix_with_lists(df, pg=pg)
-            if include_pair_lists
-            else _count_pairs_matrix(df, pg=pg)
-        )
-    out["_engine"] = chosen
-    return out
-
-
-def _select_engine(n: int, requested: str, threshold: int) -> str:
-    """Resolve ``--engine`` choice given pedigree size."""
-    if requested == "matrix":
-        return "matrix"
-    if requested == "bfs" or n >= threshold:
-        chosen = "bfs"
-    else:
-        chosen = "matrix"
-    if chosen == "bfs":
-        logger.warning(
-            "BFS engine is experimental — perf claims unverified, may be removed",
-        )
-    return chosen
-
-
-def _count_pairs_matrix(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
-    """Sparse matrix-power enumerator (default engine for n < threshold).
-
-    Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``;
-    when ``pg`` is None this wrapper compacts IDs to ``0..n-1`` first
-    because ``PedigreeGraph`` allocates an ``id_to_row`` table sized to
-    ``max(id)+1``.
-    """
-    if pg is None:
-        pg = _build_pedigree_graph(df)
-    named = pg.count_pairs(max_degree=5)
-    return _augment_pair_counts(named)
-
-
-def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
-    """Sparse matrix enumerator that retains pair lists for richer summaries."""
     if pg is None:
         pg = _build_pedigree_graph(df)
     pair_lists = pg.extract_pairs(max_degree=5)
@@ -1956,19 +1902,6 @@ def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = 
     out = _augment_pair_counts(named)
     out["_pair_lists"] = pair_lists
     return out
-
-
-def _count_pairs_bfs(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
-    """BFS / boolean-matmul / numba enumerator (experimental).
-
-    Thin wrapper around :func:`pedigree_graph.experimental.count_pairs_bfs`.
-    See that function's docstring for the inbred-pedigree caveat
-    (distinct-shared-ancestor counting vs path-multiplicity).
-    """
-    if pg is None:
-        pg = _build_pedigree_graph(df)
-    named = count_pairs_bfs(pg, max_degree=5)
-    return _augment_pair_counts(named)
 
 
 def compute_relationship_summary(
@@ -2490,21 +2423,13 @@ KNOWN_YAML_DROPS: frozenset[str] = frozenset({
     "individual.distributions.F.max",
 })
 
-# Schema renames from flat → categorised path. Used by the totality test so
-# renamed fields aren't flagged as missing.
-RENAMES: dict[str, str] = {
-    "pedigree.pairs_engine": "pedigree.relatedness.relationship_pairs.engine",
-}
-
-
 def _categorise_pedigree(flat_ped: dict) -> dict:
     """Wrap the flat pedigree dict into the category structure.
 
     Pure function. Reads ``SUMMARY_SCHEMA`` to bucket sections by
     category, drops empty categories, and folds the sibling
     ``pairs_engine`` into ``relationship_pairs.engine`` so it lives
-    inside the relatedness.relationship_pairs subtree (matches
-    ``RENAMES``).
+    inside the relatedness.relationship_pairs subtree.
 
     Does NOT apply slim/extra splitting — that is ``_split_summary``'s
     job. Does NOT apply ``KNOWN_YAML_DROPS`` — splitter handles them.
@@ -2723,30 +2648,19 @@ def _split_individual_distributions(
     return slim_d, extra_d
 
 
-def _deep_merge_summary(slim, extra):
-    """Merge a (slim, extra) pair back into one structure for ``--single-file``.
-
-    Three cases: dict (deep-union keys), list-of-dict (zip-by-index,
-    deep-union per entry), and scalars (slim wins — extra should not
-    carry scalars under the split contract).
-    """
-    if extra is None:
-        return slim
-    if slim is None:
-        return extra
-    if isinstance(slim, dict) and isinstance(extra, dict):
-        out: dict = dict(slim)
-        for k, v in extra.items():
-            if k in out:
-                out[k] = _deep_merge_summary(out[k], v)
-            else:
-                out[k] = v
-        return out
-    if isinstance(slim, list) and isinstance(extra, list):
-        if len(slim) != len(extra):
-            return slim  # length mismatch: take slim (defensive; should not happen)
-        return [_deep_merge_summary(a, b) for a, b in zip(slim, extra, strict=False)]
-    return slim
+# Keys projected from ``compute_size_structure``'s output into the
+# ``size_structure`` summary section, in emit order. ``n_total`` is lifted to
+# the top level and ``n_unknown_sex`` is intentionally not surfaced here.
+# ``compute_size_structure`` already returns YAML-clean native types
+# (scalars via int()/float(); lists via ndarray.tolist()), so no re-cast.
+_SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
+    "n_founders", "founder_frac", "n_nonfounders", "nonfounder_frac",
+    "n_male", "n_female", "n_mother_links", "n_father_links",
+    "n_parent_child_edges", "n_with_both_parents", "n_with_mother_only",
+    "n_with_father_only", "n_half_founders", "max_depth", "mean_depth",
+    "median_depth", "depth_counts", "n_components", "largest_component",
+    "largest_component_frac", "next_components",
+)
 
 
 def _build_pedigree_data(
@@ -2802,29 +2716,7 @@ def _build_pedigree_data(
         "generated_at": _now_iso(),
         "n_total": int(size["n_total"]),
         "max_degree_enumerated": 5,
-        "size_structure": {
-            "n_founders": int(size["n_founders"]),
-            "founder_frac": float(size["founder_frac"]),
-            "n_nonfounders": int(size["n_nonfounders"]),
-            "nonfounder_frac": float(size["nonfounder_frac"]),
-            "n_male": int(size["n_male"]),
-            "n_female": int(size["n_female"]),
-            "n_mother_links": int(size["n_mother_links"]),
-            "n_father_links": int(size["n_father_links"]),
-            "n_parent_child_edges": int(size["n_parent_child_edges"]),
-            "n_with_both_parents": int(size["n_with_both_parents"]),
-            "n_with_mother_only": int(size["n_with_mother_only"]),
-            "n_with_father_only": int(size["n_with_father_only"]),
-            "n_half_founders": int(size["n_half_founders"]),
-            "max_depth": int(size["max_depth"]),
-            "mean_depth": float(size["mean_depth"]),
-            "median_depth": float(size["median_depth"]),
-            "depth_counts": [int(x) for x in size["depth_counts"]],
-            "n_components": int(size["n_components"]),
-            "largest_component": int(size["largest_component"]),
-            "largest_component_frac": float(size["largest_component_frac"]),
-            "next_components": [int(x) for x in size["next_components"]],
-        },
+        "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
         "sibship_size": sibship_section,
         "mating_pairs": mating_pairs,
         "relationship_summary": relationship_summary,
@@ -2861,19 +2753,7 @@ def _build_individual_data(
             continue
         if col not in idf.columns:
             continue
-        c = idf[col]
-        is_float = pd.api.types.is_float_dtype(c)
-        cast = float if is_float else int
-        distributions[col] = {
-            "mean": float(c.mean()) if n else 0.0,
-            "std": float(c.std()) if n > 1 else 0.0,
-            "min": cast(c.min()) if n else 0,
-            "q1": cast(c.quantile(0.25)) if n else 0,
-            "median": cast(c.median()) if n else 0,
-            "q3": cast(c.quantile(0.75)) if n else 0,
-            "max": cast(c.max()) if n else 0,
-            "nz": int((c != 0).sum()),
-        }
+        distributions[col] = _numeric_distribution(idf[col])
 
     out: dict = {
         "input": str(path),
@@ -2904,6 +2784,33 @@ def _drop_distribution_extrema(obj: object) -> None:
             _drop_distribution_extrema(v)
 
 
+def _null_below(d: dict, keys, min_cell: int) -> None:
+    """Null each of ``keys`` in ``d`` whose int value is in ``(0, min_cell)``.
+
+    Missing / ``None`` values collapse to 0 via ``or 0`` and are left
+    untouched (the ``0 <`` guard fails), matching the original per-site
+    small-cell tests.
+    """
+    for k in keys:
+        if 0 < int(d.get(k, 0) or 0) < min_cell:
+            d[k] = None
+
+
+def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_keys) -> None:
+    """Small-cell redaction for a grouped row keyed by ``n``.
+
+    If the group's ``n`` is below ``min_cell``, null every key except those
+    in ``keep``. Otherwise null only the ``small_keys`` whose own value is
+    below ``min_cell`` (via :func:`_null_below`).
+    """
+    if int(row.get("n", 0)) < min_cell:
+        for k in list(row):
+            if k not in keep:
+                row[k] = None
+    else:
+        _null_below(row, small_keys, min_cell)
+
+
 def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
@@ -2924,8 +2831,7 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
     sizes["depth_counts"] = [
         (g if g >= min_cell else None) for g in sizes.get("depth_counts", [])
     ]
-    if 0 < int(sizes.get("largest_component", 0)) < min_cell:
-        sizes["largest_component"] = None
+    _null_below(sizes, ("largest_component",), min_cell)
 
     _drop_distribution_extrema(ped_data)
 
@@ -2942,90 +2848,57 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
             for k in list(mating):
                 if k != "n_pairs":
                     mating[k] = None
-        for k in ("n_pairs_with_multiple_children",):
-            if 0 < int(mating.get(k, 0) or 0) < min_cell:
-                mating[k] = None
+        _null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
 
     rel_summary = ped_data.get("relationship_summary") or {}
-    for k in ("n_related_pairs", "n_unrelated_pairs"):
-        if 0 < int(rel_summary.get(k, 0) or 0) < min_cell:
-            rel_summary[k] = None
+    _null_below(rel_summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
     for section in ("related_pairs_by_closest_degree", "closest_relationship_per_individual"):
         vals = rel_summary.get(section)
         if isinstance(vals, dict):
-            for k, v in list(vals.items()):
-                if isinstance(v, int) and 0 < v < min_cell:
-                    vals[k] = None
+            _null_below(vals, list(vals), min_cell)
     for row in rel_summary.get("related_pair_density_by_depth", []):
-        if int(row.get("n", 0)) < min_cell:
-            for k in list(row):
-                if k not in ("depth", "n"):
-                    row[k] = None
-        else:
-            for k in ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"):
-                if 0 < int(row.get(k, 0) or 0) < min_cell:
-                    row[k] = None
+        _redact_small_group(
+            row, ("depth", "n"), min_cell,
+            ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
+        )
 
     reproduction = ped_data.get("reproduction", {})
-    for k in ("n_reproductive", "n_terminal"):
-        if 0 < int(reproduction.get(k, 0) or 0) < min_cell:
-            reproduction[k] = None
+    _null_below(reproduction, ("n_reproductive", "n_terminal"), min_cell)
 
     founder = ped_data.get("founder_contribution", {})
-    for k in ("n_founders_with_descendants", "n_founders_without_descendants"):
-        if 0 < int(founder.get(k, 0) or 0) < min_cell:
-            founder[k] = None
+    _null_below(
+        founder, ("n_founders_with_descendants", "n_founders_without_descendants"), min_cell,
+    )
 
     founder_summary = ped_data.get("founder_summary", {})
     for row in founder_summary.get("by_depth", []):
-        if int(row.get("n", 0)) < min_cell:
-            for k in list(row):
-                if k not in ("depth", "n"):
-                    row[k] = None
-        else:
-            for k in ("active_founders",):
-                if 0 < int(row.get(k, 0) or 0) < min_cell:
-                    row[k] = None
+        _redact_small_group(row, ("depth", "n"), min_cell, ("active_founders",))
     bottleneck = founder_summary.get("bottleneck")
     if isinstance(bottleneck, dict):
-        for k in ("min_active_founders",):
-            if 0 < int(bottleneck.get(k, 0) or 0) < min_cell:
-                bottleneck[k] = None
+        _null_below(bottleneck, ("min_active_founders",), min_cell)
 
     comps_full = ped_data.get("components", {})
-    for k in ("singletons",):
-        if 0 < int(comps_full.get(k, 0) or 0) < min_cell:
-            comps_full[k] = None
+    _null_below(comps_full, ("singletons",), min_cell)
 
     sex_summary = ped_data.get("sex_summary", {})
     for stats in sex_summary.values():
-        if int(stats.get("n", 0)) < min_cell:
-            for k in list(stats):
-                if k != "n":
-                    stats[k] = None
-        else:
-            for k in ("n_founders", "n_reproductive", "n_terminal", "n_inbred"):
-                if 0 < int(stats.get(k, 0) or 0) < min_cell:
-                    stats[k] = None
+        _redact_small_group(
+            stats, ("n",), min_cell,
+            ("n_founders", "n_reproductive", "n_terminal", "n_inbred"),
+        )
 
     for row in ped_data.get("depth_summary", []):
-        if int(row.get("n", 0)) < min_cell:
-            for k in list(row):
-                if k not in ("depth", "n"):
-                    row[k] = None
-        else:
-            for k in ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"):
-                if 0 < int(row.get(k, 0) or 0) < min_cell:
-                    row[k] = None
+        _redact_small_group(
+            row, ("depth", "n"), min_cell,
+            ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
+        )
 
     pairs = ped_data.get("relationship_pairs", {})
-    for code, count in list(pairs.items()):
+    for code in list(pairs):
         if code == "by_degree":
-            for d, c in pairs[code].items():
-                if 0 < c < min_cell:
-                    pairs[code][d] = None
-        elif isinstance(count, int) and 0 < count < min_cell:
-            pairs[code] = None
+            _null_below(pairs["by_degree"], list(pairs["by_degree"]), min_cell)
+        elif isinstance(pairs[code], int):
+            _null_below(pairs, (code,), min_cell)
 
     inb = ped_data.get("inbreeding")
     if inb is not None:
@@ -3040,12 +2913,10 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
             if 0 < frac * n_total < min_cell:
                 inb["hist"][bucket] = None
 
-    for col, dist in ind_data.get("distributions", {}).items():
+    for dist in ind_data.get("distributions", {}).values():
         dist.pop("min", None)
         dist.pop("max", None)
-        if 0 < int(dist.get("nz", 0)) < min_cell:
-            dist["nz"] = None
-        _ = col  # silence unused-loop-var
+        _null_below(dist, ("nz",), min_cell)
 
 
 def _build_summary_data(
@@ -3621,6 +3492,14 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
     )
 
 
+@contextmanager
+def _timed(label: str):
+    """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block."""
+    t0 = time.perf_counter()
+    yield
+    logger.info("%s in %.2fs", label, time.perf_counter() - t0)
+
+
 def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
@@ -3671,43 +3550,32 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     # needs it (relationship pairs, F, lineage counts, effective size).
     # ``ped_depth`` MUST be populated from ``pg.generation`` before any
     # summary function runs — six callers read it.
-    t0 = time.perf_counter()
-    pg = _build_pedigree_graph(df)
-    df["ped_depth"] = np.asarray(pg.generation, dtype=np.int32)
-    logger.info("built PedigreeGraph in %.2fs", time.perf_counter() - t0)
+    with _timed("built PedigreeGraph"):
+        pg = _build_pedigree_graph(df)
+        df["ped_depth"] = np.asarray(pg.generation, dtype=np.int32)
 
     id_index = pd.Index(df["id"].to_numpy())
 
-    t0 = time.perf_counter()
-    size, comp_labels = compute_size_structure(df, children_csr)
-    logger.info("size+structure in %.2fs", time.perf_counter() - t0)
+    with _timed("size+structure"):
+        size, comp_labels = compute_size_structure(df, children_csr)
 
-    t0 = time.perf_counter()
-    sibships = compute_sibship_sizes(df)
-    logger.info("sibship sizes in %.2fs", time.perf_counter() - t0)
+    with _timed("sibship sizes"):
+        sibships = compute_sibship_sizes(df)
 
-    t0 = time.perf_counter()
-    mating_pairs = compute_mating_pair_summary(df)
-    logger.info("mating-pair summary in %.2fs", time.perf_counter() - t0)
+    with _timed("mating-pair summary"):
+        mating_pairs = compute_mating_pair_summary(df)
 
     n_indiv = len(df)
     if args.per_individual_pairs:
-        t0 = time.perf_counter()
-        pairs = count_relationship_pairs(
-            df, include_pair_lists=True, pg=pg,
-        )
-        logger.info("relationship pairs in %.2fs", time.perf_counter() - t0)
+        with _timed("relationship pairs"):
+            pairs = _count_pairs_matrix_with_lists(df, pg=pg)
+            pairs["_engine"] = "matrix"
 
-        t0 = time.perf_counter()
-        relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
-        logger.info("relationship burden summary in %.2fs", time.perf_counter() - t0)
+        with _timed("relationship burden summary"):
+            relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
     else:
-        t0 = time.perf_counter()
-        streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
-        logger.info(
-            "relationship pair counts (count_pairs_streaming) in %.2fs",
-            time.perf_counter() - t0,
-        )
+        with _timed("relationship pair counts (count_pairs_streaming)"):
+            streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
         pairs = _augment_pair_counts(streamed_counts)
         pairs["_engine"] = "streaming_scalar"
         relationship_summary = {
@@ -3727,49 +3595,41 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
                 "--no-inbreeding to skip",
                 f"{n_indiv:,}",
             )
-        t0 = time.perf_counter()
-        F_vec = pg.compute_inbreeding()
-        n_anc = pg.compute_n_ancestors()
-        inb_summary: dict | None = _build_inbreeding_summary(F_vec)
-        logger.info("inbreeding (F + n_ancestors) in %.2fs", time.perf_counter() - t0)
+        with _timed("inbreeding (F + n_ancestors)"):
+            F_vec = pg.compute_inbreeding()
+            n_anc = pg.compute_n_ancestors()
+            inb_summary: dict | None = _build_inbreeding_summary(F_vec)
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
         inb_summary = None
         F_vec = np.zeros(n_indiv, dtype=np.float64)
         n_anc = np.zeros(n_indiv, dtype=np.int32)
 
-    t0 = time.perf_counter()
-    n_desc = pg.compute_n_descendants()
-    logger.info("descendants in %.2fs", time.perf_counter() - t0)
+    with _timed("descendants"):
+        n_desc = pg.compute_n_descendants()
 
     effective_size: dict | None = None
     if args.effective_size:
-        t0 = time.perf_counter()
-        effective_size = compute_effective_size(
-            pg, ne_coancestry=args.ne_coancestry, n_threads=args.ne_threads,
-        )
-        logger.info(
-            "effective size (%d estimators) in %.2fs",
-            8 if args.ne_coancestry else 7,
-            time.perf_counter() - t0,
-        )
+        n_estimators = 8 if args.ne_coancestry else 7
+        with _timed(f"effective size ({n_estimators} estimators)"):
+            effective_size = compute_effective_size(
+                pg, ne_coancestry=args.ne_coancestry, n_threads=args.ne_threads,
+            )
 
     out_dir = args.out_dir
 
-    t0 = time.perf_counter()
-    sex_source = df["sex_source"].to_numpy()
-    idf = build_individual_df(
-        df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
-    )
-    founder_summary, n_founder_anc = compute_founder_summary(idf)
-    idf["n_founder_ancestors"] = n_founder_anc
-    logger.info("individual table built in %.2fs", time.perf_counter() - t0)
+    with _timed("individual table built"):
+        sex_source = df["sex_source"].to_numpy()
+        idf = build_individual_df(
+            df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
+        )
+        founder_summary, n_founder_anc = compute_founder_summary(idf)
+        idf["n_founder_ancestors"] = n_founder_anc
 
-    t0 = time.perf_counter()
-    aggregates = compute_aggregate_sections(
-        idf, founder_summary=founder_summary, include_inbreeding=args.inbreeding,
-    )
-    logger.info("aggregate pedigree sections in %.2fs", time.perf_counter() - t0)
+    with _timed("aggregate pedigree sections"):
+        aggregates = compute_aggregate_sections(
+            idf, founder_summary=founder_summary, include_inbreeding=args.inbreeding,
+        )
 
     tsv_payload, yaml_extras = _build_pedigree_data(
         args.in_path, cmd, size, sibships, pairs, inb_summary, mating_pairs,
@@ -3810,12 +3670,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "safe-attempt: skipped %s/annotated.tsv.gz (per-individual)", out_dir,
         )
     else:
-        t0 = time.perf_counter()
-        _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
-        logger.info(
-            "wrote %s/annotated.tsv.gz in %.2fs",
-            out_dir, time.perf_counter() - t0,
-        )
+        with _timed(f"wrote {out_dir}/annotated.tsv.gz"):
+            _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
 
     return 0
 

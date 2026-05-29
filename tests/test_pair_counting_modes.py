@@ -82,8 +82,8 @@ def test_per_individual_pairs_uses_matrix_engine(tmp_path):
     )
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    # engine field comes from count_relationship_pairs.
-    assert ped["relatedness"]["relationship_pairs"]["engine"] in ("matrix", "bfs")
+    # --per-individual-pairs uses the matrix pair-list enumerator.
+    assert ped["relatedness"]["relationship_pairs"]["engine"] == "matrix"
 
 
 def test_per_individual_pairs_populates_relationship_summary(tmp_path):

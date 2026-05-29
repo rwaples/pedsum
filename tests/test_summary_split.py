@@ -9,9 +9,8 @@ slim / extra / intentional-drop; per-generation values that look like
 duplicates of global scalars are preserved in extra; empty categories
 are omitted.
 
-The unit test for ``_split_summary`` + ``_deep_merge_summary`` imports
-pedigree_summary as a module to exercise the splitter on a fabricated
-list-of-dict section.
+The unit test for ``_split_summary`` imports pedigree_summary as a module
+to exercise the splitter on a fabricated list-of-dict section.
 """
 
 from __future__ import annotations
@@ -118,12 +117,12 @@ def test_empty_categories_omitted(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Direct unit tests on _split_summary / _deep_merge_summary
+# Direct unit tests on _split_summary
 # --------------------------------------------------------------------------
 
 
 def test_list_of_dict_split_zips_by_index():
-    """A list-of-dict section splits row-by-row; deep-merge zips by index."""
+    """A list-of-dict section splits row-by-row into slim / extra residues."""
     nested = {
         "strata": {
             "depth_summary": [
@@ -142,9 +141,6 @@ def test_list_of_dict_split_zips_by_index():
     extra_rows = extra["strata"]["depth_summary"]
     assert extra_rows[0] == {"mean_F": 0.0, "n_inbred": 0}
     assert extra_rows[1] == {"mean_F": 0.012, "n_inbred": 5}
-    # Round-trip: deep-merge restores the original.
-    merged = _ps._deep_merge_summary(slim, extra)
-    assert merged == nested
 
 
 def test_schema_no_overlap_between_slim_and_extra(tmp_path):

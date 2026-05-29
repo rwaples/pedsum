@@ -19,19 +19,24 @@ See [CHANGELOG.md](CHANGELOG.md). Notable:
 
 ## Engine selection & semantics
 
-- Matrix vs streaming vs BFS engines: see `_select_engine` in
-  `pedigree_summary.py` (line ~1824).
+Pedsum uses two pair-counting paths, picked by `--per-individual-pairs`
+(no engine auto-tiering — per ADR 0001, the matrix/BFS dispatch was
+removed). Both delegate to `pedigree-graph`:
+
+- Default: `PedigreeGraph.count_pairs_streaming` (`_engine` reported as
+  `streaming_scalar`). O(N) memory; aggregate counts only.
+- `--per-individual-pairs`: `_count_pairs_matrix_with_lists` (`_engine`
+  reported as `matrix`). Materialises full pair lists so the
+  per-individual relationship-burden summary can be computed.
 - Streaming counts are bit-identical to matrix on the 10 simple codes
   (`MO`, `FO`, `FS`, `MHS`, `PHS`, `MZ`, `GP`, `GGP`, `GGGP`, `G3GP`);
   ~1% scalar approximation on the 13 cousin/collateral codes when
-  the pedigree has inbreeding, twins, or shallow depth.
-- Matrix vs BFS on inbred pedigrees: matrix counts *paths*
-  (multiplicity), BFS counts *distinct shared ancestors* — they
-  disagree on cousin-style codes (`1C1R`, `H1C1R`, `1C2R`, `2C`).
-  The YAML `pairs_engine` field records which engine produced each
-  summary. See docstrings around lines 3477, 3647, 3649.
-- BFS auto-selects at `N ≥ 5M` within the `--per-individual-pairs`
-  path and emits a `FutureWarning`; never reached without that flag.
+  the pedigree has inbreeding, twins, or shallow depth. The YAML
+  `pairs_engine` field records which path produced each summary.
+- The experimental BFS enumerator (matrix counts *paths* / multiplicity;
+  BFS counts *distinct shared ancestors*, disagreeing on `1C1R`, `H1C1R`,
+  `1C2R`, `2C`) is no longer reachable from pedsum. It remains available
+  to direct callers via `pedigree_graph.experimental.count_pairs_bfs`.
   Open upstream issues:
   [pedigree-graph#2](https://github.com/rwaples/pedigree-graph/issues/2),
   [pedigree-graph#3](https://github.com/rwaples/pedigree-graph/issues/3).
