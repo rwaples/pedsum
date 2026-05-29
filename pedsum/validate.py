@@ -1,9 +1,18 @@
-"""Load + validate drivers (fail-fast and accumulating) and sex imputation."""
+"""Validation: a declarative Check registry driven by one dual-mode runner.
+
+`load_and_validate` (summarize, fail-fast) and `validate_pedigree` (validate,
+accumulating) share one `CHECKS` registry and one `_run_checks` runner — see
+`docs/adr/0002-validation-check-registry.md`. Each Check carries its
+prerequisites, label, and group; `_CHECK_ORDER` and `_CHECK_LABELS` are derived
+from the registry. `_CHECK_GROUPS` is a curated *display* order (it intentionally
+differs from execution order) and stays explicit.
+"""
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -11,7 +20,6 @@ import pandas as pd
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.checks import (
-    _CHECK_ORDER,
     CheckResult,
     Finding,
     _check_acyclic,
@@ -44,9 +52,15 @@ from pedsum.parse import (
 from pedsum.pedigree_ops import _build_children_csr, _compute_depth_unordered, _parent_rows
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import scipy.sparse as sp
+
+
+# ---------------------------------------------------------------------------
+# Sex imputation
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -61,6 +75,7 @@ class _SexImputation:
     father_first_row: dict[int, int]
     overridden_mask: np.ndarray
     sex_source: np.ndarray  # dtype=object; per-row category string
+
 
 def _impute_sex_from_roles(
     sex: np.ndarray,
@@ -147,6 +162,375 @@ def _impute_sex_from_roles(
         sex_source=sex_source,
     )
 
+
+# ---------------------------------------------------------------------------
+# Check, CheckOutcome, ValidationContext
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CheckOutcome:
+    """A single Check's verdict: status, any findings, and an optional annotation."""
+
+    status: str  # "PASS" | "FAIL" | "SKIP"
+    findings: list[Finding] = field(default_factory=list)
+    count: int = 0
+    skip_reason: str | None = None
+
+
+_PASS = CheckOutcome("PASS")
+
+
+def _from_findings(findings: list[Finding]) -> CheckOutcome:
+    """PASS when no findings, else FAIL carrying them (count = len)."""
+    if findings:
+        return CheckOutcome("FAIL", findings, len(findings))
+    return _PASS
+
+
+@dataclass
+class ValidationContext:
+    """Mutable state threaded through every Check's ``run(ctx)``.
+
+    Parse Checks populate the array fields (parsing *is* the Check); all other
+    Checks read them. ``id_index`` and ``imputation`` are derived once on first
+    access. Carries the CLI config a Check needs (column names, flags, bounds).
+    """
+
+    df_raw: pd.DataFrame
+    id_col: str
+    sex_col: str
+    mother_col: str
+    father_col: str
+    birth_year_col: str | None
+    sex_encoding: str
+    zero_as_missing: bool
+    allow_missing_sex: bool
+    override_asserted_sex: bool
+    birth_year_min: int
+    birth_year_max: int | None
+    # summarize requires a named --birth-year-col to exist (raises if absent);
+    # validate treats a missing one as an inapplicable SKIP.
+    require_birth_year_col: bool
+    # Populated by the parse Checks.
+    ids: np.ndarray | None = None
+    mothers: np.ndarray | None = None
+    fathers: np.ndarray | None = None
+    sex: np.ndarray | None = None
+    birth_year: np.ndarray | None = None
+
+    @cached_property
+    def id_index(self) -> pd.Index:
+        """Row lookup over the parsed IDs; built once (IDs are fixed after parse)."""
+        return pd.Index(self.ids)
+
+    @cached_property
+    def imputation(self) -> _SexImputation:
+        """Sex imputation from parent-role usage; computed once, shared by the sex checks."""
+        return _impute_sex_from_roles(
+            self.sex, self.ids, self.mothers, self.fathers,
+            override_asserted_sex=self.override_asserted_sex,
+        )
+
+    def get_imputation(self) -> _SexImputation | None:
+        """Return the imputation only if already computed (never triggers it)."""
+        return self.__dict__.get("imputation")
+
+    @property
+    def by_max(self) -> int:
+        """Resolved birth-year upper bound (default: current calendar year + 1)."""
+        return self.birth_year_max if self.birth_year_max is not None else _birth_year_default_max()
+
+
+@dataclass(frozen=True)
+class Check:
+    """One registry entry: a named integrity test with its prerequisites + display metadata."""
+
+    name: str
+    requires: tuple[str, ...]
+    run: Callable[[ValidationContext], CheckOutcome]
+    label: str
+    group: str
+
+
+# ---------------------------------------------------------------------------
+# Per-check run functions (ctx -> CheckOutcome). The _check_* helpers stay pure.
+# ---------------------------------------------------------------------------
+
+
+def _ck_required_columns(ctx: ValidationContext) -> CheckOutcome:
+    # summarize (require_birth_year_col) treats a named --birth-year-col as
+    # required; validate omits it and lets birth_year_dtype SKIP instead.
+    needed = {ctx.id_col, ctx.sex_col, ctx.mother_col, ctx.father_col}
+    if ctx.require_birth_year_col and ctx.birth_year_col is not None:
+        needed.add(ctx.birth_year_col)
+    miss = needed - set(ctx.df_raw.columns)
+    if miss:
+        msg = f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}"
+        return CheckOutcome("FAIL", [Finding(check="required_columns", detail=msg)], 1)
+    return _PASS
+
+
+def _ck_empty_pedigree(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_empty_pedigree(len(ctx.df_raw)))
+
+
+def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
+    try:
+        ctx.ids = _as_int_col(ctx.df_raw[ctx.id_col], ctx.id_col)
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="id_dtype", detail=str(e))], 1)
+    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids))
+    return _PASS
+
+
+def _ck_mother_dtype(ctx: ValidationContext) -> CheckOutcome:
+    try:
+        ctx.mothers = _as_parent_int_col(ctx.df_raw[ctx.mother_col], ctx.mother_col, ctx.zero_as_missing)
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="mother_dtype", detail=str(e))], 1)
+    return _PASS
+
+
+def _ck_father_dtype(ctx: ValidationContext) -> CheckOutcome:
+    try:
+        ctx.fathers = _as_parent_int_col(ctx.df_raw[ctx.father_col], ctx.father_col, ctx.zero_as_missing)
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="father_dtype", detail=str(e))], 1)
+    return _PASS
+
+
+def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
+    try:
+        ctx.sex = _decode_sex(ctx.df_raw[ctx.sex_col], encoding=ctx.sex_encoding, zero_as_missing=ctx.zero_as_missing)
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="sex_tokens", detail=str(e))], 1)
+    return _PASS
+
+
+def _ck_negative_ids(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_negative_ids(ctx.ids))
+
+
+def _ck_duplicate_ids(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_duplicate_ids(ctx.ids))
+
+
+def _ck_parent_token_range_mother(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parent_token_range(ctx.mothers, "mother"))
+
+
+def _ck_parent_token_range_father(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parent_token_range(ctx.fathers, "father"))
+
+
+def _ck_parent_refs_present_mother(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.id_index))
+
+
+def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.id_index))
+
+
+def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index))
+
+
+def _ck_self_loops(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_self_loops(ctx.ids, ctx.mothers, ctx.fathers))
+
+
+def _ck_parents_distinct(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_parents_distinct(ctx.ids, ctx.mothers, ctx.fathers))
+
+
+def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
+    imp = ctx.imputation
+    if ctx.allow_missing_sex:
+        n = int(imp.ambiguous_mask.sum())
+        return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
+    return _from_findings(_check_sex_role_ambiguity(
+        ctx.ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
+    ))
+
+
+def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
+    imp = ctx.imputation
+    # Always run the real check: the override clears asserted-vs-role
+    # contradictions only for rows used in a SINGLE role; a row asserted M and
+    # used as BOTH mother and father stays unoverridable and must still FAIL.
+    findings = _check_sex_role_consistency(
+        ctx.mothers, ctx.fathers, imp.imputed_sex, ctx.id_index,
+        skip_mask=imp.original_unknown_mask,
+    )
+    if findings:
+        return CheckOutcome("FAIL", findings, len(findings))
+    # Clean: surface the override count as a PASS annotation
+    # ("PASS (N overridden from role)") when the override fired.
+    n = int(imp.overridden_mask.sum()) if ctx.override_asserted_sex else 0
+    return CheckOutcome("PASS", count=n, skip_reason=(f"{n} overridden from role" if n > 0 else None))
+
+
+def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
+    imp = ctx.imputation
+    if ctx.allow_missing_sex:
+        n = int(((imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
+        return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
+    return _from_findings(_check_unknown_sex(ctx.ids, imp.imputed_sex, imp.ambiguous_mask))
+
+
+def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_acyclic(ctx.ids, ctx.mothers, ctx.fathers, ctx.id_index))
+
+
+def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
+    if ctx.birth_year_col is None:
+        return CheckOutcome("SKIP", skip_reason="no --birth-year-col specified")
+    if ctx.birth_year_col not in ctx.df_raw.columns:
+        return CheckOutcome("SKIP", skip_reason=f"column {ctx.birth_year_col!r} not present in file")
+    try:
+        ctx.birth_year = _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col)
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="birth_year_dtype", detail=str(e))], 1)
+    return _PASS
+
+
+def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_birth_year_range(ctx.ids, ctx.birth_year, ctx.birth_year_min, ctx.by_max))
+
+
+def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
+    return _from_findings(_check_birth_year_topology(
+        ctx.ids, ctx.mothers, ctx.fathers, ctx.birth_year, ctx.id_index,
+    ))
+
+
+# Prerequisite shorthands.
+_IDS = ("id_dtype", "negative_ids", "duplicate_ids")
+_IDS_PARENTS = (*_IDS, "mother_dtype", "father_dtype")
+
+CHECKS: tuple[Check, ...] = (
+    Check("required_columns", (), _ck_required_columns, "required columns present", "Columns & parsing"),
+    Check("empty_pedigree", ("required_columns",), _ck_empty_pedigree, "pedigree is non-empty", "Columns & parsing"),
+    Check("id_dtype", ("required_columns",), _ck_id_dtype, "id column parses as integer", "Columns & parsing"),
+    Check("mother_dtype", ("required_columns",), _ck_mother_dtype, "mother column parses as integer", "Columns & parsing"),
+    Check("father_dtype", ("required_columns",), _ck_father_dtype, "father column parses as integer", "Columns & parsing"),
+    Check("sex_tokens", ("required_columns",), _ck_sex_tokens, "sex column tokens recognized", "Columns & parsing"),
+    Check("negative_ids", ("id_dtype",), _ck_negative_ids, "no negative IDs", "IDs"),
+    Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs"),
+    Check("parent_token_range_mother", ("mother_dtype",), _ck_parent_token_range_mother, "mother IDs in valid range", "Parent references"),
+    Check("parent_token_range_father", ("father_dtype",), _ck_parent_token_range_father, "father IDs in valid range", "Parent references"),
+    Check("parent_refs_present_mother", (*_IDS, "mother_dtype"), _ck_parent_refs_present_mother, "mother IDs present in pedigree", "Parent references"),
+    Check("parent_refs_present_father", (*_IDS, "father_dtype"), _ck_parent_refs_present_father, "father IDs present in pedigree", "Parent references"),
+    Check("parent_refs_sex_conflict", _IDS_PARENTS, _ck_parent_refs_sex_conflict, "no missing-parent sex conflicts", "Parent references"),
+    Check("sex_role_ambiguity", (*_IDS_PARENTS, "sex_tokens"), _ck_sex_role_ambiguity, "no role-ambiguous unsexed individuals", "Parent references"),
+    Check("self_loops", _IDS_PARENTS, _ck_self_loops, "no self-loops", "Graph structure"),
+    Check("parents_distinct", _IDS_PARENTS, _ck_parents_distinct, "mother and father distinct", "Parent references"),
+    Check("sex_role_consistency", (*_IDS_PARENTS, "sex_tokens"), _ck_sex_role_consistency, "sex consistent with parent role", "Graph structure"),
+    Check("unknown_sex", (*_IDS_PARENTS, "sex_tokens"), _ck_unknown_sex, "all individuals have resolved sex", "Graph structure"),
+    Check("acyclic", ("parent_refs_present_mother", "parent_refs_present_father", "parents_distinct"), _ck_acyclic, "acyclic (no descent cycles)", "Graph structure"),
+    Check("birth_year_dtype", ("required_columns",), _ck_birth_year_dtype, "birth_year column parses as numeric", "Birth years (optional)"),
+    Check("birth_year_range", ("id_dtype", "birth_year_dtype"), _ck_birth_year_range, "birth years within sanity range", "Birth years (optional)"),
+    Check("birth_year_topology", (*_IDS_PARENTS, "birth_year_dtype"), _ck_birth_year_topology, "child birth_year >= parent birth_year", "Birth years (optional)"),
+)
+
+_CHECKS_BY_NAME: dict[str, Check] = {c.name: c for c in CHECKS}
+
+# Derived from the registry (single source of truth).
+_CHECK_ORDER: tuple[str, ...] = tuple(c.name for c in CHECKS)
+_CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
+
+# Curated *display* grouping for the stderr summary. Order within a group
+# intentionally differs from execution order (e.g. parents_distinct), so this
+# stays an explicit constant rather than a derivation of _CHECK_ORDER.
+_CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Columns & parsing", (
+        "required_columns", "empty_pedigree",
+        "id_dtype", "mother_dtype", "father_dtype", "sex_tokens",
+    )),
+    ("IDs", ("negative_ids", "duplicate_ids")),
+    ("Parent references", (
+        "parent_token_range_mother", "parent_token_range_father",
+        "parent_refs_present_mother", "parent_refs_present_father",
+        "parents_distinct",
+        "parent_refs_sex_conflict", "sex_role_ambiguity",
+    )),
+    ("Graph structure", (
+        "self_loops", "sex_role_consistency", "unknown_sex", "acyclic",
+    )),
+    ("Birth years (optional)", (
+        "birth_year_dtype", "birth_year_range", "birth_year_topology",
+    )),
+)
+
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+
+def _run_checks(
+    ctx: ValidationContext, *, on_fail: str,
+) -> tuple[dict[str, CheckResult], list[Finding]]:
+    """Run every Check in registry order against ``ctx``.
+
+    A Check whose prerequisite did not ``PASS`` is auto-``SKIP``ped: a FAILed
+    prerequisite yields ``"<prereq> failed"``, a SKIPped one propagates its own
+    reason (so ``required_columns failed`` / ``no --birth-year-col specified``
+    flow transitively). ``on_fail="raise"`` raises on the first ``FAIL``
+    (summarize); ``on_fail="accumulate"`` records it and continues (validate).
+    """
+    results: dict[str, CheckResult] = {}
+    findings: list[Finding] = []
+    for check in CHECKS:
+        skip_reason = None
+        for prereq in check.requires:
+            r = results[prereq]
+            if r.status != "PASS":
+                skip_reason = r.skip_reason if r.status == "SKIP" else f"{prereq} failed"
+                break
+        if skip_reason is not None:
+            results[check.name] = CheckResult(name=check.name, status="SKIP", skip_reason=skip_reason)
+            continue
+        outcome = check.run(ctx)
+        if outcome.status == "FAIL":
+            if on_fail == "raise":
+                raise PedigreeError(_summarize_findings(outcome.findings))
+            findings.extend(outcome.findings)
+            results[check.name] = CheckResult(name=check.name, status="FAIL", count=outcome.count)
+        else:
+            results[check.name] = CheckResult(
+                name=check.name, status=outcome.status,
+                count=outcome.count, skip_reason=outcome.skip_reason,
+            )
+    return results, findings
+
+
+def _build_context(path, *, id_col, sex_col, mother_col, father_col, sex_encoding,
+                   zero_as_missing, allow_missing_sex, override_asserted_sex,
+                   birth_year_col, birth_year_min, birth_year_max, sep,
+                   require_birth_year_col: bool, log_read: bool) -> ValidationContext:
+    """Read the table and assemble a `ValidationContext` (shared by both modes)."""
+    t0 = time.perf_counter()
+    df = _read_pedigree_table(path, sep=sep, dtype=str)
+    if log_read:
+        logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
+    _maybe_warn_csv(df)
+    return ValidationContext(
+        df_raw=df, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
+        father_col=father_col, birth_year_col=birth_year_col,
+        sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
+        birth_year_min=birth_year_min, birth_year_max=birth_year_max,
+        require_birth_year_col=require_birth_year_col,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public drivers
+# ---------------------------------------------------------------------------
+
+
 def load_and_validate(
     path: Path,
     id_col: str = "id",
@@ -162,75 +546,34 @@ def load_and_validate(
     birth_year_max: int | None = None,
     sep: str = "auto",
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
-    """Load TSV, run all QC, return (df, children_csr).
+    """Load TSV, run all QC fail-fast, return (df, children_csr).
 
-    df has columns id, sex (int8), mother, father, generation (int32),
-    and ``birth_year`` (int32, sentinel -1) when ``birth_year_col`` is
-    set. Missing parent encoded as -1. children_csr is the parent→child
-    sparse matrix (None if there are no parent edges) and is shared
-    across the generations / components / descendants / inbreeding
-    passes.
+    df has columns id, sex (int8), mother, father, sex_source, and
+    ``birth_year`` (int32, sentinel -1) when ``birth_year_col`` is set and
+    present. Missing parent encoded as -1. children_csr is the parent→child
+    sparse matrix (None if there are no parent edges), shared across the
+    generations / components / descendants / inbreeding passes. Raises
+    ``PedigreeError`` on the first failing Check.
+
+    Rows are topologically sorted (parents before children) so downstream
+    ``PedigreeGraph`` construction holds its parents-precede-children invariant.
+    ``ped_depth`` is populated by the caller from ``pg.generation`` before any
+    summary function runs.
     """
     t0 = time.perf_counter()
-    df = _read_pedigree_table(path, sep=sep, dtype=str)
-    logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
-    _maybe_warn_csv(df)
-
-    needed = {id_col, sex_col, mother_col, father_col}
-    if birth_year_col is not None:
-        needed.add(birth_year_col)
-    miss_cols = needed - set(df.columns)
-    if miss_cols:
-        raise PedigreeError(f"missing required columns: {sorted(miss_cols)}; file has {list(df.columns)}")
-
-    def _raise_first(findings: list[Finding]) -> None:
-        if findings:
-            raise PedigreeError(_summarize_findings(findings))
-
-    _raise_first(_check_empty_pedigree(len(df)))
-
-    ids = _as_int_col(df[id_col], id_col)
-    logger.info(
-        "parsed %d ids; five random ids: %s", len(ids), _format_id_sample(ids),
+    ctx = _build_context(
+        path, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
+        father_col=father_col, sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
+        birth_year_col=birth_year_col, birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max, sep=sep,
+        require_birth_year_col=True, log_read=True,
     )
-    mothers = _as_parent_int_col(df[mother_col], mother_col, zero_as_missing)
-    fathers = _as_parent_int_col(df[father_col], father_col, zero_as_missing)
-    sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
-    birth_year = (
-        _as_birth_year_col(df[birth_year_col], birth_year_col)
-        if birth_year_col is not None
-        else None
-    )
+    _run_checks(ctx, on_fail="raise")
 
-    n = len(ids)
-
-    _raise_first(_check_negative_ids(ids))
-    _raise_first(_check_duplicate_ids(ids))
-    _raise_first(_check_parent_token_range(mothers, "mother"))
-    _raise_first(_check_parent_token_range(fathers, "father"))
-
-    id_index = pd.Index(ids)
-    for findings in (
-        _check_parent_refs_present(mothers, "mother", id_index),
-        _check_parent_refs_present(fathers, "father", id_index),
-        _check_self_loops(ids, mothers, fathers),
-        _check_parents_distinct(ids, mothers, fathers),
-    ):
-        if findings:
-            raise PedigreeError(_summarize_findings(findings))
-
-    # Surface as PedigreeError here so summarize exits cleanly instead of
-    # crashing later inside PedigreeGraph.from_arrays with a ValueError.
-    if birth_year is not None:
-        by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
-        _raise_first(_check_birth_year_range(ids, birth_year, birth_year_min, by_max))
-        _raise_first(_check_birth_year_topology(ids, mothers, fathers, birth_year, id_index))
-
-    imp = _impute_sex_from_roles(
-        sex, ids, mothers, fathers,
-        override_asserted_sex=override_asserted_sex,
-    )
+    imp = ctx.imputation
     sex = imp.imputed_sex
+    n = len(ctx.ids)
     n_overridden = int(imp.overridden_mask.sum())
     n_unresolved = int((sex == SEX_UNKNOWN).sum())
     if imp.n_imputed > 0 or n_overridden > 0 or n_unresolved > 0:
@@ -239,37 +582,19 @@ def load_and_validate(
             "%d unresolved (sex_source column has per-row detail)",
             imp.n_imputed, n_overridden, n_unresolved,
         )
-    if not allow_missing_sex:
-        _raise_first(_check_sex_role_ambiguity(
-            ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
-        ))
-        _raise_first(_check_unknown_sex(ids, sex, imp.ambiguous_mask))
-    else:
+    if allow_missing_sex:
         n_ambiguous = int(imp.ambiguous_mask.sum())
         if n_ambiguous > 0:
-            logger.info(
-                "kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)",
-                n_ambiguous,
-            )
+            logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
         n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
         if n_orphan > 0:
-            logger.info(
-                "kept %d row(s) with sex=%d (--allow-missing-sex)",
-                n_orphan, SEX_UNKNOWN,
-            )
+            logger.info("kept %d row(s) with sex=%d (--allow-missing-sex)", n_orphan, SEX_UNKNOWN)
 
-    role_consistency = _check_sex_role_consistency(
-        mothers, fathers, sex, id_index, skip_mask=imp.original_unknown_mask,
-    )
-    if role_consistency:
-        raise PedigreeError(_summarize_findings(role_consistency))
-
-    # Map parent IDs to row indices, then run a fixed-point depth sweep
-    # that is tolerant of arbitrary input row order (real-world TSV /
-    # PLINK fam files commonly aren't topologically ordered).  Sort the
-    # df by depth so PedigreeGraph's parents-precede-children invariant
-    # holds for downstream construction.  Detects cycles by failure to
-    # converge.
+    # Map parent IDs to row indices, run a fixed-point depth sweep tolerant of
+    # arbitrary input row order, and sort by depth (parents before children).
+    ids, mothers, fathers = ctx.ids, ctx.mothers, ctx.fathers
+    birth_year = ctx.birth_year
+    id_index = ctx.id_index
     m_row, mask_m = _parent_rows(mothers, id_index)
     f_row, mask_f = _parent_rows(fathers, id_index)
     depth = _compute_depth_unordered(m_row, f_row, n)
@@ -290,9 +615,9 @@ def load_and_validate(
         )
         if birth_year is not None:
             out["birth_year"] = birth_year[order]
-        id_index = pd.Index(out["id"].to_numpy())
-        m_row, mask_m = _parent_rows(out["mother"].to_numpy(), id_index)
-        f_row, mask_f = _parent_rows(out["father"].to_numpy(), id_index)
+        reordered_index = pd.Index(out["id"].to_numpy())
+        m_row, mask_m = _parent_rows(out["mother"].to_numpy(), reordered_index)
+        f_row, mask_f = _parent_rows(out["father"].to_numpy(), reordered_index)
     else:
         out = pd.DataFrame(
             {"id": ids, "sex": sex, "mother": mothers, "father": fathers,
@@ -302,14 +627,9 @@ def load_and_validate(
             out["birth_year"] = birth_year
 
     children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
-    # Note: ``ped_depth`` is populated by the caller (``_run_summarize``)
-    # immediately after ``PedigreeGraph`` construction, using
-    # ``pg.generation``.  Every downstream summary reads ``ped_depth``,
-    # so callers building a df from ``load_and_validate`` must set the
-    # column before invoking any summary function.
-
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
     return out, children_csr
+
 
 def validate_pedigree(
     path: Path,
@@ -325,243 +645,21 @@ def validate_pedigree(
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
     sep: str = "auto",
-) -> tuple[int, list[CheckResult], list[Finding], dict]:
-    """Run every integrity check accumulating.
+) -> tuple[int, list[CheckResult], list[Finding], ValidationContext]:
+    """Run every Check accumulating.
 
     Returns ``(n_rows, results, findings, ctx)`` where ``results`` covers all
     checks in ``_CHECK_ORDER`` (each PASS / FAIL / SKIP), ``findings`` lists
-    every per-individual finding, and ``ctx`` carries the coerced arrays and
-    raw DataFrame for downstream auto-fix.
+    every per-individual finding, and ``ctx`` carries the coerced arrays and raw
+    DataFrame for ``_run_validate``'s auto-fix.
     """
-    df = _read_pedigree_table(path, sep=sep, dtype=str)
-    _maybe_warn_csv(df)
-    n = len(df)
-    findings: list[Finding] = []
-    results: dict[str, CheckResult] = {
-        name: CheckResult(name=name, status="SKIP") for name in _CHECK_ORDER
-    }
-    ctx: dict = {"ids": None, "mothers": None, "fathers": None, "sex": None, "df_raw": df}
-
-    def _record(name: str, fs: list[Finding]) -> None:
-        findings.extend(fs)
-        results[name] = CheckResult(name=name, status="FAIL" if fs else "PASS", count=len(fs))
-
-    def _skip(name: str, reason: str) -> None:
-        results[name] = CheckResult(name=name, status="SKIP", skip_reason=reason)
-
-    def _skip_many(names: tuple[str, ...], reason: str) -> None:
-        for name in names:
-            _skip(name, reason)
-
-    needed = {id_col, sex_col, mother_col, father_col}
-    miss_cols = needed - set(df.columns)
-    if miss_cols:
-        msg = f"missing required columns: {sorted(miss_cols)}; file has {list(df.columns)}"
-        findings.append(Finding(check="required_columns", detail=msg))
-        results["required_columns"] = CheckResult(name="required_columns", status="FAIL", count=1)
-        for name, result in results.items():
-            if name != "required_columns" and result.status == "SKIP":
-                result.skip_reason = "required_columns failed"
-        return n, list(results.values()), findings, ctx
-    results["required_columns"] = CheckResult(name="required_columns", status="PASS")
-
-    empty_findings = _check_empty_pedigree(n)
-    findings.extend(empty_findings)
-    results["empty_pedigree"] = CheckResult(
-        name="empty_pedigree",
-        status="FAIL" if empty_findings else "PASS",
-        count=len(empty_findings),
+    ctx = _build_context(
+        path, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
+        father_col=father_col, sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
+        birth_year_col=birth_year_col, birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max, sep=sep,
+        require_birth_year_col=False, log_read=False,
     )
-
-    def _coerce_int(col_name: str, label: str, parser=_as_int_col) -> np.ndarray | None:
-        try:
-            arr = parser(df[col_name], col_name)
-            results[label] = CheckResult(name=label, status="PASS")
-        except PedigreeError as e:
-            findings.append(Finding(check=label, detail=str(e)))
-            results[label] = CheckResult(name=label, status="FAIL", count=1)
-            return None
-        return arr
-
-    def _parent_parser(s: pd.Series, name: str) -> np.ndarray:
-        return _as_parent_int_col(s, name, zero_as_missing=zero_as_missing)
-
-    ids = _coerce_int(id_col, "id_dtype")
-    if ids is not None:
-        logger.info(
-            "parsed %d ids; five random ids: %s", len(ids), _format_id_sample(ids),
-        )
-    mothers = _coerce_int(mother_col, "mother_dtype", _parent_parser)
-    fathers = _coerce_int(father_col, "father_dtype", _parent_parser)
-    sex: np.ndarray | None = None
-    try:
-        sex = _decode_sex(df[sex_col], encoding=sex_encoding, zero_as_missing=zero_as_missing)
-        results["sex_tokens"] = CheckResult(name="sex_tokens", status="PASS")
-    except PedigreeError as e:
-        findings.append(Finding(check="sex_tokens", detail=str(e)))
-        results["sex_tokens"] = CheckResult(name="sex_tokens", status="FAIL", count=1)
-
-    if ids is not None:
-        _record("negative_ids", _check_negative_ids(ids))
-        _record("duplicate_ids", _check_duplicate_ids(ids))
-    else:
-        _skip("negative_ids", "id_dtype failed")
-        _skip("duplicate_ids", "id_dtype failed")
-
-    if mothers is not None:
-        _record("parent_token_range_mother", _check_parent_token_range(mothers, "mother"))
-    else:
-        _skip("parent_token_range_mother", "mother_dtype failed")
-    if fathers is not None:
-        _record("parent_token_range_father", _check_parent_token_range(fathers, "father"))
-    else:
-        _skip("parent_token_range_father", "father_dtype failed")
-
-    blocking = {"id_dtype", "negative_ids", "duplicate_ids"}
-    can_index = ids is not None and not any(
-        results[name].status == "FAIL" for name in blocking
-    )
-    if can_index:
-        id_index = pd.Index(ids)
-        if mothers is not None:
-            _record("parent_refs_present_mother",
-                    _check_parent_refs_present(mothers, "mother", id_index))
-        else:
-            _skip("parent_refs_present_mother", "mother_dtype failed")
-        if fathers is not None:
-            _record("parent_refs_present_father",
-                    _check_parent_refs_present(fathers, "father", id_index))
-        else:
-            _skip("parent_refs_present_father", "father_dtype failed")
-        if mothers is not None and fathers is not None:
-            _record("parent_refs_sex_conflict",
-                    _check_parent_refs_sex_conflict(mothers, fathers, id_index))
-            _record("self_loops", _check_self_loops(ids, mothers, fathers))
-            _record("parents_distinct", _check_parents_distinct(ids, mothers, fathers))
-
-            if sex is not None:
-                imp = _impute_sex_from_roles(
-                    sex, ids, mothers, fathers,
-                    override_asserted_sex=override_asserted_sex,
-                )
-                imputed_sex = imp.imputed_sex
-                n_ambiguous = int(imp.ambiguous_mask.sum())
-                if allow_missing_sex:
-                    _skip(
-                        "sex_role_ambiguity",
-                        f"bypassed via --allow-missing-sex ({n_ambiguous} tolerated)",
-                    )
-                else:
-                    _record("sex_role_ambiguity", _check_sex_role_ambiguity(
-                        ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
-                    ))
-                if override_asserted_sex:
-                    # The override has already cleared assertions that contradict
-                    # role-implied sex; the consistency check would find zero
-                    # findings. Surface the override count directly so users see
-                    # "PASS (N overridden from role)" in the grouped summary.
-                    n_overridden = int(imp.overridden_mask.sum())
-                    results["sex_role_consistency"] = CheckResult(
-                        name="sex_role_consistency", status="PASS",
-                        count=n_overridden,
-                        skip_reason=(
-                            f"{n_overridden} overridden from role"
-                            if n_overridden > 0 else None
-                        ),
-                    )
-                else:
-                    _record("sex_role_consistency", _check_sex_role_consistency(
-                        mothers, fathers, imputed_sex, id_index,
-                        skip_mask=imp.original_unknown_mask,
-                    ))
-                n_orphan = int(((imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-                if allow_missing_sex:
-                    _skip(
-                        "unknown_sex",
-                        f"bypassed via --allow-missing-sex ({n_orphan} tolerated)",
-                    )
-                else:
-                    _record("unknown_sex", _check_unknown_sex(
-                        ids, imputed_sex, imp.ambiguous_mask,
-                    ))
-                ctx["sex_imputation"] = {
-                    "imputed_sex": imputed_sex,
-                    "n_imputed": imp.n_imputed,
-                    "ambiguous_mask": imp.ambiguous_mask,
-                    "original_unknown_mask": imp.original_unknown_mask,
-                    "sex_source": imp.sex_source,
-                    "overridden_mask": imp.overridden_mask,
-                }
-            else:
-                _skip("sex_role_ambiguity", "sex_tokens failed")
-                _skip("sex_role_consistency", "sex_tokens failed")
-                _skip("unknown_sex", "sex_tokens failed")
-            blocks_acyclic = []
-            if results["parent_refs_present_mother"].status == "FAIL":
-                blocks_acyclic.append("missing mother references")
-            if results["parent_refs_present_father"].status == "FAIL":
-                blocks_acyclic.append("missing father references")
-            if results["parents_distinct"].status == "FAIL":
-                blocks_acyclic.append("mother == father rows")
-            if not blocks_acyclic:
-                _record("acyclic", _check_acyclic(ids, mothers, fathers, id_index))
-            else:
-                _skip("acyclic", "; ".join(blocks_acyclic))
-        else:
-            _skip("parent_refs_sex_conflict", "mother_dtype or father_dtype failed")
-            _skip("sex_role_ambiguity", "mother_dtype or father_dtype failed")
-            _skip("self_loops", "mother_dtype or father_dtype failed")
-            _skip("parents_distinct", "mother_dtype or father_dtype failed")
-            _skip("sex_role_consistency", "mother_dtype or father_dtype failed")
-            _skip("unknown_sex", "mother_dtype or father_dtype failed")
-            _skip("acyclic", "mother_dtype or father_dtype failed")
-    else:
-        _skip_many(
-            (
-                "parent_refs_present_mother", "parent_refs_present_father",
-                "parent_refs_sex_conflict", "sex_role_ambiguity",
-                "self_loops", "parents_distinct",
-                "sex_role_consistency", "unknown_sex", "acyclic",
-            ),
-            "id_dtype/negative_ids/duplicate_ids failed",
-        )
-
-    birth_year_checks = ("birth_year_dtype", "birth_year_range", "birth_year_topology")
-    if birth_year_col is None:
-        _skip_many(birth_year_checks, "no --birth-year-col specified")
-    elif birth_year_col not in df.columns:
-        _skip_many(birth_year_checks, f"column {birth_year_col!r} not present in file")
-    else:
-        by_max = birth_year_max if birth_year_max is not None else _birth_year_default_max()
-        try:
-            birth_year = _as_birth_year_col(df[birth_year_col], birth_year_col)
-            results["birth_year_dtype"] = CheckResult(name="birth_year_dtype", status="PASS")
-        except PedigreeError as e:
-            findings.append(Finding(check="birth_year_dtype", detail=str(e)))
-            results["birth_year_dtype"] = CheckResult(
-                name="birth_year_dtype", status="FAIL", count=1,
-            )
-            birth_year = None
-        if birth_year is not None and ids is not None:
-            _record("birth_year_range", _check_birth_year_range(
-                ids, birth_year, birth_year_min, by_max,
-            ))
-            if mothers is not None and fathers is not None and can_index:
-                # id_index is already built above when can_index is True.
-                _record("birth_year_topology", _check_birth_year_topology(
-                    ids, mothers, fathers, birth_year, id_index,
-                ))
-            else:
-                _skip(
-                    "birth_year_topology",
-                    "parent columns or ID index unavailable",
-                )
-        else:
-            _skip("birth_year_range", "birth_year_dtype failed")
-            _skip("birth_year_topology", "birth_year_dtype failed")
-
-    ctx["ids"] = ids
-    ctx["mothers"] = mothers
-    ctx["fathers"] = fathers
-    ctx["sex"] = sex
-    return n, list(results.values()), findings, ctx
+    results, findings = _run_checks(ctx, on_fail="accumulate")
+    return len(ctx.df_raw), list(results.values()), findings, ctx

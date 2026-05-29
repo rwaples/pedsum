@@ -13,14 +13,16 @@ import pandas as pd
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
-from pedsum.checks import _CHECK_GROUPS, _CHECK_LABELS, CheckResult, Finding
 from pedsum.parse import _read_pedigree_table
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
+from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
 
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
+
+    from pedsum.checks import CheckResult, Finding
 
 _NUMERIC_COLS = (
     "F",

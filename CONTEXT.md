@@ -109,6 +109,24 @@ How terms compose into output keys:
 
 Bare `descendant_paths` and `distinct_ancestors` (and other plurals from the glossary) refer to *summary-stats distributions* of the matching `n_*` column when they appear as keys inside an output section.
 
+## Validation
+
+**Check**:
+One named integrity test applied to an input pedigree (e.g. `duplicate_ids`, `acyclic`, `sex_role_consistency`). The `validate` command reports every Check; `summarize` runs the same Checks but stops at the first failure.
+_Avoid_: test, rule, assertion
+
+**Finding**:
+One recorded violation of a **Check**, scoped to a specific `id` / row where applicable. The `validate.log` carries one line per Finding.
+_Avoid_: error, issue, warning, problem
+
+**Check Status**:
+The outcome of a **Check**: `PASS` (ran, no **Findings**), `FAIL` (ran, ≥1 **Finding**), or `SKIP` (did not run — a prerequisite Check did not PASS, the Check is inapplicable to this input, or a flag tolerates it).
+_Avoid_: result, state, outcome (as bare nouns in this sense)
+
+**Blocking Check**:
+A **Check** whose `FAIL` prevents `validate` from writing a fixed pedigree, surfaced to the user as `BLOCKED`. Non-blocking failures still write the fixed output and report **Findings**.
+_Avoid_: hard error, fatal, fatal error
+
 ## Relationships
 
 - **Depth** is a property of an individual, derivable from the pedigree.
@@ -116,6 +134,7 @@ Bare `descendant_paths` and `distinct_ancestors` (and other plurals from the glo
 - A **Mating Pair** produces zero or more **Relationship Pairs** among its offspring (`FS`, and through descendants, `1C`, `Av`, etc.).
 - Every **Mating Pair** and every **Relationship Pair** is also an **Individual Pair**, but not vice versa.
 - A **Sibship** is the offspring set of exactly one **Mating Pair**; the mapping Mating Pair ↔ Sibship is one-to-one.
+- A **Check** produces zero or more **Findings**; its **Check Status** is `FAIL` iff it produced at least one. A Check may depend on other Checks: if a prerequisite did not `PASS`, the dependent Check `SKIP`s.
 
 ## Example dialogue
 
@@ -146,3 +165,4 @@ Bare `descendant_paths` and `distinct_ancestors` (and other plurals from the glo
 - "founder" was historically unqualified across five concepts (structural Founder; Founders with descendants; Founders surviving to depth *d*; variance-weighted equivalent count; founder lines per individual). Resolved: only the structural **Founder** uses the bare term; everything else is expressed via Founders + their descendants. `active_founders` is "Founders with ≥1 descendant at this depth"; per-individual count of distinct Founder Ancestors is the column `n_founder_ancestors`, aggregated as `founder_summary.by_depth[*].founder_ancestors`; `effective_founders` always carries a `_by_<weight>` qualifier. "Founder Line" is not a pedsum term.
 - "inbred" sometimes informally means "F above some threshold." Resolved: in pedsum, **Inbred** means strictly `F > 0`; users who want a threshold use the `inbreeding.hist` bins.
 - "degree" can mean meiotic-path degree (pedsum's usage) or "degree of relatedness" / "degree of kinship" (a kinship-coefficient interpretation). Resolved: pedsum **Degree** always means *meiotic distance*; the kinship coefficient is reported separately.
+- validation vocabulary was informal — "error" / "issue" / "warning" for a violation, "test" / "rule" for an integrity test, "hard error" / "fatal" for a fail that stops output. Resolved: a single integrity test is a **Check**; one recorded violation is a **Finding**; a Check's outcome is its **Check Status** (`PASS` / `FAIL` / `SKIP`); a Check whose failure stops the fixed-pedigree write is a **Blocking Check** (`BLOCKED`).

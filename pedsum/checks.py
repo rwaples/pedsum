@@ -32,75 +32,11 @@ class CheckResult:
     count: int = 0
     skip_reason: str | None = None
 
-_CHECK_ORDER: tuple[str, ...] = (
-    "required_columns",
-    "empty_pedigree",
-    "id_dtype",
-    "mother_dtype",
-    "father_dtype",
-    "sex_tokens",
-    "negative_ids",
-    "duplicate_ids",
-    "parent_token_range_mother",
-    "parent_token_range_father",
-    "parent_refs_present_mother",
-    "parent_refs_present_father",
-    "parent_refs_sex_conflict",
-    "sex_role_ambiguity",
-    "self_loops",
-    "parents_distinct",
-    "sex_role_consistency",
-    "unknown_sex",
-    "acyclic",
-    "birth_year_dtype",
-    "birth_year_range",
-    "birth_year_topology",
-)
 
-_CHECK_LABELS: dict[str, str] = {
-    "required_columns":            "required columns present",
-    "id_dtype":                    "id column parses as integer",
-    "mother_dtype":                "mother column parses as integer",
-    "father_dtype":                "father column parses as integer",
-    "sex_tokens":                  "sex column tokens recognized",
-    "negative_ids":                "no negative IDs",
-    "duplicate_ids":               "no duplicate IDs",
-    "parent_token_range_mother":   "mother IDs in valid range",
-    "parent_token_range_father":   "father IDs in valid range",
-    "parent_refs_present_mother":  "mother IDs present in pedigree",
-    "parent_refs_present_father":  "father IDs present in pedigree",
-    "parents_distinct":            "mother and father distinct",
-    "parent_refs_sex_conflict":    "no missing-parent sex conflicts",
-    "sex_role_ambiguity":          "no role-ambiguous unsexed individuals",
-    "self_loops":                  "no self-loops",
-    "sex_role_consistency":        "sex consistent with parent role",
-    "unknown_sex":                 "all individuals have resolved sex",
-    "acyclic":                     "acyclic (no descent cycles)",
-    "empty_pedigree":              "pedigree is non-empty",
-    "birth_year_dtype":            "birth_year column parses as numeric",
-    "birth_year_range":            "birth years within sanity range",
-    "birth_year_topology":         "child birth_year >= parent birth_year",
-}
+# The check registry (names, ordering, labels, grouping) lives in
+# ``pedsum.validate`` alongside the runner. This module is the pure
+# library of finding producers consumed by that registry.
 
-_CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Columns & parsing", (
-        "required_columns", "empty_pedigree",
-        "id_dtype", "mother_dtype", "father_dtype", "sex_tokens",
-    )),
-    ("IDs", ("negative_ids", "duplicate_ids")),
-    ("Parent references", (
-        "parent_token_range_mother", "parent_token_range_father",
-        "parent_refs_present_mother", "parent_refs_present_father",
-        "parents_distinct",
-        "parent_refs_sex_conflict", "sex_role_ambiguity",
-    )),
-    ("Graph structure", (
-        "self_loops", "sex_role_consistency", "unknown_sex", "acyclic",
-    )),
-    ("Birth years (optional)", (
-        "birth_year_dtype", "birth_year_range", "birth_year_topology",
-    )),
-)
 
 def _check_negative_ids(ids: np.ndarray) -> list[Finding]:
     """Detect negative IDs (id < 0). Returns one Finding per offending row."""

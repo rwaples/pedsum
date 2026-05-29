@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
-from pedsum.checks import _CHECK_ORDER, CheckResult, Finding, _summarize_findings
+from pedsum.checks import CheckResult, Finding, _summarize_findings
 from pedsum.cli import main
 from pedsum.pairs import _build_pedigree_graph
 from pedsum.parse import _decode_sex
@@ -32,7 +32,7 @@ from pedsum.sections import (
     compute_founder_summary,
     compute_size_structure,
 )
-from pedsum.validate import load_and_validate, validate_pedigree
+from pedsum.validate import _CHECK_ORDER, load_and_validate, validate_pedigree
 
 __all__ = [
     "KNOWN_YAML_DROPS",

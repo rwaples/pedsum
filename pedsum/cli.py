@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
-from pedsum.checks import _CHECK_ORDER, CheckResult
+from pedsum.checks import CheckResult
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import _compute_depth_unordered, _parent_rows
@@ -43,7 +43,7 @@ from pedsum.sections import (
     compute_sibship_sizes,
     compute_size_structure,
 )
-from pedsum.validate import load_and_validate, validate_pedigree
+from pedsum.validate import _CHECK_ORDER, load_and_validate, validate_pedigree
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -561,22 +561,20 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 2
 
     added_founders: list[dict] = []
-    df_out = ctx["df_raw"]
-    if ctx["ids"] is not None and ctx["mothers"] is not None and ctx["fathers"] is not None:
-        id_index = pd.Index(ctx["ids"])
+    df_out = ctx.df_raw
+    if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
+        id_index = pd.Index(ctx.ids)
         added_founders = _build_added_founders(
-            ctx["mothers"], ctx["fathers"], id_index, args.no_sex_check,
+            ctx.mothers, ctx.fathers, id_index, args.no_sex_check,
         )
         # Fold sex imputation into the fixed output so the user's "fixed"
         # file reflects the auto-fix instead of the original blanks.
-        sex_imp = ctx.get("sex_imputation")
+        sex_imp = ctx.get_imputation()
         if sex_imp is not None:
             df_out = df_out.copy()
-            imputed = sex_imp["imputed_sex"]
-            original_unknown = sex_imp["original_unknown_mask"]
-            overridden = sex_imp.get(
-                "overridden_mask", np.zeros(len(imputed), dtype=bool),
-            )
+            imputed = sex_imp.imputed_sex
+            original_unknown = sex_imp.original_unknown_mask
+            overridden = sex_imp.overridden_mask
             # Rewrite the sex column wherever pedsum changed it: missing→F/M
             # imputation (0.8) and asserted→role overrides (0.9). Rows still
             # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
@@ -588,10 +586,10 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             sex_col_values.loc[modified & (imputed == SEX_MALE)] = "M"
             sex_col_values.loc[unresolved_mask] = "-1"
             df_out[args.sex_col] = sex_col_values
-            if sex_imp["n_imputed"] > 0:
+            if sex_imp.n_imputed > 0:
                 logger.info(
                     "validate: imputed sex for %d row(s) from parent role",
-                    int(sex_imp["n_imputed"]),
+                    int(sex_imp.n_imputed),
                 )
             n_normalised = int(unresolved_mask.sum())
             if n_normalised > 0:
@@ -602,13 +600,13 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             # 0.9 per-row audit: stamp sex_source onto the fixed output BEFORE
             # the topological reorder below, so pandas reorders the column
             # along with the rest.
-            df_out["sex_source"] = sex_imp["sex_source"]
+            df_out["sex_source"] = sex_imp.sex_source
         # Reorder so the fixed file is parents-before-children and feeds
         # back into pedsum without further auto-fixes.
-        m_row, _ = _parent_rows(ctx["mothers"], id_index)
-        f_row, _ = _parent_rows(ctx["fathers"], id_index)
+        m_row, _ = _parent_rows(ctx.mothers, id_index)
+        f_row, _ = _parent_rows(ctx.fathers, id_index)
         try:
-            depth = _compute_depth_unordered(m_row, f_row, len(ctx["ids"]))
+            depth = _compute_depth_unordered(m_row, f_row, len(ctx.ids))
         except PedigreeError:
             depth = None  # acyclic FAIL already surfaced; skip reorder
         if depth is not None:
