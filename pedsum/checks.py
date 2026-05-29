@@ -23,6 +23,7 @@ class Finding:
     row: int | None = None
     detail: str = ""
 
+
 @dataclass
 class CheckResult:
     """Per-check status report (PASS / FAIL / SKIP) with finding count."""
@@ -41,10 +42,10 @@ class CheckResult:
 def _check_negative_ids(ids: np.ndarray) -> list[Finding]:
     """Detect negative IDs (id < 0). Returns one Finding per offending row."""
     return [
-        Finding(check="negative_ids", id=int(ids[i]), row=int(i),
-                detail=f"id={int(ids[i])} is negative; must be >= 0")
+        Finding(check="negative_ids", id=int(ids[i]), row=int(i), detail=f"id={int(ids[i])} is negative; must be >= 0")
         for i in np.where(ids < 0)[0]
     ]
+
 
 def _check_duplicate_ids(ids: np.ndarray) -> list[Finding]:
     """Detect duplicate IDs. Returns one Finding per duplicated ID value."""
@@ -54,18 +55,20 @@ def _check_duplicate_ids(ids: np.ndarray) -> list[Finding]:
     if not dup_mask.any():
         return []
     dup_ids = np.unique(sorted_ids[1:][dup_mask])
-    return [
-        Finding(check="duplicate_ids", id=int(d), detail=f"id={int(d)} appears more than once")
-        for d in dup_ids
-    ]
+    return [Finding(check="duplicate_ids", id=int(d), detail=f"id={int(d)} appears more than once") for d in dup_ids]
+
 
 def _check_parent_token_range(arr: np.ndarray, role: str) -> list[Finding]:
     """Detect parent column values < -1; one Finding per offending row."""
     return [
-        Finding(check=f"parent_token_range_{role}", row=int(i),
-                detail=f"row {int(i)}: {role} value {int(arr[i])} < -1; missing parent must be -1")
+        Finding(
+            check=f"parent_token_range_{role}",
+            row=int(i),
+            detail=f"row {int(i)}: {role} value {int(arr[i])} < -1; missing parent must be -1",
+        )
         for i in np.where(arr < -1)[0]
     ]
+
 
 def _check_parent_refs_present(arr: np.ndarray, role: str, id_index: pd.Index) -> list[Finding]:
     """Detect parent IDs that don't have their own row; one Finding per missing ID."""
@@ -87,36 +90,54 @@ def _check_parent_refs_present(arr: np.ndarray, role: str, id_index: pd.Index) -
         findings.append(Finding(check=f"parent_refs_present_{role}", id=int(mid), detail=detail))
     return findings
 
+
 def _check_empty_pedigree(n: int) -> list[Finding]:
     """Detect empty pedigrees (n == 0). Returns a single Finding when empty."""
     if n > 0:
         return []
     return [Finding(check="empty_pedigree", detail="pedigree has 0 rows")]
 
+
 def _check_parents_distinct(
-    ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray,
+    ids: np.ndarray,
+    mothers: np.ndarray,
+    fathers: np.ndarray,
 ) -> list[Finding]:
     """Detect rows where mother == father (and both != -1); one Finding per row."""
     bad = (mothers != -1) & (fathers != -1) & (mothers == fathers)
     return [
-        Finding(check="parents_distinct", id=int(ids[i]), row=int(i),
-                detail=f"row {int(i)}: id={int(ids[i])} has mother == father == {int(mothers[i])}")
+        Finding(
+            check="parents_distinct",
+            id=int(ids[i]),
+            row=int(i),
+            detail=f"row {int(i)}: id={int(ids[i])} has mother == father == {int(mothers[i])}",
+        )
         for i in np.where(bad)[0]
     ]
+
 
 def _check_self_loops(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> list[Finding]:
     """Detect rows where id == mother or id == father; one Finding per offending row."""
     findings = [
-        Finding(check="self_loops", id=int(ids[i]), row=int(i),
-                detail=f"row {int(i)}: id={int(ids[i])} listed as own mother")
+        Finding(
+            check="self_loops",
+            id=int(ids[i]),
+            row=int(i),
+            detail=f"row {int(i)}: id={int(ids[i])} listed as own mother",
+        )
         for i in np.where(mothers == ids)[0]
     ]
     findings.extend(
-        Finding(check="self_loops", id=int(ids[i]), row=int(i),
-                detail=f"row {int(i)}: id={int(ids[i])} listed as own father")
+        Finding(
+            check="self_loops",
+            id=int(ids[i]),
+            row=int(i),
+            detail=f"row {int(i)}: id={int(ids[i])} listed as own father",
+        )
         for i in np.where(fathers == ids)[0]
     )
     return findings
+
 
 def _check_parent_refs_sex_conflict(
     mothers: np.ndarray,
@@ -130,10 +151,14 @@ def _check_parent_refs_sex_conflict(
     dads_missing = dads[id_index.get_indexer(dads) == -1]
     conflicts = np.intersect1d(moms_missing, dads_missing)
     return [
-        Finding(check="parent_refs_sex_conflict", id=int(c),
-                detail=f"id={int(c)} referenced as both mother and father (sex ambiguous)")
+        Finding(
+            check="parent_refs_sex_conflict",
+            id=int(c),
+            detail=f"id={int(c)} referenced as both mother and father (sex ambiguous)",
+        )
         for c in conflicts
     ]
+
 
 def _check_sex_role_consistency(
     mothers: np.ndarray,
@@ -160,16 +185,15 @@ def _check_sex_role_consistency(
         keep_m = rows_um != -1
         keep_f = rows_uf != -1
     findings = [
-        Finding(check="sex_role_consistency", id=int(mid),
-                detail=f"id={int(mid)} used as mother but sex != female")
+        Finding(check="sex_role_consistency", id=int(mid), detail=f"id={int(mid)} used as mother but sex != female")
         for mid in used_as_mother[keep_m & (sex[rows_um] != SEX_FEMALE)]
     ]
     findings.extend(
-        Finding(check="sex_role_consistency", id=int(fid),
-                detail=f"id={int(fid)} used as father but sex != male")
+        Finding(check="sex_role_consistency", id=int(fid), detail=f"id={int(fid)} used as father but sex != male")
         for fid in used_as_father[keep_f & (sex[rows_uf] != SEX_MALE)]
     )
     return findings
+
 
 def _check_sex_role_ambiguity(
     ids: np.ndarray,
@@ -189,17 +213,20 @@ def _check_sex_role_ambiguity(
         rid = int(ids[row_idx])
         mrow = mother_first_row.get(rid, -1)
         frow = father_first_row.get(rid, -1)
-        findings.append(Finding(
-            check="sex_role_ambiguity",
-            id=rid,
-            row=int(row_idx),
-            detail=(
-                f"id={rid} has unknown sex AND is referenced as both "
-                f"mother (row {mrow}) and father (row {frow}); "
-                "sex cannot be imputed"
-            ),
-        ))
+        findings.append(
+            Finding(
+                check="sex_role_ambiguity",
+                id=rid,
+                row=int(row_idx),
+                detail=(
+                    f"id={rid} has unknown sex AND is referenced as both "
+                    f"mother (row {mrow}) and father (row {frow}); "
+                    "sex cannot be imputed"
+                ),
+            )
+        )
     return findings
+
 
 def _check_unknown_sex(
     ids: np.ndarray,
@@ -216,13 +243,11 @@ def _check_unknown_sex(
             check="unknown_sex",
             id=int(ids[i]),
             row=int(i),
-            detail=(
-                f"id={int(ids[i])} has unknown sex and is not referenced as a "
-                "parent; cannot be imputed"
-            ),
+            detail=(f"id={int(ids[i])} has unknown sex and is not referenced as a parent; cannot be imputed"),
         )
         for i in np.where(orphan_mask)[0]
     ]
+
 
 def _summarize_findings(findings: list[Finding]) -> str:
     """Build a human-readable error message from a list of findings."""
@@ -242,8 +267,8 @@ def _summarize_findings(findings: list[Finding]) -> str:
     extra = f" (and {n - 5} more)" if n > 5 else ""
     return f"{check}: {n} finding(s) — {sample_str}{extra}"
 
-def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray,
-                   id_index: pd.Index) -> list[Finding]:
+
+def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, id_index: pd.Index) -> list[Finding]:
     """Detect IDs in a cycle via Kahn's; one Finding per node that couldn't be resolved."""
     n = len(ids)
     m_row, mask_m = _parent_rows(mothers, id_index)
@@ -260,10 +285,15 @@ def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray,
         unique_kids = np.unique(kids)
         frontier = unique_kids[indeg[unique_kids] == 0]
     return [
-        Finding(check="acyclic", id=int(ids[i]), row=int(i),
-                detail=f"id={int(ids[i])} could not be topologically ordered (in a cycle)")
+        Finding(
+            check="acyclic",
+            id=int(ids[i]),
+            row=int(i),
+            detail=f"id={int(ids[i])} could not be topologically ordered (in a cycle)",
+        )
         for i in np.where(indeg > 0)[0]
     ]
+
 
 def _check_birth_year_range(
     ids: np.ndarray,
@@ -283,12 +313,12 @@ def _check_birth_year_range(
             id=int(ids[i]),
             row=int(i),
             detail=(
-                f"id={int(ids[i])} birth_year={int(birth_year[i])} is outside "
-                f"the sanity range [{year_min}, {year_max}]"
+                f"id={int(ids[i])} birth_year={int(birth_year[i])} is outside the sanity range [{year_min}, {year_max}]"
             ),
         )
         for i in np.where(bad)[0]
     ]
+
 
 def _check_birth_year_topology(
     ids: np.ndarray,
@@ -316,14 +346,16 @@ def _check_birth_year_topology(
         bad = both_known & (child_by < parent_by)
         for i in np.where(bad)[0]:
             row_idx = int(child_rows[i])
-            findings.append(Finding(
-                check="birth_year_topology",
-                id=int(ids[row_idx]),
-                row=row_idx,
-                detail=(
-                    f"id={int(ids[row_idx])} birth_year={int(child_by[i])} < "
-                    f"{role} (id={int(parents[row_idx])}) "
-                    f"birth_year={int(parent_by[i])}"
-                ),
-            ))
+            findings.append(
+                Finding(
+                    check="birth_year_topology",
+                    id=int(ids[row_idx]),
+                    row=row_idx,
+                    detail=(
+                        f"id={int(ids[row_idx])} birth_year={int(child_by[i])} < "
+                        f"{role} (id={int(parents[row_idx])}) "
+                        f"birth_year={int(parent_by[i])}"
+                    ),
+                )
+            )
     return findings

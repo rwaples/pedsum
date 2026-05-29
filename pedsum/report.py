@@ -40,8 +40,10 @@ _NUMERIC_COLS = (
     "n_descendant_paths",
 )
 
+
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 # Keys projected from ``compute_size_structure``'s output into the
 # ``size_structure`` summary section, in emit order. ``n_total`` is lifted to
@@ -49,13 +51,29 @@ def _now_iso() -> str:
 # ``compute_size_structure`` already returns YAML-clean native types
 # (scalars via int()/float(); lists via ndarray.tolist()), so no re-cast.
 _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
-    "n_founders", "founder_frac", "n_nonfounders", "nonfounder_frac",
-    "n_male", "n_female", "n_mother_links", "n_father_links",
-    "n_parent_child_edges", "n_with_both_parents", "n_with_mother_only",
-    "n_with_father_only", "n_half_founders", "max_depth", "mean_depth",
-    "median_depth", "depth_counts", "n_components", "largest_component",
-    "largest_component_frac", "next_components",
+    "n_founders",
+    "founder_frac",
+    "n_nonfounders",
+    "nonfounder_frac",
+    "n_male",
+    "n_female",
+    "n_mother_links",
+    "n_father_links",
+    "n_parent_child_edges",
+    "n_with_both_parents",
+    "n_with_mother_only",
+    "n_with_father_only",
+    "n_half_founders",
+    "max_depth",
+    "mean_depth",
+    "median_depth",
+    "depth_counts",
+    "n_components",
+    "largest_component",
+    "largest_component_frac",
+    "next_components",
 )
+
 
 def _build_pedigree_data(
     path: Path,
@@ -132,6 +150,7 @@ def _build_pedigree_data(
     yaml_extras: dict = {}
     return tsv_payload, yaml_extras
 
+
 def _build_individual_data(
     idf: pd.DataFrame,
     path: Path,
@@ -158,9 +177,11 @@ def _build_individual_data(
     }
     return out
 
+
 _SUMMARY_META_KEYS = ("input", "command", "version", "generated_at", "n_total")
 
 SAFE_MIN_CELL = 5
+
 
 def _drop_distribution_extrema(obj: object) -> None:
     """Remove min/max from nested distribution dicts for safe-attempt output."""
@@ -174,6 +195,7 @@ def _drop_distribution_extrema(obj: object) -> None:
         for v in obj:
             _drop_distribution_extrema(v)
 
+
 def _null_below(d: dict, keys, min_cell: int) -> None:
     """Null each of ``keys`` in ``d`` whose int value is in ``(0, min_cell)``.
 
@@ -184,6 +206,7 @@ def _null_below(d: dict, keys, min_cell: int) -> None:
     for k in keys:
         if 0 < int(d.get(k, 0) or 0) < min_cell:
             d[k] = None
+
 
 def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_keys) -> None:
     """Small-cell redaction for a grouped row keyed by ``n``.
@@ -199,6 +222,7 @@ def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_k
     else:
         _null_below(row, small_keys, min_cell)
 
+
 def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
@@ -213,12 +237,8 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
     n_total = int(ped_data.get("n_total", 0))
 
     sizes = ped_data.get("size_structure", {})
-    sizes["next_components"] = [
-        s for s in sizes.get("next_components", []) if s >= min_cell
-    ]
-    sizes["depth_counts"] = [
-        (g if g >= min_cell else None) for g in sizes.get("depth_counts", [])
-    ]
+    sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
+    sizes["depth_counts"] = [(g if g >= min_cell else None) for g in sizes.get("depth_counts", [])]
     _null_below(sizes, ("largest_component",), min_cell)
 
     _drop_distribution_extrema(ped_data)
@@ -246,7 +266,9 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
             _null_below(vals, list(vals), min_cell)
     for row in rel_summary.get("related_pair_density_by_depth", []):
         _redact_small_group(
-            row, ("depth", "n"), min_cell,
+            row,
+            ("depth", "n"),
+            min_cell,
             ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
         )
 
@@ -255,7 +277,9 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
 
     founder = ped_data.get("founder_contribution", {})
     _null_below(
-        founder, ("n_founders_with_descendants", "n_founders_without_descendants"), min_cell,
+        founder,
+        ("n_founders_with_descendants", "n_founders_without_descendants"),
+        min_cell,
     )
 
     founder_summary = ped_data.get("founder_summary", {})
@@ -271,13 +295,17 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
     sex_summary = ped_data.get("sex_summary", {})
     for stats in sex_summary.values():
         _redact_small_group(
-            stats, ("n",), min_cell,
+            stats,
+            ("n",),
+            min_cell,
             ("n_founders", "n_reproductive", "n_terminal", "n_inbred"),
         )
 
     for row in ped_data.get("depth_summary", []):
         _redact_small_group(
-            row, ("depth", "n"), min_cell,
+            row,
+            ("depth", "n"),
+            min_cell,
             ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
         )
 
@@ -306,8 +334,12 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
         dist.pop("max", None)
         _null_below(dist, ("nz",), min_cell)
 
+
 def _build_summary_data(
-    ped_data: dict, ind_data: dict, *, yaml_extras: dict | None = None,
+    ped_data: dict,
+    ind_data: dict,
+    *,
+    yaml_extras: dict | None = None,
 ) -> tuple[dict, dict]:
     """Build the (slim, extra) categorised YAML payloads from flat dicts.
 
@@ -348,6 +380,7 @@ def _build_summary_data(
     extra_yaml = {**meta, "pedigree": extra_ped, "individual": extra_ind}
     return slim_yaml, extra_yaml
 
+
 def _flatten_long(obj, prefix: tuple = ()):
     """Yield (section, key, subkey, value) rows from a nested dict / list."""
     if isinstance(obj, dict):
@@ -364,6 +397,7 @@ def _flatten_long(obj, prefix: tuple = ()):
         subkey = ".".join(prefix[2:]) if len(prefix) > 2 else ""
         yield section, key, subkey, obj
 
+
 def _round_floats(obj: object, ndigits: int = 4) -> object:
     """Recursively round floats in nested dicts/lists to ``ndigits``."""
     if isinstance(obj, float):
@@ -374,11 +408,13 @@ def _round_floats(obj: object, ndigits: int = 4) -> object:
         return [_round_floats(x, ndigits) for x in obj]
     return obj
 
+
 def _write_yaml(data: dict, path: Path) -> None:
     """Write data as YAML to path (creates parent dirs); floats rounded to 4dp."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as fh:
         yaml.safe_dump(_round_floats(data), fh, sort_keys=False, default_flow_style=False)
+
 
 def _write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
@@ -386,6 +422,7 @@ def _write_long_tsv(data: dict, path: Path) -> None:
     rows = list(_flatten_long(_round_floats(data)))
     df = pd.DataFrame(rows, columns=["section", "key", "subkey", "value"])
     df.to_csv(path, sep="\t", index=False)
+
 
 def _prepare_out_dir(path: Path) -> int:
     """Create ``path`` as a directory if needed; refuse if it is a file.
@@ -401,6 +438,7 @@ def _prepare_out_dir(path: Path) -> int:
     path.mkdir(parents=True, exist_ok=True)
     return 0
 
+
 def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
     """Write ``df`` as gzipped TSV; uses pigz when available, else gzip level 1.
 
@@ -409,9 +447,14 @@ def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     pigz = shutil.which("pigz")
     if pigz is not None:
-        with out_path.open("wb") as fh_out, subprocess.Popen(
-            [pigz, "-1", "-p", "4", "-c"], stdin=subprocess.PIPE, stdout=fh_out,
-        ) as proc:
+        with (
+            out_path.open("wb") as fh_out,
+            subprocess.Popen(
+                [pigz, "-1", "-p", "4", "-c"],
+                stdin=subprocess.PIPE,
+                stdout=fh_out,
+            ) as proc,
+        ):
             df.to_csv(proc.stdin, sep="\t", index=False)
             proc.stdin.close()
             if proc.wait() != 0:
@@ -419,6 +462,7 @@ def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
         return
     with gzip.open(out_path, "wb", compresslevel=1) as fh:
         df.to_csv(fh, sep="\t", index=False)
+
 
 def _write_annotated_tsv(
     in_path: Path,
@@ -455,9 +499,7 @@ def _write_annotated_tsv(
         if np.isnan(perm).any() or len(perm) != len(idf_ids):
             # Truly mismatched (rows added or dropped between input and
             # idf) — not a benign reorder.
-            raise PedigreeError(
-                "internal: row order mismatch between input and individual table"
-            )
+            raise PedigreeError("internal: row order mismatch between input and individual table")
         raw = raw.iloc[perm.astype(np.int64)].reset_index(drop=True)
 
     canonical = ("id", "sex", "mother", "father")
@@ -470,11 +512,13 @@ def _write_annotated_tsv(
         extras = extras.rename(columns=new_names)
         logger.warning(
             "input columns %s collide with derived columns; preserved as %s",
-            collisions, [new_names[c] for c in collisions],
+            collisions,
+            [new_names[c] for c in collisions],
         )
 
     annotated = pd.concat([idf.reset_index(drop=True), extras], axis=1)
     _to_csv_gz(annotated, out_path)
+
 
 def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
     """Render the validate summary as grouped sections with friendly labels.
@@ -506,6 +550,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     lines.append(f"result: {total_findings} finding(s)")
     return "\n".join(lines) + "\n"
 
+
 def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
     """Tab-separated log: one row per finding (check / id / row / detail)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -520,6 +565,7 @@ def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
     ]
     df = pd.DataFrame(rows, columns=["check", "id", "row", "detail"])
     df.to_csv(out_path, sep="\t", index=False)
+
 
 def _build_added_founders(
     mothers: np.ndarray,
@@ -544,23 +590,27 @@ def _build_added_founders(
     out: list[dict] = []
     for mid in sorted(moms_only):
         rows = np.where(mothers == mid)[0]
-        out.append({"id": int(mid), "sex": "F",
-                    "reason": f"referenced as mother in {_rows_listing(rows)}"})
+        out.append({"id": int(mid), "sex": "F", "reason": f"referenced as mother in {_rows_listing(rows)}"})
     for did in sorted(dads_only):
         rows = np.where(fathers == did)[0]
-        out.append({"id": int(did), "sex": "M",
-                    "reason": f"referenced as father in {_rows_listing(rows)}"})
+        out.append({"id": int(did), "sex": "M", "reason": f"referenced as father in {_rows_listing(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
             rows_m = np.where(mothers == cid)[0]
             rows_f = np.where(fathers == cid)[0]
-            out.append({"id": int(cid), "sex": "F",
-                        "reason": (
-                            f"--no-sex-check; conflicting roles "
-                            f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
-                        )})
+            out.append(
+                {
+                    "id": int(cid),
+                    "sex": "F",
+                    "reason": (
+                        f"--no-sex-check; conflicting roles "
+                        f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
+                    ),
+                }
+            )
     out.sort(key=lambda x: x["id"])
     return out
+
 
 def _write_validate_tsv_gz(
     df_raw: pd.DataFrame,
@@ -573,9 +623,7 @@ def _write_validate_tsv_gz(
 ) -> None:
     """Write input pedigree (gzipped TSV), with new founder rows prepended at top."""
     if added_founders:
-        new_rows = pd.DataFrame(
-            {col: [""] * len(added_founders) for col in df_raw.columns}
-        )
+        new_rows = pd.DataFrame({col: [""] * len(added_founders) for col in df_raw.columns})
         new_rows[id_col] = [str(f["id"]) for f in added_founders]
         new_rows[sex_col] = [f["sex"] for f in added_founders]
         new_rows[mother_col] = ["-1"] * len(added_founders)

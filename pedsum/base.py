@@ -18,5 +18,6 @@ INBRED_TOL = 1e-9
 
 logger = logging.getLogger("pedigree_summary")
 
+
 class PedigreeError(Exception):
     """Raised on any input validation failure."""

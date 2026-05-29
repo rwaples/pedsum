@@ -14,13 +14,27 @@ from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PARENT_MISSING_TOKENS: frozenset[str] = frozenset({
-    "", "NA", "NAN", "N/A", ".", "?", "NONE", "NULL",
-})
+_PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
+    {
+        "",
+        "NA",
+        "NAN",
+        "N/A",
+        ".",
+        "?",
+        "NONE",
+        "NULL",
+    }
+)
 
-_SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset({
-    "-1", "U", "UNKNOWN",
-})
+_SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
+    {
+        "-1",
+        "U",
+        "UNKNOWN",
+    }
+)
+
 
 def _detect_sex_encoding(
     upper_non_missing: pd.Series,
@@ -43,6 +57,7 @@ def _detect_sex_encoding(
         return "default", "word_only"
     return "default", "ones_only"
 
+
 def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
     """Deterministic random sample of ``k`` IDs as a comma-separated string.
 
@@ -57,6 +72,7 @@ def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
     rng = np.random.default_rng(0)
     indices = np.sort(rng.choice(n, size=sample_size, replace=False))
     return ", ".join(str(int(x)) for x in ids[indices])
+
 
 def _decode_sex(
     series: pd.Series,
@@ -151,14 +167,18 @@ def _decode_sex(
     )
     return out
 
+
 def _as_int_col(series: pd.Series, name: str) -> np.ndarray:
     try:
         return pd.to_numeric(series, errors="raise").astype(np.int64).to_numpy()
     except (ValueError, TypeError) as e:
         raise PedigreeError(f"column {name!r} must be integer-valued; failed to parse: {e}") from None
 
+
 def _replace_missing_with(
-    series: pd.Series, missing_tokens: frozenset[str], sentinel: str,
+    series: pd.Series,
+    missing_tokens: frozenset[str],
+    sentinel: str,
 ) -> pd.Series:
     """Normalize ``series`` to stripped strings with ``missing_tokens`` → ``sentinel``.
 
@@ -170,6 +190,7 @@ def _replace_missing_with(
     str_vals = filled.astype(str).str.strip()
     missing_mask = str_vals.str.upper().isin(missing_tokens)
     return str_vals.where(~missing_mask, sentinel)
+
 
 def _maybe_warn_csv(df: pd.DataFrame) -> None:
     """Raise a clear error when the file looks like CSV but was read as TSV.
@@ -187,6 +208,7 @@ def _maybe_warn_csv(df: pd.DataFrame) -> None:
             "with --sep auto (the default) or --sep comma."
         )
 
+
 _SEP_CHOICES = ("auto", "tab", "comma", "semicolon", "pipe", "whitespace")
 
 _SEP_MAP = {
@@ -199,11 +221,13 @@ _SEP_MAP = {
 
 _SEP_HUMAN = {v: k for k, v in _SEP_MAP.items()}
 
+
 def _open_text_for_sniff(path: Path):
     """Open ``path`` as text for delimiter sniffing; transparent to gzip."""
     if path.suffix == ".gz":
         return gzip.open(path, mode="rt", encoding="utf-8", newline="")
     return path.open("r", encoding="utf-8", newline="")
+
 
 def _sniff_delimiter(path: Path) -> str:
     r"""Return the most likely column delimiter for ``path``.
@@ -230,8 +254,12 @@ def _sniff_delimiter(path: Path) -> str:
         return r"\s+"
     return "\t"
 
+
 def _read_pedigree_table(
-    path: Path, sep: str = "auto", *, dtype: object | None = None,
+    path: Path,
+    sep: str = "auto",
+    *,
+    dtype: object | None = None,
 ) -> pd.DataFrame:
     r"""Read a pedigree table, sniffing the delimiter when ``sep == 'auto'``.
 
@@ -251,8 +279,11 @@ def _read_pedigree_table(
     engine = "python" if chosen == r"\s+" else None
     return pd.read_csv(path, sep=chosen, dtype=dtype, engine=engine)
 
+
 def _as_parent_int_col(
-    series: pd.Series, name: str, zero_as_missing: bool = False,
+    series: pd.Series,
+    name: str,
+    zero_as_missing: bool = False,
 ) -> np.ndarray:
     """Parse a parent-ID column, with NA-like tokens (and optionally 0) → -1.
 
@@ -265,12 +296,12 @@ def _as_parent_int_col(
         arr = pd.to_numeric(cleaned, errors="raise").astype(np.int64).to_numpy(copy=True)
     except (ValueError, TypeError) as e:
         raise PedigreeError(
-            f"column {name!r} must be integer-valued (with -1, NA, blank, "
-            f"or empty for unknown); failed to parse: {e}"
+            f"column {name!r} must be integer-valued (with -1, NA, blank, or empty for unknown); failed to parse: {e}"
         ) from None
     if zero_as_missing:
         arr[arr == 0] = -1
     return arr
+
 
 def _as_birth_year_col(series: pd.Series, name: str) -> np.ndarray:
     """Parse a birth-year column to int32 with sentinel -1 for unknown.
@@ -291,7 +322,9 @@ def _as_birth_year_col(series: pd.Series, name: str) -> np.ndarray:
         ) from None
     return as_float.astype(np.int32)
 
+
 _BIRTH_YEAR_DEFAULT_MIN = 1800
+
 
 def _birth_year_default_max() -> int:
     """Default upper bound for birth-year sanity (current calendar year + 1)."""

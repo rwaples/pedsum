@@ -21,6 +21,7 @@ def _augment_pair_counts(named: dict[str, int]) -> dict:
     out["by_degree"] = by_degree
     return out
 
+
 def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """Sparse matrix enumerator that retains pair lists for richer summaries.
 
@@ -45,6 +46,7 @@ def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = 
     out = _augment_pair_counts(named)
     out["_pair_lists"] = pair_lists
     return out
+
 
 def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
     """Compact arbitrary IDs to ``0..n-1`` and build a full ``PedigreeGraph``.
@@ -78,14 +80,12 @@ def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
 
     def _remap(parents: np.ndarray) -> np.ndarray:
         return np.where(
-            parents == -1, -1, id_to_compact.reindex(parents).to_numpy(),
+            parents == -1,
+            -1,
+            id_to_compact.reindex(parents).to_numpy(),
         ).astype(np.int64)
 
-    birth_year = (
-        df["birth_year"].to_numpy().astype(np.int32)
-        if "birth_year" in df.columns
-        else None
-    )
+    birth_year = df["birth_year"].to_numpy().astype(np.int32) if "birth_year" in df.columns else None
     return PedigreeGraph.from_arrays(
         ids=new_ids,
         mothers=_remap(df["mother"].to_numpy()),

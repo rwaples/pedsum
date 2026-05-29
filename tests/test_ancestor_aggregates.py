@@ -57,14 +57,13 @@ def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
 
     founder_summary, _ = compute_founder_summary(idf)
     aggregates = compute_aggregate_sections(
-        idf, founder_summary=founder_summary, include_inbreeding=False,
+        idf,
+        founder_summary=founder_summary,
+        include_inbreeding=False,
     )
 
     assert aggregates["genealogy"]["distinct_ancestors"] is None
-    assert all(
-        row["mean_distinct_ancestors"] is None
-        for row in aggregates["depth_summary"]
-    )
+    assert all(row["mean_distinct_ancestors"] is None for row in aggregates["depth_summary"])
 
 
 def test_default_individual_data_omits_ancestor_distribution() -> None:
@@ -88,7 +87,9 @@ def test_inbreeding_mode_reports_ancestor_stats() -> None:
 
     founder_summary, _ = compute_founder_summary(idf)
     aggregates = compute_aggregate_sections(
-        idf, founder_summary=founder_summary, include_inbreeding=True,
+        idf,
+        founder_summary=founder_summary,
+        include_inbreeding=True,
     )
     out = _build_individual_data(
         idf,

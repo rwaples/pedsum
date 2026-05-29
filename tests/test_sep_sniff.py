@@ -78,9 +78,7 @@ def test_auto_sniffs_whitespace_plink_style(tmp_path):
 def test_explicit_tab_still_works(tmp_path):
     """``--sep tab`` produces the same result as auto-sniff on a TSV file."""
     out = tmp_path / "o"
-    res = _run(
-        ["summarize", "--in", str(EXAMPLE), "--out", str(out), "--sep", "tab"]
-    )
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out), "--sep", "tab"])
     assert res.returncode == 0, res.stderr
     # No sniff log when sep is explicit.
     assert "sniffed" not in res.stderr
@@ -90,9 +88,7 @@ def test_explicit_comma_required_when_no_sniff(tmp_path):
     """``--sep comma`` reads a comma-separated file without sniffing."""
     pedigree = _rewrite_with_delim(EXAMPLE, tmp_path / "p.csv", ",")
     out = tmp_path / "o"
-    res = _run(
-        ["summarize", "--in", str(pedigree), "--out", str(out), "--sep", "comma"]
-    )
+    res = _run(["summarize", "--in", str(pedigree), "--out", str(out), "--sep", "comma"])
     assert res.returncode == 0, res.stderr
     assert "sniffed" not in res.stderr
 
@@ -102,9 +98,7 @@ def test_explicit_tab_on_csv_raises_friendly_error(tmp_path):
     pedigree = _strip(tmp_path / "tsv_to_be_made_csv.tsv")
     csv_path = _rewrite_with_delim(pedigree, tmp_path / "p.csv", ",")
     out = tmp_path / "o"
-    res = _run(
-        ["summarize", "--in", str(csv_path), "--out", str(out), "--sep", "tab"]
-    )
+    res = _run(["summarize", "--in", str(csv_path), "--out", str(out), "--sep", "tab"])
     assert res.returncode == 1
     assert "appears to be CSV" in res.stderr
 

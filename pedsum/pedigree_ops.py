@@ -15,6 +15,7 @@ def _id_list(ids, max_show: int = 5) -> str:
         return ", ".join(str(i) for i in ids)
     return ", ".join(str(i) for i in ids[:max_show]) + f", ... ({len(ids)} total)"
 
+
 def _parent_rows(parents: np.ndarray, id_index: pd.Index) -> tuple[np.ndarray, np.ndarray]:
     """Map parent IDs to row indices; -1 for missing. Returns (row_index, present_mask)."""
     out = np.full(len(parents), -1, dtype=np.int64)
@@ -22,6 +23,7 @@ def _parent_rows(parents: np.ndarray, id_index: pd.Index) -> tuple[np.ndarray, n
     if mask.any():
         out[mask] = id_index.get_indexer(parents[mask])
     return out, mask
+
 
 def _full_sib_groups(df: pd.DataFrame) -> tuple[np.ndarray, pd.Series, np.ndarray]:
     """Per-row full-sib counts plus underlying mating-pair group sizes.
@@ -45,6 +47,7 @@ def _full_sib_groups(df: pd.DataFrame) -> tuple[np.ndarray, pd.Series, np.ndarra
     fs_count[np.where(both_present)[0]] = fs_groups.reindex(idx).to_numpy() - 1
     return fs_count, fs_groups, both_present
 
+
 def _grandparent_arrays(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return (mm, mf, fm, ff) arrays of grandparent IDs (-1 for unknown)."""
     parent_lookup = df.set_index("id")[["mother", "father"]]
@@ -57,6 +60,7 @@ def _grandparent_arrays(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.nd
             ("father", "father"),
         )
     )
+
 
 def _build_children_csr(
     m_row: np.ndarray,
@@ -75,8 +79,11 @@ def _build_children_csr(
         shape=(n, n),
     )
 
+
 def _compute_depth_unordered(
-    mother_rows: np.ndarray, father_rows: np.ndarray, n: int,
+    mother_rows: np.ndarray,
+    father_rows: np.ndarray,
+    n: int,
 ) -> np.ndarray:
     """Per-row topological depth, tolerant of any input row order.
 

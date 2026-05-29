@@ -24,8 +24,8 @@ def compute_size_structure(
     connected-component id for row i.
     """
     n = len(df)
-    has_mom = (df["mother"].to_numpy() != -1)
-    has_dad = (df["father"].to_numpy() != -1)
+    has_mom = df["mother"].to_numpy() != -1
+    has_dad = df["father"].to_numpy() != -1
     has_parent = has_mom | has_dad
     has_both_parents = has_mom & has_dad
     n_founders = int((~has_parent).sum())
@@ -78,6 +78,7 @@ def compute_size_structure(
     }
     return summary, comp_labels
 
+
 def _numeric_distribution(values: pd.Series | np.ndarray) -> dict:
     """Compact distribution summary for pedigree-level aggregate sections."""
     c = pd.Series(values)
@@ -95,6 +96,7 @@ def _numeric_distribution(values: pd.Series | np.ndarray) -> dict:
         "nz": int((c != 0).sum()) if n else 0,
     }
 
+
 def _effective_count_from_weights(weights: np.ndarray) -> float:
     """Return 1 / sum(p_i^2), or 0 when no positive weights are present."""
     positive = weights[weights > 0].astype(np.float64)
@@ -103,6 +105,7 @@ def _effective_count_from_weights(weights: np.ndarray) -> float:
         return 0.0
     p = positive / total
     return float(1.0 / np.sum(p * p))
+
 
 def compute_mating_pair_summary(df: pd.DataFrame) -> dict | None:
     """Aggregate per-Mating-Pair statistics: count, children-per-pair, effective pairs.
@@ -126,6 +129,7 @@ def compute_mating_pair_summary(df: pd.DataFrame) -> dict | None:
         "effective_pairs_by_children": _effective_count_from_weights(pair_sizes.to_numpy()),
     }
 
+
 def _offspring_dist(counts: np.ndarray, n: int) -> dict:
     if n == 0:
         return dict.fromkeys(("0", "1", "2", "3", "4+"), 0.0)
@@ -134,6 +138,7 @@ def _offspring_dist(counts: np.ndarray, n: int) -> dict:
         out[str(k)] = float((counts == k).sum()) / n
     out["4+"] = float((counts >= 4).sum()) / n
     return out
+
 
 def compute_founder_summary(
     idf: pd.DataFrame,
@@ -160,8 +165,7 @@ def compute_founder_summary(
         skip = {
             "computed": False,
             "skip_reason": (
-                f"n_individuals * n_founders = {n * n_founders} exceeds "
-                f"max_lineage_cells={max_lineage_cells}"
+                f"n_individuals * n_founders = {n * n_founders} exceeds max_lineage_cells={max_lineage_cells}"
             ),
         }
         return skip, zeros
@@ -188,7 +192,8 @@ def compute_founder_summary(
         founder_sets[i_int] = s
 
     n_founder_ancestors = np.array(
-        [len(fs) for fs in founder_sets], dtype=np.int32,
+        [len(fs) for fs in founder_sets],
+        dtype=np.int32,
     )
 
     by_depth = []
@@ -205,14 +210,16 @@ def compute_founder_summary(
             active.update(fs)
             counts[list(fs)] += 1
         active_counts = counts[counts > 0]
-        by_depth.append({
-            "depth": int(depth),
-            "n": len(rows),
-            "active_founders": len(active),
-            "active_founder_frac": len(active) / n_founders,
-            "effective_founders_by_descendants": _effective_count_from_weights(active_counts),
-            "founder_ancestors": _numeric_distribution(line_counts),
-        })
+        by_depth.append(
+            {
+                "depth": int(depth),
+                "n": len(rows),
+                "active_founders": len(active),
+                "active_founder_frac": len(active) / n_founders,
+                "effective_founders_by_descendants": _effective_count_from_weights(active_counts),
+                "founder_ancestors": _numeric_distribution(line_counts),
+            }
+        )
 
     nonempty = [row for row in by_depth if row["n"] > 0]
     if nonempty:
@@ -221,14 +228,10 @@ def compute_founder_summary(
         bottleneck = {
             "min_active_founders": int(min_active),
             "min_active_founder_frac": min_active / n_founders,
-            "min_active_depths": [
-                int(row["depth"]) for row in nonempty if row["active_founders"] == min_active
-            ],
+            "min_active_depths": [int(row["depth"]) for row in nonempty if row["active_founders"] == min_active],
             "min_effective_founders_by_descendants": float(min_eff),
             "min_effective_depths": [
-                int(row["depth"])
-                for row in nonempty
-                if row["effective_founders_by_descendants"] == min_eff
+                int(row["depth"]) for row in nonempty if row["effective_founders_by_descendants"] == min_eff
             ],
         }
     else:
@@ -236,6 +239,7 @@ def compute_founder_summary(
 
     summary = {"computed": True, "by_depth": by_depth, "bottleneck": bottleneck}
     return summary, n_founder_ancestors
+
 
 def compute_aggregate_sections(
     idf: pd.DataFrame,
@@ -279,9 +283,7 @@ def compute_aggregate_sections(
     both_parents = (idf["mother"] != -1) & (idf["father"] != -1)
     n_both = int(both_parents.sum())
     if n_both:
-        frac_with_full_sib = float(
-            (idf.loc[both_parents, "n_full_sibs"] >= 1).sum()
-        ) / n_both
+        frac_with_full_sib = float((idf.loc[both_parents, "n_full_sibs"] >= 1).sum()) / n_both
     else:
         frac_with_full_sib = 0.0
 
@@ -398,6 +400,7 @@ def compute_aggregate_sections(
         "depth_summary": depth_summary,
     }
 
+
 def compute_sibship_sizes(df: pd.DataFrame) -> dict:
     """Per-**Sibship** size statistics.
 
@@ -425,6 +428,7 @@ def compute_sibship_sizes(df: pd.DataFrame) -> dict:
         "q3": float(sibship_sizes.quantile(0.75)),
         "size_dist": size_dist,
     }
+
 
 def compute_relationship_summary(
     df: pd.DataFrame,
@@ -490,10 +494,7 @@ def compute_relationship_summary(
                 "none": int((closest_degree == 0).sum()),
                 **{str(d): 0 for d in range(1, 6)},
             },
-            "relatives_by_degree": {
-                str(d): _numeric_distribution(np.zeros(n, dtype=np.int64))
-                for d in range(1, 6)
-            },
+            "relatives_by_degree": {str(d): _numeric_distribution(np.zeros(n, dtype=np.int64)) for d in range(1, 6)},
             "relatives_total": _numeric_distribution(np.zeros(n, dtype=np.int64)),
             "related_pair_density_by_generation": [],
         }
@@ -516,27 +517,19 @@ def compute_relationship_summary(
     closest_degree = np.zeros(n, dtype=np.int8)
     for degree in range(1, 6):
         mask = min_degrees == degree
-        degree_counts = (
-            np.bincount(lo[mask], minlength=n)
-            + np.bincount(hi[mask], minlength=n)
-        ).astype(np.int64)
+        degree_counts = (np.bincount(lo[mask], minlength=n) + np.bincount(hi[mask], minlength=n)).astype(np.int64)
         counts_by_degree[str(degree)] = _numeric_distribution(degree_counts)
         total_relatives += degree_counts
 
     for degree in range(5, 0, -1):
         has_degree = (
-            np.bincount(lo[min_degrees == degree], minlength=n)
-            + np.bincount(hi[min_degrees == degree], minlength=n)
+            np.bincount(lo[min_degrees == degree], minlength=n) + np.bincount(hi[min_degrees == degree], minlength=n)
         ) > 0
         closest_degree[has_degree] = degree
 
-    related_by_closest_degree = {
-        str(degree): int((min_degrees == degree).sum()) for degree in range(1, 6)
-    }
+    related_by_closest_degree = {str(degree): int((min_degrees == degree).sum()) for degree in range(1, 6)}
     closest_dist = {"none": int((closest_degree == 0).sum())}
-    closest_dist.update({
-        str(degree): int((closest_degree == degree).sum()) for degree in range(1, 6)
-    })
+    closest_dist.update({str(degree): int((closest_degree == degree).sum()) for degree in range(1, 6)})
 
     depth = df["ped_depth"].to_numpy()
     depth_rows = []
@@ -549,14 +542,16 @@ def compute_relationship_summary(
         else:
             related = 0
             density = 0.0
-        depth_rows.append({
-            "depth": int(d),
-            "n": n_d,
-            "n_individual_pairs": int(possible),
-            "n_related_pairs": related,
-            "n_unrelated_pairs": int(possible - related),
-            "related_pair_density": float(density),
-        })
+        depth_rows.append(
+            {
+                "depth": int(d),
+                "n": n_d,
+                "n_individual_pairs": int(possible),
+                "n_related_pairs": related,
+                "n_unrelated_pairs": int(possible - related),
+                "related_pair_density": float(density),
+            }
+        )
 
     return {
         "computed": True,
@@ -571,6 +566,7 @@ def compute_relationship_summary(
         "relatives_total": _numeric_distribution(total_relatives),
         "related_pair_density_by_depth": depth_rows,
     }
+
 
 def compute_effective_size(
     pg: PedigreeGraph,
@@ -597,10 +593,8 @@ def compute_effective_size(
         skip_ne_coancestry=not ne_coancestry,
         n_threads=n_threads,
     )
-    return {
-        name: _normalise_effective_size_keys(result.to_dict())
-        for name, result in raw.items()
-    }
+    return {name: _normalise_effective_size_keys(result.to_dict()) for name, result in raw.items()}
+
 
 def _normalise_effective_size_keys(d: dict) -> dict:
     """Rename upstream ``n_generations_used`` → ``n_depths_used`` on the way out.
@@ -613,9 +607,9 @@ def _normalise_effective_size_keys(d: dict) -> dict:
     adopts the depth-based name.
     """
     if "n_generations_used" in d:
-        d = {("n_depths_used" if k == "n_generations_used" else k): v
-             for k, v in d.items()}
+        d = {("n_depths_used" if k == "n_generations_used" else k): v for k, v in d.items()}
     return d
+
 
 def _build_inbreeding_summary(F: np.ndarray) -> dict:
     """Aggregate a per-individual F vector into the YAML-shaped summary.
@@ -643,6 +637,7 @@ def _build_inbreeding_summary(F: np.ndarray) -> dict:
         "max_F": float(F.max()) if n else 0.0,
         "hist": hist,
     }
+
 
 def build_individual_df(
     df: pd.DataFrame,
@@ -687,9 +682,8 @@ def build_individual_df(
         share_dad = dad_groups.reindex(fathers[rows_f]).to_numpy().astype(np.int64) - 1
         n_phs[rows_f] = share_dad.astype(np.int32) - fs_count[rows_f]
 
-    n_off = (
-        np.bincount(m_row[has_mom], minlength=n).astype(np.int32)
-        + np.bincount(f_row[has_dad], minlength=n).astype(np.int32)
+    n_off = np.bincount(m_row[has_mom], minlength=n).astype(np.int32) + np.bincount(f_row[has_dad], minlength=n).astype(
+        np.int32
     )
 
     n_mates = np.zeros(n, dtype=np.int32)

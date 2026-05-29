@@ -62,37 +62,51 @@ class _FullHelpParser(argparse.ArgumentParser):
         sys.stderr.write(f"\nerror: {message}\n")
         sys.exit(2)
 
+
 def _add_logging_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group()
     g.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="DEBUG-level logging to stderr (default: INFO)",
     )
     g.add_argument(
-        "-q", "--quiet", action="store_true",
+        "-q",
+        "--quiet",
+        action="store_true",
         help="WARNING-level logging only (suppress per-section timings)",
     )
 
+
 def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--sep", choices=_SEP_CHOICES, default="auto",
+        "--sep",
+        choices=_SEP_CHOICES,
+        default="auto",
         help="input column delimiter. 'auto' (default) sniffs the first "
         "non-empty line for tab/comma/semicolon/pipe; falls back to "
         "whitespace (PLINK fam-style) when none are present. Pass an "
         "explicit choice to opt out of sniffing.",
     )
     p.add_argument(
-        "--sex-encoding", choices=("auto", "default", "plink"), default="auto",
+        "--sex-encoding",
+        choices=("auto", "default", "plink"),
+        default="auto",
         help="how to decode the sex column: 'default' = 0=female, 1=male "
         "(pedsum default); 'plink' = 1=male, 2=female, 0=unknown (PLINK fam "
         "convention); 'auto' (default) detects from the observed tokens.",
     )
     p.add_argument(
-        "--plink-sex", action="store_const", dest="sex_encoding", const="plink",
+        "--plink-sex",
+        action="store_const",
+        dest="sex_encoding",
+        const="plink",
         help="legacy alias for --sex-encoding=plink (PLINK convention: 1=male, 2=female)",
     )
     p.add_argument(
-        "--allow-missing-sex", action="store_true",
+        "--allow-missing-sex",
+        action="store_true",
         help="tolerate rows whose sex is missing after imputation — either "
         "because the row is unsexed and not used as a parent (orphan), OR "
         "because it is used as BOTH mother and father with unknown sex "
@@ -102,13 +116,15 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         "(sex-stratified estimators require resolved sex).",
     )
     p.add_argument(
-        "--no-override-asserted-sex", action="store_true",
+        "--no-override-asserted-sex",
+        action="store_true",
         help="disable the 0.9 default of overriding asserted sex when topology "
         "unambiguously implies the opposite (asserted M used only as mother "
         "-> F; asserted F used only as father -> M). The existing "
         "missing->F/M imputation is unaffected. Restores 0.8's hard-block on "
         "sex/role contradictions via the sex_role_consistency check.",
     )
+
 
 def _positive_int(v: str) -> int:
     """Argparse type guard for ints >= 1."""
@@ -120,26 +136,33 @@ def _positive_int(v: str) -> int:
         raise argparse.ArgumentTypeError(f"expected integer >= 1, got {iv}")
     return iv
 
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = _FullHelpParser(
         prog="pedigree_summary.py",
-        description=(
-            "Pedigree summary CLI. Depends on numpy, scipy, pandas, pyyaml, "
-            "and pedigree-graph."
-        ),
+        description=("Pedigree summary CLI. Depends on numpy, scipy, pandas, pyyaml, and pedigree-graph."),
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {VERSION}",
+        "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
     )
     sub = parser.add_subparsers(dest="subcommand", parser_class=_FullHelpParser)
 
     p_sum = sub.add_parser("summarize", help="summarise a pedigree (TSV input)")
     p_sum.add_argument(
-        "--in", dest="in_path", required=True, type=Path,
+        "--in",
+        dest="in_path",
+        required=True,
+        type=Path,
         help="input pedigree (.tsv or .tsv.gz)",
     )
     p_sum.add_argument(
-        "--out", dest="out_dir", required=True, type=Path, metavar="DIR",
+        "--out",
+        dest="out_dir",
+        required=True,
+        type=Path,
+        metavar="DIR",
         help="output directory (created if needed). Always writes "
         "summary.yaml (slim categorised summary), summary.extra.yaml "
         "(per-generation / per-cohort / per-transition arrays and full "
@@ -149,24 +172,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "summary.individual.tsv.",
     )
     p_sum.add_argument(
-        "--id-col", default="id", metavar="NAME",
+        "--id-col",
+        default="id",
+        metavar="NAME",
         help="column name for individual ID (int) (default: %(default)s)",
     )
     p_sum.add_argument(
-        "--sex-col", default="sex", metavar="NAME",
+        "--sex-col",
+        default="sex",
+        metavar="NAME",
         help="column name for sex; accepts M/F (any case), Male/Female, or "
         "0/1 (default: %(default)s; 0=female, 1=male). See --plink-sex.",
     )
     p_sum.add_argument(
-        "--mother-col", default="mother", metavar="NAME",
+        "--mother-col",
+        default="mother",
+        metavar="NAME",
         help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_sum.add_argument(
-        "--father-col", default="father", metavar="NAME",
+        "--father-col",
+        default="father",
+        metavar="NAME",
         help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_sum.add_argument(
-        "--birth-year-col", default=None, metavar="NAME",
+        "--birth-year-col",
+        default=None,
+        metavar="NAME",
         help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). When set, pedsum threads "
         "the column through to PedigreeGraph so the Hill overlapping-"
@@ -174,12 +207,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "without it Ne_H collapses to Ne_V.",
     )
     p_sum.add_argument(
-        "--birth-year-min", type=int, default=_BIRTH_YEAR_DEFAULT_MIN, metavar="YEAR",
+        "--birth-year-min",
+        type=int,
+        default=_BIRTH_YEAR_DEFAULT_MIN,
+        metavar="YEAR",
         help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
         "No-op without --birth-year-col.",
     )
     p_sum.add_argument(
-        "--birth-year-max", type=int, default=None, metavar="YEAR",
+        "--birth-year-max",
+        type=int,
+        default=None,
+        metavar="YEAR",
         help="inclusive upper bound for birth_year sanity check "
         "(default: current calendar year + 1). No-op without --birth-year-col.",
     )
@@ -216,7 +255,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p_sum.add_argument(
         "--ne-threads",
-        type=_positive_int, default=1, metavar="N",
+        type=_positive_int,
+        default=1,
+        metavar="N",
         help="number of worker threads for independent Ne estimator dispatch "
         "(default: %(default)s; serial). No-op without `--effective-size`.",
     )
@@ -250,35 +291,49 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_val = sub.add_parser("validate", help="run all integrity checks accumulating; report issues")
     p_val.add_argument("--in", dest="in_path", required=True, type=Path, help="input pedigree TSV")
     p_val.add_argument(
-        "--out", dest="out_dir", required=True, type=Path, metavar="DIR",
+        "--out",
+        dest="out_dir",
+        required=True,
+        type=Path,
+        metavar="DIR",
         help="output directory (created if needed); writes validate.log "
         "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
         "auto-fixes applied; not written if a block is detected)",
     )
     p_val.add_argument(
-        "--id-col", default="id", metavar="NAME",
+        "--id-col",
+        default="id",
+        metavar="NAME",
         help="column name for individual ID (int) (default: %(default)s)",
     )
     p_val.add_argument(
-        "--sex-col", default="sex", metavar="NAME",
-        help="column name for sex; accepts M/F or 0/1 with 0=female, 1=male "
-        "(default: %(default)s)",
+        "--sex-col",
+        default="sex",
+        metavar="NAME",
+        help="column name for sex; accepts M/F or 0/1 with 0=female, 1=male (default: %(default)s)",
     )
     p_val.add_argument(
-        "--mother-col", default="mother", metavar="NAME",
+        "--mother-col",
+        default="mother",
+        metavar="NAME",
         help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_val.add_argument(
-        "--father-col", default="father", metavar="NAME",
+        "--father-col",
+        default="father",
+        metavar="NAME",
         help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
     p_val.add_argument(
-        "--no-sex-check", action="store_true",
+        "--no-sex-check",
+        action="store_true",
         help="bypass the sex-conflict check on missing parents; auto-added "
         "founders default to sex=F when the role is ambiguous (default: off)",
     )
     p_val.add_argument(
-        "--birth-year-col", default=None, metavar="NAME",
+        "--birth-year-col",
+        default=None,
+        metavar="NAME",
         help="optional column name for birth year (integer or float calendar "
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
@@ -286,13 +341,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(child birth_year >= parent birth_year).",
     )
     p_val.add_argument(
-        "--birth-year-min", type=int, default=_BIRTH_YEAR_DEFAULT_MIN, metavar="YEAR",
+        "--birth-year-min",
+        type=int,
+        default=_BIRTH_YEAR_DEFAULT_MIN,
+        metavar="YEAR",
         help="inclusive lower bound for birth_year_range check (default: %(default)s).",
     )
     p_val.add_argument(
-        "--birth-year-max", type=int, default=None, metavar="YEAR",
-        help="inclusive upper bound for birth_year_range check "
-        "(default: current calendar year + 1).",
+        "--birth-year-max",
+        type=int,
+        default=None,
+        metavar="YEAR",
+        help="inclusive upper bound for birth_year_range check (default: current calendar year + 1).",
     )
     _add_format_args(p_val)
     _add_logging_args(p_val)
@@ -303,6 +363,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         sys.exit(0)
     return args
 
+
 def _init_logging(verbose: bool, quiet: bool) -> None:
     level = logging.WARNING if quiet else (logging.DEBUG if verbose else logging.INFO)
     logging.basicConfig(
@@ -312,12 +373,14 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
         stream=sys.stderr,
     )
 
+
 @contextmanager
 def _timed(label: str):
     """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block."""
     t0 = time.perf_counter()
     yield
     logger.info("%s in %.2fs", label, time.perf_counter() - t0)
+
 
 def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
@@ -410,8 +473,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if args.inbreeding:
         if n_indiv > _F_KERNEL_WARN_THRESHOLD:
             logger.info(
-                "computing F on N=%s rows; may take several minutes — pass "
-                "--no-inbreeding to skip",
+                "computing F on N=%s rows; may take several minutes — pass --no-inbreeding to skip",
                 f"{n_indiv:,}",
             )
         with _timed("inbreeding (F + n_ancestors)"):
@@ -432,7 +494,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         n_estimators = 8 if args.ne_coancestry else 7
         with _timed(f"effective size ({n_estimators} estimators)"):
             effective_size = compute_effective_size(
-                pg, ne_coancestry=args.ne_coancestry, n_threads=args.ne_threads,
+                pg,
+                ne_coancestry=args.ne_coancestry,
+                n_threads=args.ne_threads,
             )
 
     out_dir = args.out_dir
@@ -440,28 +504,44 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     with _timed("individual table built"):
         sex_source = df["sex_source"].to_numpy()
         idf = build_individual_df(
-            df, id_index, F_vec, n_anc, n_desc, comp_labels, sex_source,
+            df,
+            id_index,
+            F_vec,
+            n_anc,
+            n_desc,
+            comp_labels,
+            sex_source,
         )
         founder_summary, n_founder_anc = compute_founder_summary(idf)
         idf["n_founder_ancestors"] = n_founder_anc
 
     with _timed("aggregate pedigree sections"):
         aggregates = compute_aggregate_sections(
-            idf, founder_summary=founder_summary, include_inbreeding=args.inbreeding,
+            idf,
+            founder_summary=founder_summary,
+            include_inbreeding=args.inbreeding,
         )
 
     tsv_payload, yaml_extras = _build_pedigree_data(
-        args.in_path, cmd, size, sibships, pairs, inb_summary, mating_pairs,
-        relationship_summary, aggregates,
+        args.in_path,
+        cmd,
+        size,
+        sibships,
+        pairs,
+        inb_summary,
+        mating_pairs,
+        relationship_summary,
+        aggregates,
     )
     if effective_size is not None:
-        tsv_payload["effective_size_scalars"] = {
-            name: result["ne"] for name, result in effective_size.items()
-        }
+        tsv_payload["effective_size_scalars"] = {name: result["ne"] for name, result in effective_size.items()}
         yaml_extras["effective_size"] = effective_size
 
     ind_data = _build_individual_data(
-        idf, args.in_path, cmd, include_inbreeding=args.inbreeding,
+        idf,
+        args.in_path,
+        cmd,
+        include_inbreeding=args.inbreeding,
     )
 
     if args.safe_attempt:
@@ -469,30 +549,36 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
 
     slim_yaml, extra_yaml = _build_summary_data(
-        tsv_payload, ind_data, yaml_extras=yaml_extras,
+        tsv_payload,
+        ind_data,
+        yaml_extras=yaml_extras,
     )
     _write_yaml(slim_yaml, out_dir / "summary.yaml")
     _write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
     logger.info(
-        "wrote %s/{summary.yaml, summary.extra.yaml}", out_dir,
+        "wrote %s/{summary.yaml, summary.extra.yaml}",
+        out_dir,
     )
 
     if args.tsv:
         _write_long_tsv(tsv_payload, out_dir / "summary.pedigree.tsv")
         _write_long_tsv(ind_data, out_dir / "summary.individual.tsv")
         logger.info(
-            "wrote %s/{summary.pedigree.tsv, summary.individual.tsv}", out_dir,
+            "wrote %s/{summary.pedigree.tsv, summary.individual.tsv}",
+            out_dir,
         )
 
     if args.safe_attempt:
         logger.info(
-            "safe-attempt: skipped %s/annotated.tsv.gz (per-individual)", out_dir,
+            "safe-attempt: skipped %s/annotated.tsv.gz (per-individual)",
+            out_dir,
         )
     else:
         with _timed(f"wrote {out_dir}/annotated.tsv.gz"):
             _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
 
     return 0
+
 
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
@@ -525,7 +611,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if args.no_sex_check:
         findings = [f for f in findings if f.check != "parent_refs_sex_conflict"]
         by_check["parent_refs_sex_conflict"] = CheckResult(
-            name="parent_refs_sex_conflict", status="SKIP",
+            name="parent_refs_sex_conflict",
+            status="SKIP",
             skip_reason="bypassed via --no-sex-check",
         )
         results = [by_check[name] for name in _CHECK_ORDER]
@@ -565,7 +652,10 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
         id_index = pd.Index(ctx.ids)
         added_founders = _build_added_founders(
-            ctx.mothers, ctx.fathers, id_index, args.no_sex_check,
+            ctx.mothers,
+            ctx.fathers,
+            id_index,
+            args.no_sex_check,
         )
         # Fold sex imputation into the fixed output so the user's "fixed"
         # file reflects the auto-fix instead of the original blanks.
@@ -620,16 +710,19 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
 
     out_path = out_dir / "validate.tsv.gz"
     _write_validate_tsv_gz(
-        df_out, added_founders,
-        args.id_col, args.sex_col, args.mother_col, args.father_col,
+        df_out,
+        added_founders,
+        args.id_col,
+        args.sex_col,
+        args.mother_col,
+        args.father_col,
         out_path,
     )
     n_total_out = n_total + len(added_founders)
-    sys.stderr.write(
-        f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n"
-    )
+    sys.stderr.write(f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n")
 
     return 0 if not findings else 1
+
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns process exit code."""

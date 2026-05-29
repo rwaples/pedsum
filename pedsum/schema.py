@@ -8,58 +8,108 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SectionSpec:
     """One leaf section under a category."""
+
     name: str
     slim_keys: tuple[str, ...] | None = None
     list_of_dict_slim_keys: tuple[str, ...] | None = None
 
+
 @dataclass(frozen=True)
 class CategorySpec:
     """One category bucket grouping related sections."""
+
     name: str
     sections: tuple[SectionSpec, ...]
 
+
 # 23 named relationship codes from REL_REGISTRY plus PO and engine.
 _PAIRS_SLIM_KEYS: tuple[str, ...] = (
-    "MZ", "MO", "FO", "FS", "MHS", "PHS", "GP", "Av", "GGP", "HAv", "GAv",
-    "1C", "GGGP", "HGAv", "GGAv", "H1C", "1C1R", "G3GP", "HGGAv", "G3Av",
-    "H1C1R", "1C2R", "2C", "PO", "engine",
+    "MZ",
+    "MO",
+    "FO",
+    "FS",
+    "MHS",
+    "PHS",
+    "GP",
+    "Av",
+    "GGP",
+    "HAv",
+    "GAv",
+    "1C",
+    "GGGP",
+    "HGAv",
+    "GGAv",
+    "H1C",
+    "1C1R",
+    "G3GP",
+    "HGGAv",
+    "G3Av",
+    "H1C1R",
+    "1C2R",
+    "2C",
+    "PO",
+    "engine",
 )
 
 SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
-    CategorySpec("structure", (
-        SectionSpec("size_structure"),
-        SectionSpec("components"),
-        SectionSpec("max_degree_enumerated"),
-    )),
-    CategorySpec("demography", (
-        SectionSpec("sibship_size"),
-        SectionSpec("mating_pairs"),
-    )),
-    CategorySpec("individuals", (
-        SectionSpec("reproduction"),
-        SectionSpec("genealogy"),
-    )),
-    CategorySpec("founders", (
-        SectionSpec("founder_contribution"),
-        SectionSpec("founder_summary"),
-    )),
-    CategorySpec("relatedness", (
-        SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS),
-        SectionSpec("relationship_summary"),
-        SectionSpec("inbreeding"),
-    )),
-    CategorySpec("popgen", (
-        SectionSpec("effective_size"),  # per-estimator special handling
-    )),
-    CategorySpec("strata", (
-        SectionSpec("sex_summary"),     # per-stratum special handling
-        SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n")),
-    )),
+    CategorySpec(
+        "structure",
+        (
+            SectionSpec("size_structure"),
+            SectionSpec("components"),
+            SectionSpec("max_degree_enumerated"),
+        ),
+    ),
+    CategorySpec(
+        "demography",
+        (
+            SectionSpec("sibship_size"),
+            SectionSpec("mating_pairs"),
+        ),
+    ),
+    CategorySpec(
+        "individuals",
+        (
+            SectionSpec("reproduction"),
+            SectionSpec("genealogy"),
+        ),
+    ),
+    CategorySpec(
+        "founders",
+        (
+            SectionSpec("founder_contribution"),
+            SectionSpec("founder_summary"),
+        ),
+    ),
+    CategorySpec(
+        "relatedness",
+        (
+            SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS),
+            SectionSpec("relationship_summary"),
+            SectionSpec("inbreeding"),
+        ),
+    ),
+    CategorySpec(
+        "popgen",
+        (
+            SectionSpec("effective_size"),  # per-estimator special handling
+        ),
+    ),
+    CategorySpec(
+        "strata",
+        (
+            SectionSpec("sex_summary"),  # per-stratum special handling
+            SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n")),
+        ),
+    ),
 )
 
 # Per-stratum slim keys for sex_summary (the scalar integers only).
 _SEX_SUMMARY_SLIM_KEYS: tuple[str, ...] = (
-    "n", "n_founders", "n_reproductive", "n_inbred",
+    "n",
+    "n_founders",
+    "n_reproductive",
+    "n_inbred",
 )
 
 # Per-individual distribution split: only headline columns in slim, and within
@@ -70,10 +120,13 @@ INDIVIDUAL_SLIM_DIST_KEYS: tuple[str, ...] = ("mean", "median")
 
 # YAML-only drops (paths within the categorised dict). Constructed in the
 # flat dict and visible in the TSV; excluded from both slim and extra YAML.
-KNOWN_YAML_DROPS: frozenset[str] = frozenset({
-    "pedigree.relatedness.relationship_pairs.by_degree",
-    "individual.distributions.F.max",
-})
+KNOWN_YAML_DROPS: frozenset[str] = frozenset(
+    {
+        "pedigree.relatedness.relationship_pairs.by_degree",
+        "individual.distributions.F.max",
+    }
+)
+
 
 def _categorise_pedigree(flat_ped: dict) -> dict:
     """Wrap the flat pedigree dict into the category structure.
@@ -110,24 +163,37 @@ def _categorise_pedigree(flat_ped: dict) -> dict:
             nested[cat.name] = cat_dict
     return nested
 
+
 # Per-estimator routing for effective_size. Detection is name-based (not
 # value-based) so a field that *normally* carries an array still routes to
 # extra when upstream emits ``None`` (e.g. Hill arrays when birth_year is
 # absent and the estimator collapses).
 _EFFECTIVE_SIZE_ARRAY_SUFFIXES: tuple[str, ...] = (
-    "_per_gen", "_per_transition", "_per_cohort",
+    "_per_gen",
+    "_per_transition",
+    "_per_cohort",
 )
 
-_EFFECTIVE_SIZE_ARRAY_NAMES: frozenset[str] = frozenset({
-    "cohort_years", "age_table",
-    "v_mm", "v_mf", "v_fm", "v_ff", "cov_m", "cov_f",
-})
+_EFFECTIVE_SIZE_ARRAY_NAMES: frozenset[str] = frozenset(
+    {
+        "cohort_years",
+        "age_table",
+        "v_mm",
+        "v_mf",
+        "v_fm",
+        "v_ff",
+        "cov_m",
+        "cov_f",
+    }
+)
+
 
 def _is_effective_size_array_key(key: str) -> bool:
     """Return True if ``key`` names an array field inside an Ne estimator."""
     if key in _EFFECTIVE_SIZE_ARRAY_NAMES:
         return True
     return any(key.endswith(suf) for suf in _EFFECTIVE_SIZE_ARRAY_SUFFIXES)
+
 
 def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
     """Per-estimator scalar/array split for ``popgen.effective_size``.
@@ -161,6 +227,7 @@ def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
             extra[est_name] = est_extra
     return slim, extra
 
+
 def _split_sex_summary(sex_dict: dict) -> tuple[dict, dict]:
     """Per-stratum split for ``strata.sex_summary``: scalars in slim, dists in extra."""
     slim: dict = {}
@@ -176,6 +243,7 @@ def _split_sex_summary(sex_dict: dict) -> tuple[dict, dict]:
         if s_extra:
             extra[stratum_name] = s_extra
     return slim, extra
+
 
 def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
     """Split a single section value into (slim, extra) per its SectionSpec."""
@@ -212,6 +280,7 @@ def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
     extra_dict = {k: v for k, v in value.items() if k not in spec.slim_keys}
     return slim_dict, (extra_dict if extra_dict else None)
 
+
 def _drop_dotted_path(d: dict, parts: tuple[str, ...]) -> None:
     """Delete ``d[parts[0]][parts[1]]...`` if present. In-place; safe on missing keys."""
     if not parts or not isinstance(d, dict):
@@ -222,6 +291,7 @@ def _drop_dotted_path(d: dict, parts: tuple[str, ...]) -> None:
     sub = d.get(parts[0])
     if isinstance(sub, dict):
         _drop_dotted_path(sub, parts[1:])
+
 
 def _split_summary(nested_ped: dict) -> tuple[dict, dict]:
     """Split a categorised pedigree dict into (slim, extra) per ``SUMMARY_SCHEMA``.
@@ -257,6 +327,7 @@ def _split_summary(nested_ped: dict) -> tuple[dict, dict]:
         _drop_dotted_path(slim, parts)
         _drop_dotted_path(extra, parts)
     return slim, extra
+
 
 def _split_individual_distributions(
     dists: dict,

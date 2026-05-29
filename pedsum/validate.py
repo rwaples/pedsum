@@ -240,7 +240,10 @@ class ValidationContext:
     def imputation(self) -> _SexImputation:
         """Sex imputation from parent-role usage; computed once, shared by the sex checks."""
         return _impute_sex_from_roles(
-            self.sex, self.ids, self.mothers, self.fathers,
+            self.sex,
+            self.ids,
+            self.mothers,
+            self.fathers,
             override_asserted_sex=self.override_asserted_sex,
         )
 
@@ -360,9 +363,14 @@ def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
     if ctx.allow_missing_sex:
         n = int(imp.ambiguous_mask.sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
-    return _from_findings(_check_sex_role_ambiguity(
-        ctx.ids, imp.ambiguous_mask, imp.mother_first_row, imp.father_first_row,
-    ))
+    return _from_findings(
+        _check_sex_role_ambiguity(
+            ctx.ids,
+            imp.ambiguous_mask,
+            imp.mother_first_row,
+            imp.father_first_row,
+        )
+    )
 
 
 def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
@@ -371,7 +379,10 @@ def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
     # contradictions only for rows used in a SINGLE role; a row asserted M and
     # used as BOTH mother and father stays unoverridable and must still FAIL.
     findings = _check_sex_role_consistency(
-        ctx.mothers, ctx.fathers, imp.imputed_sex, ctx.id_index,
+        ctx.mothers,
+        ctx.fathers,
+        imp.imputed_sex,
+        ctx.id_index,
         skip_mask=imp.original_unknown_mask,
     )
     if findings:
@@ -411,9 +422,15 @@ def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
-    return _from_findings(_check_birth_year_topology(
-        ctx.ids, ctx.mothers, ctx.fathers, ctx.birth_year, ctx.id_index,
-    ))
+    return _from_findings(
+        _check_birth_year_topology(
+            ctx.ids,
+            ctx.mothers,
+            ctx.fathers,
+            ctx.birth_year,
+            ctx.id_index,
+        )
+    )
 
 
 # Prerequisite shorthands.
@@ -424,25 +441,101 @@ CHECKS: tuple[Check, ...] = (
     Check("required_columns", (), _ck_required_columns, "required columns present", "Columns & parsing"),
     Check("empty_pedigree", ("required_columns",), _ck_empty_pedigree, "pedigree is non-empty", "Columns & parsing"),
     Check("id_dtype", ("required_columns",), _ck_id_dtype, "id column parses as integer", "Columns & parsing"),
-    Check("mother_dtype", ("required_columns",), _ck_mother_dtype, "mother column parses as integer", "Columns & parsing"),
-    Check("father_dtype", ("required_columns",), _ck_father_dtype, "father column parses as integer", "Columns & parsing"),
+    Check(
+        "mother_dtype", ("required_columns",), _ck_mother_dtype, "mother column parses as integer", "Columns & parsing"
+    ),
+    Check(
+        "father_dtype", ("required_columns",), _ck_father_dtype, "father column parses as integer", "Columns & parsing"
+    ),
     Check("sex_tokens", ("required_columns",), _ck_sex_tokens, "sex column tokens recognized", "Columns & parsing"),
     Check("negative_ids", ("id_dtype",), _ck_negative_ids, "no negative IDs", "IDs"),
     Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs"),
-    Check("parent_token_range_mother", ("mother_dtype",), _ck_parent_token_range_mother, "mother IDs in valid range", "Parent references"),
-    Check("parent_token_range_father", ("father_dtype",), _ck_parent_token_range_father, "father IDs in valid range", "Parent references"),
-    Check("parent_refs_present_mother", (*_IDS, "mother_dtype"), _ck_parent_refs_present_mother, "mother IDs present in pedigree", "Parent references"),
-    Check("parent_refs_present_father", (*_IDS, "father_dtype"), _ck_parent_refs_present_father, "father IDs present in pedigree", "Parent references"),
-    Check("parent_refs_sex_conflict", _IDS_PARENTS, _ck_parent_refs_sex_conflict, "no missing-parent sex conflicts", "Parent references"),
-    Check("sex_role_ambiguity", (*_IDS_PARENTS, "sex_tokens"), _ck_sex_role_ambiguity, "no role-ambiguous unsexed individuals", "Parent references"),
+    Check(
+        "parent_token_range_mother",
+        ("mother_dtype",),
+        _ck_parent_token_range_mother,
+        "mother IDs in valid range",
+        "Parent references",
+    ),
+    Check(
+        "parent_token_range_father",
+        ("father_dtype",),
+        _ck_parent_token_range_father,
+        "father IDs in valid range",
+        "Parent references",
+    ),
+    Check(
+        "parent_refs_present_mother",
+        (*_IDS, "mother_dtype"),
+        _ck_parent_refs_present_mother,
+        "mother IDs present in pedigree",
+        "Parent references",
+    ),
+    Check(
+        "parent_refs_present_father",
+        (*_IDS, "father_dtype"),
+        _ck_parent_refs_present_father,
+        "father IDs present in pedigree",
+        "Parent references",
+    ),
+    Check(
+        "parent_refs_sex_conflict",
+        _IDS_PARENTS,
+        _ck_parent_refs_sex_conflict,
+        "no missing-parent sex conflicts",
+        "Parent references",
+    ),
+    Check(
+        "sex_role_ambiguity",
+        (*_IDS_PARENTS, "sex_tokens"),
+        _ck_sex_role_ambiguity,
+        "no role-ambiguous unsexed individuals",
+        "Parent references",
+    ),
     Check("self_loops", _IDS_PARENTS, _ck_self_loops, "no self-loops", "Graph structure"),
     Check("parents_distinct", _IDS_PARENTS, _ck_parents_distinct, "mother and father distinct", "Parent references"),
-    Check("sex_role_consistency", (*_IDS_PARENTS, "sex_tokens"), _ck_sex_role_consistency, "sex consistent with parent role", "Graph structure"),
-    Check("unknown_sex", (*_IDS_PARENTS, "sex_tokens"), _ck_unknown_sex, "all individuals have resolved sex", "Graph structure"),
-    Check("acyclic", ("parent_refs_present_mother", "parent_refs_present_father", "parents_distinct"), _ck_acyclic, "acyclic (no descent cycles)", "Graph structure"),
-    Check("birth_year_dtype", ("required_columns",), _ck_birth_year_dtype, "birth_year column parses as numeric", "Birth years (optional)"),
-    Check("birth_year_range", ("id_dtype", "birth_year_dtype"), _ck_birth_year_range, "birth years within sanity range", "Birth years (optional)"),
-    Check("birth_year_topology", (*_IDS_PARENTS, "birth_year_dtype"), _ck_birth_year_topology, "child birth_year >= parent birth_year", "Birth years (optional)"),
+    Check(
+        "sex_role_consistency",
+        (*_IDS_PARENTS, "sex_tokens"),
+        _ck_sex_role_consistency,
+        "sex consistent with parent role",
+        "Graph structure",
+    ),
+    Check(
+        "unknown_sex",
+        (*_IDS_PARENTS, "sex_tokens"),
+        _ck_unknown_sex,
+        "all individuals have resolved sex",
+        "Graph structure",
+    ),
+    Check(
+        "acyclic",
+        ("parent_refs_present_mother", "parent_refs_present_father", "parents_distinct"),
+        _ck_acyclic,
+        "acyclic (no descent cycles)",
+        "Graph structure",
+    ),
+    Check(
+        "birth_year_dtype",
+        ("required_columns",),
+        _ck_birth_year_dtype,
+        "birth_year column parses as numeric",
+        "Birth years (optional)",
+    ),
+    Check(
+        "birth_year_range",
+        ("id_dtype", "birth_year_dtype"),
+        _ck_birth_year_range,
+        "birth years within sanity range",
+        "Birth years (optional)",
+    ),
+    Check(
+        "birth_year_topology",
+        (*_IDS_PARENTS, "birth_year_dtype"),
+        _ck_birth_year_topology,
+        "child birth_year >= parent birth_year",
+        "Birth years (optional)",
+    ),
 )
 
 _CHECKS_BY_NAME: dict[str, Check] = {c.name: c for c in CHECKS}
@@ -455,23 +548,47 @@ _CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
 # intentionally differs from execution order (e.g. parents_distinct), so this
 # stays an explicit constant rather than a derivation of _CHECK_ORDER.
 _CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Columns & parsing", (
-        "required_columns", "empty_pedigree",
-        "id_dtype", "mother_dtype", "father_dtype", "sex_tokens",
-    )),
+    (
+        "Columns & parsing",
+        (
+            "required_columns",
+            "empty_pedigree",
+            "id_dtype",
+            "mother_dtype",
+            "father_dtype",
+            "sex_tokens",
+        ),
+    ),
     ("IDs", ("negative_ids", "duplicate_ids")),
-    ("Parent references", (
-        "parent_token_range_mother", "parent_token_range_father",
-        "parent_refs_present_mother", "parent_refs_present_father",
-        "parents_distinct",
-        "parent_refs_sex_conflict", "sex_role_ambiguity",
-    )),
-    ("Graph structure", (
-        "self_loops", "sex_role_consistency", "unknown_sex", "acyclic",
-    )),
-    ("Birth years (optional)", (
-        "birth_year_dtype", "birth_year_range", "birth_year_topology",
-    )),
+    (
+        "Parent references",
+        (
+            "parent_token_range_mother",
+            "parent_token_range_father",
+            "parent_refs_present_mother",
+            "parent_refs_present_father",
+            "parents_distinct",
+            "parent_refs_sex_conflict",
+            "sex_role_ambiguity",
+        ),
+    ),
+    (
+        "Graph structure",
+        (
+            "self_loops",
+            "sex_role_consistency",
+            "unknown_sex",
+            "acyclic",
+        ),
+    ),
+    (
+        "Birth years (optional)",
+        (
+            "birth_year_dtype",
+            "birth_year_range",
+            "birth_year_topology",
+        ),
+    ),
 )
 
 
@@ -481,7 +598,9 @@ _CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def _run_checks(
-    ctx: ValidationContext, *, on_fail: str,
+    ctx: ValidationContext,
+    *,
+    on_fail: str,
 ) -> tuple[dict[str, CheckResult], list[Finding]]:
     """Run every Check in registry order against ``ctx``.
 
@@ -511,16 +630,32 @@ def _run_checks(
             results[check.name] = CheckResult(name=check.name, status="FAIL", count=outcome.count)
         else:
             results[check.name] = CheckResult(
-                name=check.name, status=outcome.status,
-                count=outcome.count, skip_reason=outcome.skip_reason,
+                name=check.name,
+                status=outcome.status,
+                count=outcome.count,
+                skip_reason=outcome.skip_reason,
             )
     return results, findings
 
 
-def _build_context(path, *, id_col, sex_col, mother_col, father_col, sex_encoding,
-                   zero_as_missing, allow_missing_sex, override_asserted_sex,
-                   birth_year_col, birth_year_min, birth_year_max, sep,
-                   require_birth_year_col: bool, log_read: bool) -> ValidationContext:
+def _build_context(
+    path,
+    *,
+    id_col,
+    sex_col,
+    mother_col,
+    father_col,
+    sex_encoding,
+    zero_as_missing,
+    allow_missing_sex,
+    override_asserted_sex,
+    birth_year_col,
+    birth_year_min,
+    birth_year_max,
+    sep,
+    require_birth_year_col: bool,
+    log_read: bool,
+) -> ValidationContext:
     """Read the table and assemble a `ValidationContext` (shared by both modes)."""
     t0 = time.perf_counter()
     df = _read_pedigree_table(path, sep=sep, dtype=str)
@@ -528,11 +663,18 @@ def _build_context(path, *, id_col, sex_col, mother_col, father_col, sex_encodin
         logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
     _maybe_warn_csv(df)
     return ValidationContext(
-        df_raw=df, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
-        father_col=father_col, birth_year_col=birth_year_col,
-        sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
-        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
-        birth_year_min=birth_year_min, birth_year_max=birth_year_max,
+        df_raw=df,
+        id_col=id_col,
+        sex_col=sex_col,
+        mother_col=mother_col,
+        father_col=father_col,
+        birth_year_col=birth_year_col,
+        sex_encoding=sex_encoding,
+        zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex,
+        override_asserted_sex=override_asserted_sex,
+        birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max,
         require_birth_year_col=require_birth_year_col,
     )
 
@@ -573,12 +715,21 @@ def load_and_validate(
     """
     t0 = time.perf_counter()
     ctx = _build_context(
-        path, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
-        father_col=father_col, sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
-        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
-        birth_year_col=birth_year_col, birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max, sep=sep,
-        require_birth_year_col=True, log_read=True,
+        path,
+        id_col=id_col,
+        sex_col=sex_col,
+        mother_col=mother_col,
+        father_col=father_col,
+        sex_encoding=sex_encoding,
+        zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex,
+        override_asserted_sex=override_asserted_sex,
+        birth_year_col=birth_year_col,
+        birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max,
+        sep=sep,
+        require_birth_year_col=True,
+        log_read=True,
     )
     _run_checks(ctx, on_fail="raise")
 
@@ -591,7 +742,9 @@ def load_and_validate(
         logger.info(
             "sex imputation: %d from missing, %d overridden from role, "
             "%d unresolved (sex_source column has per-row detail)",
-            imp.n_imputed, n_overridden, n_unresolved,
+            imp.n_imputed,
+            n_overridden,
+            n_unresolved,
         )
     if allow_missing_sex:
         n_ambiguous = int(imp.ambiguous_mask.sum())
@@ -617,12 +770,17 @@ def load_and_validate(
         n_oo = int((order != natural).sum())
         logger.info(
             "reordering %d/%d row(s) into topological order (parents before children)",
-            n_oo, n,
+            n_oo,
+            n,
         )
         out = pd.DataFrame(
-            {"id": ids[order], "sex": sex[order],
-             "mother": mothers[order], "father": fathers[order],
-             "sex_source": imp.sex_source[order]},
+            {
+                "id": ids[order],
+                "sex": sex[order],
+                "mother": mothers[order],
+                "father": fathers[order],
+                "sex_source": imp.sex_source[order],
+            },
         )
         if birth_year is not None:
             out["birth_year"] = birth_year[order]
@@ -631,8 +789,7 @@ def load_and_validate(
         f_row, mask_f = _parent_rows(out["father"].to_numpy(), reordered_index)
     else:
         out = pd.DataFrame(
-            {"id": ids, "sex": sex, "mother": mothers, "father": fathers,
-             "sex_source": imp.sex_source},
+            {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source},
         )
         if birth_year is not None:
             out["birth_year"] = birth_year
@@ -665,12 +822,21 @@ def validate_pedigree(
     DataFrame for ``_run_validate``'s auto-fix.
     """
     ctx = _build_context(
-        path, id_col=id_col, sex_col=sex_col, mother_col=mother_col,
-        father_col=father_col, sex_encoding=sex_encoding, zero_as_missing=zero_as_missing,
-        allow_missing_sex=allow_missing_sex, override_asserted_sex=override_asserted_sex,
-        birth_year_col=birth_year_col, birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max, sep=sep,
-        require_birth_year_col=False, log_read=False,
+        path,
+        id_col=id_col,
+        sex_col=sex_col,
+        mother_col=mother_col,
+        father_col=father_col,
+        sex_encoding=sex_encoding,
+        zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex,
+        override_asserted_sex=override_asserted_sex,
+        birth_year_col=birth_year_col,
+        birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max,
+        sep=sep,
+        require_birth_year_col=False,
+        log_read=False,
     )
     results, findings = _run_checks(ctx, on_fail="accumulate")
     return len(ctx.df_raw), list(results.values()), findings, ctx
