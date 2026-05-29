@@ -188,6 +188,18 @@ def _from_findings(findings: list[Finding]) -> CheckOutcome:
     return _PASS
 
 
+def _try_parse(check_name: str, parse: Callable[[], np.ndarray]):
+    """Run a column parser, mapping a PedigreeError to a single-finding FAIL.
+
+    Returns ``(value, None)`` on success or ``(None, outcome)`` on failure, so a
+    parse Check reads ``value, fail = _try_parse(...); if fail: return fail``.
+    """
+    try:
+        return parse(), None
+    except PedigreeError as e:
+        return None, CheckOutcome("FAIL", [Finding(check=check_name, detail=str(e))], 1)
+
+
 @dataclass
 class ValidationContext:
     """Mutable state threaded through every Check's ``run(ctx)``.
@@ -276,36 +288,35 @@ def _ck_empty_pedigree(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
-    try:
-        ctx.ids = _as_int_col(ctx.df_raw[ctx.id_col], ctx.id_col)
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="id_dtype", detail=str(e))], 1)
+    ctx.ids, fail = _try_parse("id_dtype", lambda: _as_int_col(ctx.df_raw[ctx.id_col], ctx.id_col))
+    if fail:
+        return fail
     logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids))
     return _PASS
 
 
 def _ck_mother_dtype(ctx: ValidationContext) -> CheckOutcome:
-    try:
-        ctx.mothers = _as_parent_int_col(ctx.df_raw[ctx.mother_col], ctx.mother_col, ctx.zero_as_missing)
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="mother_dtype", detail=str(e))], 1)
-    return _PASS
+    ctx.mothers, fail = _try_parse(
+        "mother_dtype",
+        lambda: _as_parent_int_col(ctx.df_raw[ctx.mother_col], ctx.mother_col, ctx.zero_as_missing),
+    )
+    return fail or _PASS
 
 
 def _ck_father_dtype(ctx: ValidationContext) -> CheckOutcome:
-    try:
-        ctx.fathers = _as_parent_int_col(ctx.df_raw[ctx.father_col], ctx.father_col, ctx.zero_as_missing)
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="father_dtype", detail=str(e))], 1)
-    return _PASS
+    ctx.fathers, fail = _try_parse(
+        "father_dtype",
+        lambda: _as_parent_int_col(ctx.df_raw[ctx.father_col], ctx.father_col, ctx.zero_as_missing),
+    )
+    return fail or _PASS
 
 
 def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
-    try:
-        ctx.sex = _decode_sex(ctx.df_raw[ctx.sex_col], encoding=ctx.sex_encoding, zero_as_missing=ctx.zero_as_missing)
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="sex_tokens", detail=str(e))], 1)
-    return _PASS
+    ctx.sex, fail = _try_parse(
+        "sex_tokens",
+        lambda: _decode_sex(ctx.df_raw[ctx.sex_col], encoding=ctx.sex_encoding, zero_as_missing=ctx.zero_as_missing),
+    )
+    return fail or _PASS
 
 
 def _ck_negative_ids(ctx: ValidationContext) -> CheckOutcome:
@@ -388,11 +399,11 @@ def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
         return CheckOutcome("SKIP", skip_reason="no --birth-year-col specified")
     if ctx.birth_year_col not in ctx.df_raw.columns:
         return CheckOutcome("SKIP", skip_reason=f"column {ctx.birth_year_col!r} not present in file")
-    try:
-        ctx.birth_year = _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col)
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="birth_year_dtype", detail=str(e))], 1)
-    return _PASS
+    ctx.birth_year, fail = _try_parse(
+        "birth_year_dtype",
+        lambda: _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col),
+    )
+    return fail or _PASS
 
 
 def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
