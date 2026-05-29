@@ -3,6 +3,26 @@
 Pointers to where implementation details live. The README is the
 collaborator-facing surface; this file is for maintainers.
 
+## Package layout
+
+The implementation is the `pedsum/` package; `pedigree_summary.py` is a thin
+runnable shim (`python pedigree_summary.py …`) that re-exports the symbols the
+test suite imports directly. Modules, in dependency order (each imports only
+from those above it):
+
+| Module | Responsibility |
+|---|---|
+| `pedsum/base.py` | shared constants, the `pedigree_summary` logger, `PedigreeError` |
+| `pedsum/pedigree_ops.py` | low-level array helpers (parent rows, sib groups, topological depth) |
+| `pedsum/parse.py` | delimiter sniffing, column coercion, sex decoding |
+| `pedsum/checks.py` | per-check finding producers + check metadata (`_CHECK_*`) |
+| `pedsum/validate.py` | `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) + sex imputation |
+| `pedsum/pairs.py` | relationship-pair enumeration + `PedigreeGraph` construction |
+| `pedsum/sections.py` | per-section summary computations |
+| `pedsum/schema.py` | categorised YAML schema + slim/extra split machinery |
+| `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers |
+| `pedsum/cli.py` | argparse + `summarize` / `validate` runners + `main` |
+
 ## CLI design rationale
 
 See [docs/adr/0001-collaborator-cli-redesign.md](docs/adr/0001-collaborator-cli-redesign.md).
@@ -44,7 +64,8 @@ removed). Both delegate to `pedigree-graph`:
 ## Performance thresholds
 
 - F kernel (Meuwissen-Luo): logs INFO above `N = 1,000,000` so naive
-  runs don't silently hang. See `pedigree_summary.py:2176, 3443`.
+  runs don't silently hang. See `_F_KERNEL_WARN_THRESHOLD` (`pedsum/base.py`)
+  and its use in `_run_summarize` (`pedsum/cli.py`).
 - `--per-individual-pairs`: matrix engine OOMs on pair-dense
   pedigrees above ~500K rows.
 - `--ne-coancestry`: kinship DP scales with cumulative ancestor set;
