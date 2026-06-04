@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -44,6 +45,9 @@ from pedsum.sections import (
     compute_size_structure,
 )
 from pedsum.validate import _CHECK_ORDER, load_and_validate, validate_pedigree
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -365,7 +369,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _init_logging(verbose: bool, quiet: bool) -> None:
-    level = logging.WARNING if quiet else (logging.DEBUG if verbose else logging.INFO)
+    if quiet:
+        level = logging.WARNING
+    elif verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
@@ -375,7 +384,7 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
 
 
 @contextmanager
-def _timed(label: str):
+def _timed(label: str) -> Iterator[None]:
     """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block."""
     t0 = time.perf_counter()
     yield
@@ -701,10 +710,11 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
             depth = None  # acyclic FAIL already surfaced; skip reorder
         if depth is not None:
             order = np.argsort(depth, kind="stable")
-            if not np.array_equal(order, np.arange(len(order))):
+            natural = np.arange(len(order))
+            if not np.array_equal(order, natural):
                 logger.info(
                     "validate: reordering %d row(s) into topological order",
-                    int((order != np.arange(len(order))).sum()),
+                    int((order != natural).sum()),
                 )
                 df_out = df_out.iloc[order].reset_index(drop=True)
 

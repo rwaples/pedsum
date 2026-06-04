@@ -20,6 +20,7 @@ from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Iterator
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
@@ -247,9 +248,9 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
     mating = ped_data.get("mating_pairs")
     n_pairs = int(mating.get("n_pairs", 0)) if mating is not None else 0
     if sibship is not None and 0 < n_pairs < min_cell:
-        for k in ("size_dist",):
-            if k in sibship and isinstance(sibship[k], dict):
-                sibship[k] = dict.fromkeys(sibship[k])
+        size_dist = sibship.get("size_dist")
+        if isinstance(size_dist, dict):
+            sibship["size_dist"] = dict.fromkeys(size_dist)
 
     if mating is not None:
         if 0 < int(mating.get("n_pairs", 0)) < min_cell:
@@ -369,8 +370,9 @@ def _build_summary_data(
     ind_payload = {k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS}
     dists = ind_payload.get("distributions", {})
     slim_dists, extra_dists = _split_individual_distributions(dists)
-    slim_ind: dict = {k: v for k, v in ind_payload.items() if k != "distributions"}
-    extra_ind: dict = {k: v for k, v in ind_payload.items() if k != "distributions"}
+    base_ind = {k: v for k, v in ind_payload.items() if k != "distributions"}
+    slim_ind = dict(base_ind)
+    extra_ind = dict(base_ind)
     if slim_dists:
         slim_ind["distributions"] = slim_dists
     if extra_dists:
@@ -381,7 +383,10 @@ def _build_summary_data(
     return slim_yaml, extra_yaml
 
 
-def _flatten_long(obj, prefix: tuple = ()):
+def _flatten_long(
+    obj: object,
+    prefix: tuple[str, ...] = (),
+) -> Iterator[tuple[str, str, str, object]]:
     """Yield (section, key, subkey, value) rows from a nested dict / list."""
     if isinstance(obj, dict):
         for k, v in obj.items():

@@ -188,7 +188,10 @@ def _from_findings(findings: list[Finding]) -> CheckOutcome:
     return _PASS
 
 
-def _try_parse(check_name: str, parse: Callable[[], np.ndarray]):
+def _try_parse(
+    check_name: str,
+    parse: Callable[[], np.ndarray],
+) -> tuple[np.ndarray | None, CheckOutcome | None]:
     """Run a column parser, mapping a PedigreeError to a single-finding FAIL.
 
     Returns ``(value, None)`` on success or ``(None, outcome)`` on failure, so a
@@ -639,20 +642,20 @@ def _run_checks(
 
 
 def _build_context(
-    path,
+    path: Path,
     *,
-    id_col,
-    sex_col,
-    mother_col,
-    father_col,
-    sex_encoding,
-    zero_as_missing,
-    allow_missing_sex,
-    override_asserted_sex,
-    birth_year_col,
-    birth_year_min,
-    birth_year_max,
-    sep,
+    id_col: str,
+    sex_col: str,
+    mother_col: str,
+    father_col: str,
+    sex_encoding: str,
+    zero_as_missing: bool,
+    allow_missing_sex: bool,
+    override_asserted_sex: bool,
+    birth_year_col: str | None,
+    birth_year_min: int,
+    birth_year_max: int | None,
+    sep: str,
     require_birth_year_col: bool,
     log_read: bool,
 ) -> ValidationContext:

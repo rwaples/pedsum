@@ -120,11 +120,13 @@ def compute_mating_pair_summary(df: pd.DataFrame) -> dict | None:
         return None
 
     pair_sizes = children.groupby(["mother", "father"]).size()
+    n_pairs = len(pair_sizes)
+    n_multi_child_pairs = int((pair_sizes >= 2).sum())
 
     return {
-        "n_pairs": len(pair_sizes),
-        "n_pairs_with_multiple_children": int((pair_sizes >= 2).sum()),
-        "frac_pairs_with_multiple_children": float((pair_sizes >= 2).sum()) / len(pair_sizes),
+        "n_pairs": n_pairs,
+        "n_pairs_with_multiple_children": n_multi_child_pairs,
+        "frac_pairs_with_multiple_children": n_multi_child_pairs / n_pairs,
         "children_per_pair": _numeric_distribution(pair_sizes.to_numpy()),
         "effective_pairs_by_children": _effective_count_from_weights(pair_sizes.to_numpy()),
     }
@@ -267,6 +269,8 @@ def compute_aggregate_sections(
 
     reproductive = idf["n_offspring"] > 0
     no_children = ~reproductive
+    n_reproductive = int(reproductive.sum())
+    n_terminal = int(no_children.sum())
     founders = idf["is_founder"].astype(bool)
     descendant_path_counts = idf.loc[founders, "n_descendant_paths"].to_numpy()
 
@@ -292,10 +296,10 @@ def compute_aggregate_sections(
     # CONTEXT.md naming convention: <noun>_count for summary stats;
     # <noun>_count_hist for binned PMF; _male / _female stratify either.
     reproduction = {
-        "n_reproductive": int(reproductive.sum()),
-        "frac_reproductive": float(reproductive.sum()) / n,
-        "n_terminal": int(no_children.sum()),
-        "frac_terminal": float(no_children.sum()) / n,
+        "n_reproductive": n_reproductive,
+        "frac_reproductive": n_reproductive / n,
+        "n_terminal": n_terminal,
+        "frac_terminal": n_terminal / n,
         "frac_with_full_sib": frac_with_full_sib,
         "offspring_count": _numeric_distribution(n_offspring_arr),
         "offspring_count_hist": _offspring_dist(n_offspring_arr, n),

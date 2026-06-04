@@ -178,19 +178,27 @@ def _check_sex_role_consistency(
     used_as_father = np.unique(fathers[fathers != -1])
     rows_um = id_index.get_indexer(used_as_mother)
     rows_uf = id_index.get_indexer(used_as_father)
+
+    keep_m = rows_um != -1
+    keep_f = rows_uf != -1
     if skip_mask is not None:
-        keep_m = (rows_um != -1) & ~skip_mask[np.where(rows_um != -1, rows_um, 0)]
-        keep_f = (rows_uf != -1) & ~skip_mask[np.where(rows_uf != -1, rows_uf, 0)]
-    else:
-        keep_m = rows_um != -1
-        keep_f = rows_uf != -1
+        present_m = keep_m.copy()
+        present_f = keep_f.copy()
+        keep_m[present_m] = ~skip_mask[rows_um[present_m]]
+        keep_f[present_f] = ~skip_mask[rows_uf[present_f]]
+
+    mother_ids = used_as_mother[keep_m]
+    mother_rows = rows_um[keep_m]
+    father_ids = used_as_father[keep_f]
+    father_rows = rows_uf[keep_f]
+
     findings = [
         Finding(check="sex_role_consistency", id=int(mid), detail=f"id={int(mid)} used as mother but sex != female")
-        for mid in used_as_mother[keep_m & (sex[rows_um] != SEX_FEMALE)]
+        for mid in mother_ids[sex[mother_rows] != SEX_FEMALE]
     ]
     findings.extend(
         Finding(check="sex_role_consistency", id=int(fid), detail=f"id={int(fid)} used as father but sex != male")
-        for fid in used_as_father[keep_f & (sex[rows_uf] != SEX_MALE)]
+        for fid in father_ids[sex[father_rows] != SEX_MALE]
     )
     return findings
 

@@ -13,6 +13,7 @@ from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import TextIO
 
 _PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
     {
@@ -222,7 +223,7 @@ _SEP_MAP = {
 _SEP_HUMAN = {v: k for k, v in _SEP_MAP.items()}
 
 
-def _open_text_for_sniff(path: Path):
+def _open_text_for_sniff(path: Path) -> TextIO:
     """Open ``path`` as text for delimiter sniffing; transparent to gzip."""
     if path.suffix == ".gz":
         return gzip.open(path, mode="rt", encoding="utf-8", newline="")
@@ -248,7 +249,8 @@ def _sniff_delimiter(path: Path) -> str:
     if not first:
         raise PedigreeError(f"input file {path} is empty or contains only blank lines")
     best = max(("\t", ",", ";", "|"), key=first.count)
-    if first.count(best) > 0:
+    best_count = first.count(best)
+    if best_count > 0:
         return best
     if len(first.split()) >= 2:
         return r"\s+"
