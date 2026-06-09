@@ -7,14 +7,10 @@ ancestor aggregates empty, and that ``--inbreeding`` flips them on.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from pedigree_summary import (
     SEX_FEMALE,
     SEX_MALE,

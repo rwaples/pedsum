@@ -12,13 +12,9 @@ pin is later bumped:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 import pedigree_summary as ps
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"

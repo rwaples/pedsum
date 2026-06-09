@@ -14,6 +14,13 @@ REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
 SCRIPT = REPO / "pedigree_summary.py"
 
+# Make the repo-root ``pedigree_summary`` shim importable for every test,
+# regardless of collection order or how pytest is invoked. conftest.py is
+# imported before any test module, so this replaces the per-file
+# ``sys.path.insert`` hacks the direct-import tests used to carry.
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
 
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Invoke ``pedigree_summary.py`` as a subprocess; capture stdout/stderr."""
