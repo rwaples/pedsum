@@ -6,10 +6,11 @@ import logging
 
 import numpy as np
 import pandas as pd
-import pedigree_summary as ps
 import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
+
+import pedigree_summary as ps
 
 # ---------------------------------------------------------------------------
 # Auto-detection

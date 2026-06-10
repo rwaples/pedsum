@@ -9,8 +9,9 @@ which makes precise assertions noisy).
 
 from __future__ import annotations
 
-import pedigree_summary as ps
 from conftest import write_ped as _write_ped
+
+import pedigree_summary as ps
 
 
 def _results_by_name(path) -> dict[str, ps.CheckResult]:

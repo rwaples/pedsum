@@ -1,0 +1,28 @@
+target-version = "py313"
+required-version = ">=0.15,<0.16"
+line-length = 120
+
+[lint]
+select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF", "A", "C4", "PT", "PIE", "PERF", "TC", "PLW", "RSE", "RET", "D"]
+ignore = [
+    "E501",   # line too long — formatter handles wrapping
+    "SIM108", # use ternary — often less readable
+    "RUF001", # ambiguous unicode in identifiers/strings — scientific notation
+    "RUF002", # ambiguous unicode in docstrings — scientific notation
+    "RUF003", # ambiguous unicode in comments — scientific notation
+    "C408",   # unnecessary dict() call — dict() often reads better for keyword-style mappings
+]
+
+[lint.flake8-type-checking]
+strict = true
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.isort]
+known-first-party = ["pedsum"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

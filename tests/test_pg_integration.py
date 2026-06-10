@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
 import pedigree_summary as ps
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"

@@ -10,9 +10,10 @@ founder_contribution, founder_summary, components, depth_summary.
 
 from __future__ import annotations
 
-import pedigree_summary as ps
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
+
+import pedigree_summary as ps
 
 
 def test_safe_attempt_summarize_outputs(tmp_path):

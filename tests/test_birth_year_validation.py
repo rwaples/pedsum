@@ -5,10 +5,11 @@ from __future__ import annotations
 import gzip
 
 import pandas as pd
-import pedigree_summary as ps
 import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
+
+import pedigree_summary as ps
 
 
 def test_validate_without_birth_year_col_skips_all_three(tmp_path):

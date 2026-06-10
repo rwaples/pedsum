@@ -5,9 +5,10 @@ from __future__ import annotations
 import gzip
 
 import pandas as pd
-import pedigree_summary as ps
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
+
+import pedigree_summary as ps
 
 
 def test_topological_row_order_check_removed():

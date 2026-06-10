@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from itertools import pairwise
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
-from pedigree_graph import REL_REGISTRY, PedigreeGraph
+from pedigree_graph import REL_REGISTRY
+
+if TYPE_CHECKING:
+    import scipy.sparse as sp
+    from pedigree_graph import PedigreeGraph
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import _full_sib_groups, _grandparent_arrays, _parent_rows

@@ -29,6 +29,7 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
         capture_output=True,
         text=True,
         cwd=cwd or REPO,
+        check=False,
     )
 
 

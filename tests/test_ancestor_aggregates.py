@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
 from pedigree_summary import (
     SEX_FEMALE,
     SEX_MALE,
