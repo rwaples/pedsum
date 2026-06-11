@@ -151,6 +151,38 @@ Where the overall peak now lives after Tier 1:
 
 Both are **out of pedsum-only scope** (no upstream `pedigree-graph` edits).
 
+## Real-data check: the 783K stallion-heavy horse pedigree
+
+The synthetic cells above deliberately avoid pathological pair density. The real
+worst case is the horse-breed pedigree in `external/pedigrees/horse/horse.fixed.tsv`
+(783,029 individuals; top sire 516736 has 2,593 offspring — the "all-time-great
+stallion" of `pedigree-graph`'s `LIMITATIONS.md`). The matrix engine OOMs on it
+(C(50K,2) candidate pairs through one stallion grandparent); the **streaming**
+path is the only viable one, and it is exactly what Idea 1 optimises.
+
+Command (not bundled in pedsum; columns map FoalID/Sex/Dam/Sire/BirthYear):
+
+```bash
+python benchmarks/profile_memory.py --label horse/streaming/full --repeats 2 --warmup 1 \
+  -- summarize --in .../horse/horse.fixed.tsv --out /tmp/horse \
+     --id-col FoalID --sex-col Sex --mother-col Dam --father-col Sire --birth-year-col BirthYear
+```
+
+Idea 1 before/after (matched 2-repeat runs; F is cheap here, mean F≈0.007, so the
+peak is the individual-table phase, not inbreeding):
+
+| Cell | Peak RSS before → after (MiB) | Δ | Runtime (s) |
+|------|------------------------------:|----:|------------:|
+| horse/streaming, full (F + 7 Ne) | 1103.2 → 963.0 | **−140.2 (−12.7%)** | 18.1 → 18.9 |
+| horse/streaming, no F/Ne (diag) | 1096.4 → 947.7 | **−148.7 (−13.6%)** | 15.4 → 13.9 |
+
+Full-run per-phase drop (before → after): inbreeding 918.0→756.6, individual
+table 1103.2→963.0, write 1045.0→905.0, effective size 798.4→620.5 — every
+post-streaming phase falls ~140–180 MiB as the cached `_A…_A5` are released. The
+whole default summarize finishes in ~19 s at <1 GiB peak on the pedigree both
+non-streaming engines OOM on. Confirms Idea 1 generalises to the real stallion
+worst case (smaller absolute matrices than the synthetic 1M cell, ~150 MiB).
+
 ## Tier 2 / Tier 3 stop-go review
 
 Gate (from the plan): promote only if the target accounts for ≥10% of peak RSS
