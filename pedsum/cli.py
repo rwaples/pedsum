@@ -383,11 +383,38 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
     )
 
 
+# Module-level stack of the active ``_timed`` labels, innermost last. Touched
+# only by the benchmark RSS profiler (``benchmarks/profile_memory.py``) so it
+# can attribute each sample to the phase running when it was taken; empty and
+# inert in normal runs.
+_PROFILE_PHASE_STACK: list[str] = []
+
+
+def _current_profile_phase() -> str | None:
+    """Return the innermost active ``_timed`` label, or None outside any block.
+
+    Exposed for the benchmark RSS profiler so it can attribute sampled RSS to a
+    phase without depending on the private stack variable's name.
+    """
+    return _PROFILE_PHASE_STACK[-1] if _PROFILE_PHASE_STACK else None
+
+
 @contextmanager
 def _timed(label: str) -> Iterator[None]:
-    """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block."""
+    """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block.
+
+    Also pushes ``label`` onto a module-level phase stack for the block's
+    duration so the benchmark profiler can attribute RSS samples to it. The
+    push/pop is exception-safe (``finally``); the INFO log stays *after* the
+    block so — exactly as before — it fires only on normal exit, never when the
+    wrapped block raises.
+    """
     t0 = time.perf_counter()
-    yield
+    _PROFILE_PHASE_STACK.append(label)
+    try:
+        yield
+    finally:
+        _PROFILE_PHASE_STACK.pop()
     logger.info("%s in %.2fs", label, time.perf_counter() - t0)
 
 
@@ -395,21 +422,24 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     try:
-        df, children_csr = load_and_validate(
-            args.in_path,
-            id_col=args.id_col,
-            sex_col=args.sex_col,
-            mother_col=args.mother_col,
-            father_col=args.father_col,
-            sex_encoding=args.sex_encoding,
-            zero_as_missing=False,
-            allow_missing_sex=args.allow_missing_sex,
-            override_asserted_sex=not args.no_override_asserted_sex,
-            birth_year_col=args.birth_year_col,
-            birth_year_min=args.birth_year_min,
-            birth_year_max=args.birth_year_max,
-            sep=args.sep,
-        )
+        # Wrapped so the read/validation peak is attributed to a phase by the
+        # benchmark profiler; load_and_validate already logs its own timing.
+        with _timed("load+validate"):
+            df, children_csr = load_and_validate(
+                args.in_path,
+                id_col=args.id_col,
+                sex_col=args.sex_col,
+                mother_col=args.mother_col,
+                father_col=args.father_col,
+                sex_encoding=args.sex_encoding,
+                zero_as_missing=False,
+                allow_missing_sex=args.allow_missing_sex,
+                override_asserted_sex=not args.no_override_asserted_sex,
+                birth_year_col=args.birth_year_col,
+                birth_year_min=args.birth_year_min,
+                birth_year_max=args.birth_year_max,
+                sep=args.sep,
+            )
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         return 1
@@ -464,9 +494,27 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
         with _timed("relationship burden summary"):
             relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
+        # The materialised pair lists are consumed only by the burden summary
+        # above; on a pair-dense pedigree they dominate the post-extraction
+        # resident floor that persists through inbreeding / Ne / write. Drop
+        # them now — nothing downstream reads pairs["_pair_lists"] (report.py
+        # touches only the scalar counts and by_degree). Leaves pairs["_engine"].
+        pairs.pop("_pair_lists", None)
     else:
         with _timed("relationship pair counts (count_pairs_streaming)"):
             streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
+        # count_pairs_streaming builds _A … _A5 (and _Am/_Af) on pg but, unlike
+        # the matrix engine's extract_pairs, never releases them. On a 1M-row
+        # pedigree those cached adjacency powers stay resident through the
+        # inbreeding / Ne / individual-table / write phases — which is where the
+        # streaming run actually peaks. Release them now (private pedigree-graph
+        # API; the coupling is deliberate and documented). Safe because nothing
+        # downstream reuses the matrices: compute_inbreeding, compute_n_ancestors,
+        # compute_n_descendants, and compute_effective_size all run off the raw
+        # mother/father arrays and their own kernels. If pair extraction were
+        # ever called again, pedigree-graph rebuilds the parent CSR lazily via
+        # _ensure_parent_csr().
+        pg._release_pair_matrices()
         pairs = _augment_pair_counts(streamed_counts)
         pairs["_engine"] = "streaming_scalar"
         relationship_summary = {

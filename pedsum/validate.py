@@ -115,14 +115,16 @@ def _impute_sex_from_roles(
     imputed = sex.copy()
     sex_source = np.full(len(sex), "input", dtype=object)
 
-    # first_row dicts are only consumed to render row-X / row-Y detail in
-    # sex_role_ambiguity findings.
+    # The unique parent IDs (and their first-occurrence row indices) drive the
+    # as_mother / as_father role masks every row needs. The first_row *dicts*,
+    # however, are only consumed to render row-X / row-Y detail in
+    # sex_role_ambiguity findings, so they are built lazily below — only when an
+    # ambiguous row actually exists — to avoid materialising two id→row dicts
+    # the size of the parent set on every run.
     m_idx = np.where(mothers != -1)[0]
     f_idx = np.where(fathers != -1)[0]
     unique_mids, first_m = np.unique(mothers[m_idx], return_index=True)
     unique_fids, first_f = np.unique(fathers[f_idx], return_index=True)
-    mother_first_row = {int(mid): int(m_idx[i]) for mid, i in zip(unique_mids, first_m, strict=True)}
-    father_first_row = {int(fid): int(f_idx[i]) for fid, i in zip(unique_fids, first_f, strict=True)}
 
     as_mother = np.isin(ids, unique_mids)
     as_father = np.isin(ids, unique_fids)
@@ -131,6 +133,17 @@ def _impute_sex_from_roles(
     impute_f = original_unknown_mask & as_mother & ~as_father
     impute_m = original_unknown_mask & as_father & ~as_mother
     ambiguous_mask = original_unknown_mask & as_mother & as_father
+
+    # Lazy first_row dicts: _check_sex_role_ambiguity only queries these inside
+    # its `where(ambiguous_mask)` loop, so empty dicts are equivalent when there
+    # is nothing ambiguous to describe.
+    if ambiguous_mask.any():
+        mother_first_row = {int(mid): int(m_idx[i]) for mid, i in zip(unique_mids, first_m, strict=True)}
+        father_first_row = {int(fid): int(f_idx[i]) for fid, i in zip(unique_fids, first_f, strict=True)}
+    else:
+        mother_first_row = {}
+        father_first_row = {}
+
     imputed[impute_f] = SEX_FEMALE
     imputed[impute_m] = SEX_MALE
     imputed_from_missing = impute_f | impute_m

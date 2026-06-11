@@ -62,6 +62,22 @@
 - Zero downstream consumers parse pedsum YAML/TSV today (verified against fitACE and simACE). No grace period is provided.
 - If you have scripts that read these outputs, rewrite the paths per the tables above. A complete diff of expected keys lives in `tests/test_07_redesign.py` and `tests/test_summary_split.py`.
 
+### Performance (internal; output unchanged)
+
+`summarize` peak RSS lowered with no change to any YAML/TSV/annotated value
+(verified by semantic before/after parity). Measured on a deterministic ~1M-row
+pedigree via the new `benchmarks/` profiler:
+
+- **Release streaming pair matrices.** After `count_pairs_streaming`, the
+  cached `_A … _A5` adjacency powers are dropped (they were held through the
+  inbreeding / Ne / write phases, where the streaming run actually peaks).
+  Overall peak −20% (narrow) / −24% (wide).
+- **Drop `_pair_lists` after the burden summary** (`--per-individual-pairs`):
+  removes the materialised pair lists (~2–2.8 GiB at 200K–400K rows) from the
+  post-extraction resident floor.
+- **Lazy sex-role first-row dicts:** built only when an ambiguous unsexed row
+  exists, trimming the read/validate phase (~190 MiB at 1M rows).
+
 ## 0.9.0 — 2026-05-19 — sex-from-role override + `sex_source` per-row audit column
 
 Breaking. Continues the [ADR-0001](docs/adr/0001-collaborator-cli-redesign.md)
