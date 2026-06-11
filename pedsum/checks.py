@@ -206,8 +206,8 @@ def _check_sex_role_consistency(
 def _check_sex_role_ambiguity(
     ids: np.ndarray,
     ambiguous_mask: np.ndarray,
-    mother_first_row: dict[int, int],
-    father_first_row: dict[int, int],
+    mothers: np.ndarray,
+    fathers: np.ndarray,
 ) -> list[Finding]:
     """Detect unsexed rows that are referenced as BOTH mother and father.
 
@@ -215,12 +215,18 @@ def _check_sex_role_ambiguity(
     information. Pedsum 0.8 added ``--allow-missing-sex`` which downgrades
     this to a SKIP with a tolerated count; the fixed validate-output writes
     these rows' sex as ``-1`` so the on-disk pedigree is self-consistent.
+
+    The first row referencing each ambiguous id as mother / father is found on
+    demand here (rather than precomputed) because ``ambiguous_mask`` is empty on
+    every well-formed pedigree — this loop almost never runs.
     """
     findings: list[Finding] = []
     for row_idx in np.where(ambiguous_mask)[0]:
         rid = int(ids[row_idx])
-        mrow = mother_first_row.get(rid, -1)
-        frow = father_first_row.get(rid, -1)
+        m_rows = np.where(mothers == rid)[0]
+        f_rows = np.where(fathers == rid)[0]
+        mrow = int(m_rows[0]) if m_rows.size else -1
+        frow = int(f_rows[0]) if f_rows.size else -1
         findings.append(
             Finding(
                 check="sex_role_ambiguity",

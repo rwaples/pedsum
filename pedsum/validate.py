@@ -71,8 +71,6 @@ class _SexImputation:
     n_imputed: int
     ambiguous_mask: np.ndarray
     original_unknown_mask: np.ndarray
-    mother_first_row: dict[int, int]
-    father_first_row: dict[int, int]
     overridden_mask: np.ndarray
     sex_source: np.ndarray  # dtype=object; per-row category string
 
@@ -115,16 +113,12 @@ def _impute_sex_from_roles(
     imputed = sex.copy()
     sex_source = np.full(len(sex), "input", dtype=object)
 
-    # The unique parent IDs (and their first-occurrence row indices) drive the
-    # as_mother / as_father role masks every row needs. The first_row *dicts*,
-    # however, are only consumed to render row-X / row-Y detail in
-    # sex_role_ambiguity findings, so they are built lazily below — only when an
-    # ambiguous row actually exists — to avoid materialising two id→row dicts
-    # the size of the parent set on every run.
-    m_idx = np.where(mothers != -1)[0]
-    f_idx = np.where(fathers != -1)[0]
-    unique_mids, first_m = np.unique(mothers[m_idx], return_index=True)
-    unique_fids, first_f = np.unique(fathers[f_idx], return_index=True)
+    # The distinct parent IDs drive the as_mother / as_father role masks every
+    # row needs. (The first-occurrence row of each ambiguous parent is computed
+    # on demand in _check_sex_role_ambiguity, which only runs on the rare
+    # ambiguous rows — so no id→row table is materialised here.)
+    unique_mids = np.unique(mothers[mothers != -1])
+    unique_fids = np.unique(fathers[fathers != -1])
 
     as_mother = np.isin(ids, unique_mids)
     as_father = np.isin(ids, unique_fids)
@@ -133,17 +127,6 @@ def _impute_sex_from_roles(
     impute_f = original_unknown_mask & as_mother & ~as_father
     impute_m = original_unknown_mask & as_father & ~as_mother
     ambiguous_mask = original_unknown_mask & as_mother & as_father
-
-    # Lazy first_row dicts: _check_sex_role_ambiguity only queries these inside
-    # its `where(ambiguous_mask)` loop, so empty dicts are equivalent when there
-    # is nothing ambiguous to describe.
-    if ambiguous_mask.any():
-        mother_first_row = {int(mid): int(m_idx[i]) for mid, i in zip(unique_mids, first_m, strict=True)}
-        father_first_row = {int(fid): int(f_idx[i]) for fid, i in zip(unique_fids, first_f, strict=True)}
-    else:
-        mother_first_row = {}
-        father_first_row = {}
-
     imputed[impute_f] = SEX_FEMALE
     imputed[impute_m] = SEX_MALE
     imputed_from_missing = impute_f | impute_m
@@ -169,8 +152,6 @@ def _impute_sex_from_roles(
         n_imputed=n_imputed,
         ambiguous_mask=ambiguous_mask,
         original_unknown_mask=original_unknown_mask,
-        mother_first_row=mother_first_row,
-        father_first_row=father_first_row,
         overridden_mask=overridden_mask,
         sex_source=sex_source,
     )
@@ -383,8 +364,8 @@ def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
         _check_sex_role_ambiguity(
             ctx.ids,
             imp.ambiguous_mask,
-            imp.mother_first_row,
-            imp.father_first_row,
+            ctx.mothers,
+            ctx.fathers,
         )
     )
 

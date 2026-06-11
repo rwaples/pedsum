@@ -75,8 +75,10 @@ pedigree via the new `benchmarks/` profiler:
 - **Drop `_pair_lists` after the burden summary** (`--per-individual-pairs`):
   removes the materialised pair lists (~2–2.8 GiB at 200K–400K rows) from the
   post-extraction resident floor.
-- **Lazy sex-role first-row dicts:** built only when an ambiguous unsexed row
-  exists, trimming the read/validate phase (~190 MiB at 1M rows).
+- **Compute sex-role ambiguity rows on demand:** the two per-parent
+  first-row lookup tables are gone; the rare ambiguous-row finding now resolves
+  its row reference directly, trimming the read/validate phase (~190 MiB at
+  1M rows).
 
 ## 0.9.0 — 2026-05-19 — sex-from-role override + `sex_source` per-row audit column
 
