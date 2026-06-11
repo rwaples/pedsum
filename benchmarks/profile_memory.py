@@ -124,21 +124,14 @@ def _run_once(summarize_argv: list[str], out_dir: Path) -> dict:
     if rc != 0:
         raise SystemExit(f"summarize returned non-zero exit code {rc}; argv={argv}")
 
-    # Canonicalize the annotated-TSV write label: its _timed() label embeds the
-    # per-run output path, which would otherwise stop the write phase from
-    # aggregating across repeats. Merge by max peak / summed samples.
-    per_phase: dict[str, dict] = {}
-    for name, slot in sampler.phases.items():
-        canon = "wrote annotated.tsv.gz" if name.startswith("wrote ") and "annotated.tsv.gz" in name else name
-        entry = per_phase.get(canon)
-        peak_mib = slot["peak"] / _MiB
-        elapsed = slot["last_t"] - slot["first_t"]
-        if entry is None:
-            per_phase[canon] = {"peak_mib": peak_mib, "elapsed_s": elapsed, "n_samples": int(slot["n"])}
-        else:
-            entry["peak_mib"] = max(entry["peak_mib"], peak_mib)
-            entry["elapsed_s"] += elapsed
-            entry["n_samples"] += int(slot["n"])
+    per_phase = {
+        name: {
+            "peak_mib": slot["peak"] / _MiB,
+            "elapsed_s": slot["last_t"] - slot["first_t"],
+            "n_samples": int(slot["n"]),
+        }
+        for name, slot in sampler.phases.items()
+    }
     return {
         "global_peak_mib": sampler.global_peak / _MiB,
         "total_runtime_s": total_runtime,

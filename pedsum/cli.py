@@ -514,6 +514,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # mother/father arrays and their own kernels. If pair extraction were
         # ever called again, pedigree-graph rebuilds the parent CSR lazily via
         # _ensure_parent_csr().
+        # The clean fix is upstream symmetry — count_pairs_streaming should
+        # self-release like extract_pairs already does: pedigree-graph#4. Drop
+        # this private call once that lands.
         pg._release_pair_matrices()
         pairs = _augment_pair_counts(streamed_counts)
         pairs["_engine"] = "streaming_scalar"
@@ -631,7 +634,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             out_dir,
         )
     else:
-        with _timed(f"wrote {out_dir}/annotated.tsv.gz"):
+        # Stable phase label (no per-run path) so the benchmark profiler can
+        # aggregate this phase across repeats; out_dir is already in the
+        # summary.yaml log line above.
+        with _timed("wrote annotated.tsv.gz"):
             _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
 
     return 0
