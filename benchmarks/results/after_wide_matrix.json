@@ -1,0 +1,291 @@
+{
+  "label": "wide/matrix/after",
+  "metadata": {
+    "input": "/tmp/ped_200k_wide.tsv",
+    "rows": 200000,
+    "max_depth": 7,
+    "extra_cols": 8,
+    "engine": "matrix",
+    "inbreeding": true,
+    "effective_size": true
+  },
+  "aggregate": {
+    "peak_mib_median": 6213.51171875,
+    "peak_mib_min": 5752.44921875,
+    "peak_mib_max": 6428.26953125,
+    "runtime_s_median": 34.56176917099947,
+    "per_phase": {
+      "inbreeding (F + n_ancestors)": {
+        "peak_mib": 1198.85546875,
+        "elapsed_s": 1.0919783650024328,
+        "n_runs": 3
+      },
+      "aggregate pedigree sections": {
+        "peak_mib": 1088.36328125,
+        "elapsed_s": 0.12163036600395571,
+        "n_runs": 3
+      },
+      "wrote annotated.tsv.gz": {
+        "peak_mib": 1084.39453125,
+        "elapsed_s": 1.3876345250027953,
+        "n_runs": 3
+      },
+      "load+validate": {
+        "peak_mib": 1208.30859375,
+        "elapsed_s": 1.0686823170035495,
+        "n_runs": 3
+      },
+      "size+structure": {
+        "peak_mib": 854.46484375,
+        "elapsed_s": 0.0,
+        "n_runs": 1
+      },
+      "relationship pairs": {
+        "peak_mib": 6213.51171875,
+        "elapsed_s": 20.733315498000593,
+        "n_runs": 3
+      },
+      "relationship burden summary": {
+        "peak_mib": 5091.984375,
+        "elapsed_s": 6.715891960004228,
+        "n_runs": 3
+      },
+      "sibship sizes": {
+        "peak_mib": 1198.96484375,
+        "elapsed_s": 0.0,
+        "n_runs": 3
+      },
+      "mating-pair summary": {
+        "peak_mib": 1198.96484375,
+        "elapsed_s": 0.0,
+        "n_runs": 3
+      },
+      "built PedigreeGraph": {
+        "peak_mib": 1198.96484375,
+        "elapsed_s": 0.08241873000224587,
+        "n_runs": 3
+      },
+      "(unprofiled)": {
+        "peak_mib": 1182.01171875,
+        "elapsed_s": 33.71554070699494,
+        "n_runs": 3
+      },
+      "individual table built": {
+        "peak_mib": 1067.7578125,
+        "elapsed_s": 0.997536606999347,
+        "n_runs": 3
+      },
+      "effective size (7 estimators)": {
+        "peak_mib": 1059.49609375,
+        "elapsed_s": 0.04045767399657052,
+        "n_runs": 3
+      }
+    }
+  },
+  "runs": [
+    {
+      "global_peak_mib": 5752.44921875,
+      "total_runtime_s": 34.56176917099947,
+      "per_phase": {
+        "(unprofiled)": {
+          "peak_mib": 1251.9296875,
+          "elapsed_s": 33.11071208099747,
+          "n_samples": 7
+        },
+        "load+validate": {
+          "peak_mib": 1261.67578125,
+          "elapsed_s": 1.0472724029968958,
+          "n_samples": 27
+        },
+        "built PedigreeGraph": {
+          "peak_mib": 1257.70703125,
+          "elapsed_s": 0.08107068100071047,
+          "n_samples": 5
+        },
+        "sibship sizes": {
+          "peak_mib": 1257.70703125,
+          "elapsed_s": 0.0,
+          "n_samples": 1
+        },
+        "mating-pair summary": {
+          "peak_mib": 1257.70703125,
+          "elapsed_s": 0.02016536500013899,
+          "n_samples": 2
+        },
+        "relationship pairs": {
+          "peak_mib": 5752.44921875,
+          "elapsed_s": 21.630481236999913,
+          "n_samples": 575
+        },
+        "relationship burden summary": {
+          "peak_mib": 5065.0,
+          "elapsed_s": 6.715891960004228,
+          "n_samples": 326
+        },
+        "inbreeding (F + n_ancestors)": {
+          "peak_mib": 1375.06640625,
+          "elapsed_s": 1.0727602249971824,
+          "n_samples": 54
+        },
+        "effective size (7 estimators)": {
+          "peak_mib": 1236.26171875,
+          "elapsed_s": 0.04036611800256651,
+          "n_samples": 3
+        },
+        "individual table built": {
+          "peak_mib": 1241.734375,
+          "elapsed_s": 0.9651288380046026,
+          "n_samples": 10
+        },
+        "aggregate pedigree sections": {
+          "peak_mib": 1256.8828125,
+          "elapsed_s": 0.1023539140005596,
+          "n_samples": 6
+        },
+        "wrote annotated.tsv.gz": {
+          "peak_mib": 1251.9296875,
+          "elapsed_s": 1.3876345250027953,
+          "n_samples": 33
+        }
+      }
+    },
+    {
+      "global_peak_mib": 6428.26953125,
+      "total_runtime_s": 33.71594438500324,
+      "per_phase": {
+        "(unprofiled)": {
+          "peak_mib": 1182.01171875,
+          "elapsed_s": 33.71554070699494,
+          "n_samples": 7
+        },
+        "load+validate": {
+          "peak_mib": 1208.30859375,
+          "elapsed_s": 1.0686823170035495,
+          "n_samples": 29
+        },
+        "built PedigreeGraph": {
+          "peak_mib": 1198.96484375,
+          "elapsed_s": 0.08241873000224587,
+          "n_samples": 5
+        },
+        "sibship sizes": {
+          "peak_mib": 1198.96484375,
+          "elapsed_s": 0.02036932299961336,
+          "n_samples": 2
+        },
+        "mating-pair summary": {
+          "peak_mib": 1198.96484375,
+          "elapsed_s": 0.0,
+          "n_samples": 1
+        },
+        "relationship pairs": {
+          "peak_mib": 6428.26953125,
+          "elapsed_s": 20.733315498000593,
+          "n_samples": 526
+        },
+        "relationship burden summary": {
+          "peak_mib": 5091.984375,
+          "elapsed_s": 6.533759555997676,
+          "n_samples": 319
+        },
+        "inbreeding (F + n_ancestors)": {
+          "peak_mib": 1198.85546875,
+          "elapsed_s": 1.1098721140006091,
+          "n_samples": 56
+        },
+        "effective size (7 estimators)": {
+          "peak_mib": 1059.49609375,
+          "elapsed_s": 0.04045767399657052,
+          "n_samples": 3
+        },
+        "individual table built": {
+          "peak_mib": 1067.7578125,
+          "elapsed_s": 0.997536606999347,
+          "n_samples": 10
+        },
+        "aggregate pedigree sections": {
+          "peak_mib": 1088.36328125,
+          "elapsed_s": 0.12163036600395571,
+          "n_samples": 7
+        },
+        "wrote annotated.tsv.gz": {
+          "peak_mib": 1084.39453125,
+          "elapsed_s": 1.3619793409961858,
+          "n_samples": 34
+        }
+      }
+    },
+    {
+      "global_peak_mib": 6213.51171875,
+      "total_runtime_s": 35.64588854799513,
+      "per_phase": {
+        "(unprofiled)": {
+          "peak_mib": 881.30078125,
+          "elapsed_s": 34.16250475899869,
+          "n_samples": 6
+        },
+        "load+validate": {
+          "peak_mib": 856.8125,
+          "elapsed_s": 1.0724697729965555,
+          "n_samples": 28
+        },
+        "built PedigreeGraph": {
+          "peak_mib": 854.46484375,
+          "elapsed_s": 0.0851802429970121,
+          "n_samples": 5
+        },
+        "size+structure": {
+          "peak_mib": 854.46484375,
+          "elapsed_s": 0.0,
+          "n_samples": 1
+        },
+        "sibship sizes": {
+          "peak_mib": 854.46484375,
+          "elapsed_s": 0.0,
+          "n_samples": 1
+        },
+        "mating-pair summary": {
+          "peak_mib": 854.46484375,
+          "elapsed_s": 0.0,
+          "n_samples": 1
+        },
+        "relationship pairs": {
+          "peak_mib": 6213.51171875,
+          "elapsed_s": 20.385059279993584,
+          "n_samples": 525
+        },
+        "relationship burden summary": {
+          "peak_mib": 5607.1015625,
+          "elapsed_s": 8.732264639998903,
+          "n_samples": 424
+        },
+        "inbreeding (F + n_ancestors)": {
+          "peak_mib": 1015.00390625,
+          "elapsed_s": 1.0919783650024328,
+          "n_samples": 55
+        },
+        "effective size (7 estimators)": {
+          "peak_mib": 875.64453125,
+          "elapsed_s": 0.11518868900020607,
+          "n_samples": 4
+        },
+        "individual table built": {
+          "peak_mib": 878.08203125,
+          "elapsed_s": 1.0366333210040466,
+          "n_samples": 10
+        },
+        "aggregate pedigree sections": {
+          "peak_mib": 883.30078125,
+          "elapsed_s": 0.12171200999728171,
+          "n_samples": 7
+        },
+        "wrote annotated.tsv.gz": {
+          "peak_mib": 891.98046875,
+          "elapsed_s": 1.3976553629981936,
+          "n_samples": 34
+        }
+      }
+    }
+  ],
+  "flags": []
+}
