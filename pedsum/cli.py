@@ -503,21 +503,12 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     else:
         with _timed("relationship pair counts (count_pairs_streaming)"):
             streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
-        # count_pairs_streaming builds _A … _A5 (and _Am/_Af) on pg but, unlike
-        # the matrix engine's extract_pairs, never releases them. On a 1M-row
-        # pedigree those cached adjacency powers stay resident through the
-        # inbreeding / Ne / individual-table / write phases — which is where the
-        # streaming run actually peaks. Release them now (private pedigree-graph
-        # API; the coupling is deliberate and documented). Safe because nothing
-        # downstream reuses the matrices: compute_inbreeding, compute_n_ancestors,
-        # compute_n_descendants, and compute_effective_size all run off the raw
-        # mother/father arrays and their own kernels. If pair extraction were
-        # ever called again, pedigree-graph rebuilds the parent CSR lazily via
-        # _ensure_parent_csr().
-        # The clean fix is upstream symmetry — count_pairs_streaming should
-        # self-release like extract_pairs already does: pedigree-graph#4. Drop
-        # this private call once that lands.
-        pg._release_pair_matrices()
+        # count_pairs_streaming builds the transient adjacency powers (_A … _A5)
+        # and now releases them on exit, mirroring extract_pairs (pedigree-graph#4),
+        # so they no longer stay resident through the inbreeding / Ne /
+        # individual-table / write phases where the streaming run peaks.  We used
+        # to reach into the private pg._release_pair_matrices() here; the upstream
+        # symmetry fix made that unnecessary.
         pairs = _augment_pair_counts(streamed_counts)
         pairs["_engine"] = "streaming_scalar"
         relationship_summary = {

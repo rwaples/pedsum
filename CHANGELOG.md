@@ -71,7 +71,10 @@ pedigree via the new `benchmarks/` profiler:
 - **Release streaming pair matrices.** After `count_pairs_streaming`, the
   cached `_A … _A5` adjacency powers are dropped (they were held through the
   inbreeding / Ne / write phases, where the streaming run actually peaks).
-  Overall peak −20% (narrow) / −24% (wide).
+  Now delivered upstream: pedigree-graph **v0.5.2** releases them on exit
+  (pedigree-graph#4), so the pin moves to `@v0.5.2` and pedsum's private
+  `_release_pair_matrices()` workaround is removed. Overall peak −20%
+  (narrow) / −24% (wide).
 - **Drop `_pair_lists` after the burden summary** (`--per-individual-pairs`):
   removes the materialised pair lists (~2–2.8 GiB at 200K–400K rows) from the
   post-extraction resident floor.
