@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.2 — 2026-06-12 — validate.log pins the offending rows
+
+### Fixes
+
+- **`validate.log` now names the offending rows for the role-conflict checks.** `sex_role_consistency` and `parent_refs_sex_conflict` previously recorded only the id (the `row` column was blank), so a pedigree where an individual is used as both a mother and a father told you the id but not which lines to fix. The findings now carry the id's own row in the `row` column (where it has one) and list the referencing rows in the detail — e.g. `id=3 used as father in row(s) [4, 5] but sex != male`, and `id=99 referenced as both mother (row(s) [2, 4]) and father (row(s) [3])`. This matches what `sex_role_ambiguity` already did.
+
 ## 0.10.1 — 2026-06-12 — summarize writes validate.log on validation failure
 
 ### Fixes
