@@ -39,6 +39,18 @@ class CheckResult:
 # library of finding producers consumed by that registry.
 
 
+def _rows_phrase(rows: np.ndarray, limit: int = 5) -> str:
+    """Render referencing rows for a finding detail, capped at ``limit``.
+
+    Lets ID-level checks (sex_role_consistency, parent_refs_sex_conflict) pin
+    the offending lines in their detail. Wording matches ``_rows_listing`` in
+    ``report.py``.
+    """
+    listed = rows[:limit].tolist()
+    suffix = f" (and {len(rows) - limit} more)" if len(rows) > limit else ""
+    return f"row(s) {listed}{suffix}"
+
+
 def _check_negative_ids(ids: np.ndarray) -> list[Finding]:
     """Detect negative IDs (id < 0). Returns one Finding per offending row."""
     return [
@@ -154,9 +166,39 @@ def _check_parent_refs_sex_conflict(
         Finding(
             check="parent_refs_sex_conflict",
             id=int(c),
-            detail=f"id={int(c)} referenced as both mother and father (sex ambiguous)",
+            detail=(
+                f"id={int(c)} referenced as both mother ({_rows_phrase(np.where(mothers == c)[0])}) "
+                f"and father ({_rows_phrase(np.where(fathers == c)[0])}) (sex ambiguous)"
+            ),
         )
         for c in conflicts
+    ]
+
+
+def _sex_role_findings(
+    role: str,
+    parents: np.ndarray,
+    ids: np.ndarray,
+    own_rows: np.ndarray,
+    sex: np.ndarray,
+    expected_sex: int,
+) -> list[Finding]:
+    """Build sex_role_consistency Findings for ids used as ``role`` with the wrong sex.
+
+    ``row`` is the individual's own row (where its sex is declared); the detail
+    names the row(s) that reference the id in this role so the log pins the
+    offending lines.
+    """
+    expected = "female" if expected_sex == SEX_FEMALE else "male"
+    bad = sex[own_rows] != expected_sex
+    return [
+        Finding(
+            check="sex_role_consistency",
+            id=int(pid),
+            row=int(own_row),
+            detail=f"id={int(pid)} used as {role} in {_rows_phrase(np.where(parents == pid)[0])} but sex != {expected}",
+        )
+        for pid, own_row in zip(ids[bad], own_rows[bad], strict=True)
     ]
 
 
@@ -192,14 +234,8 @@ def _check_sex_role_consistency(
     father_ids = used_as_father[keep_f]
     father_rows = rows_uf[keep_f]
 
-    findings = [
-        Finding(check="sex_role_consistency", id=int(mid), detail=f"id={int(mid)} used as mother but sex != female")
-        for mid in mother_ids[sex[mother_rows] != SEX_FEMALE]
-    ]
-    findings.extend(
-        Finding(check="sex_role_consistency", id=int(fid), detail=f"id={int(fid)} used as father but sex != male")
-        for fid in father_ids[sex[father_rows] != SEX_MALE]
-    )
+    findings = _sex_role_findings("mother", mothers, mother_ids, mother_rows, sex, SEX_FEMALE)
+    findings.extend(_sex_role_findings("father", fathers, father_ids, father_rows, sex, SEX_MALE))
     return findings
 
 

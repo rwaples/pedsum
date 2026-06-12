@@ -118,6 +118,66 @@ def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
     assert "sex_role_ambiguity" not in log
 
 
+def test_sex_role_consistency_log_pins_offending_rows(tmp_path):
+    """sex_role_consistency names the lines, not just the id.
+
+    id=3 (row 2, female) is used as a father in rows 4 and 5. The finding now
+    carries the id's own row in the ``row`` column and the referencing rows in
+    the detail, so the log is actionable without grepping the input.
+    """
+    import pandas as pd
+
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "F", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+            {"id": 3, "sex": "F", "mother": -1, "father": -1},  # row 2
+            {"id": 4, "sex": "F", "mother": 3, "father": 2},  # 3 as mother (consistent)
+            {"id": 5, "sex": "M", "mother": 1, "father": 3},  # row 4: 3 as father
+            {"id": 6, "sex": "M", "mother": 1, "father": 3},  # row 5: 3 as father
+        ],
+    )
+    base = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
+    assert r.returncode == 1, r.stderr  # FAIL but not a hard block
+    log = pd.read_csv(base / "validate.log", sep="\t")
+    finding = log[log["check"] == "sex_role_consistency"]
+    assert len(finding) == 1
+    assert int(finding.iloc[0]["id"]) == 3
+    assert int(finding.iloc[0]["row"]) == 2  # id=3's own row (where its sex lives)
+    assert "row(s) [4, 5]" in finding.iloc[0]["detail"]
+
+
+def test_parent_refs_sex_conflict_log_pins_rows(tmp_path):
+    """parent_refs_sex_conflict names the mother and father referencing rows.
+
+    Missing parent id=99 is referenced as mother in rows 2 and 4 and as father
+    in row 3; the detail now names both sets of lines.
+    """
+    import pandas as pd
+
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "F", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+            {"id": 4, "sex": "F", "mother": 99, "father": 2},  # row 2: 99 as mother
+            {"id": 5, "sex": "M", "mother": 1, "father": 99},  # row 3: 99 as father
+            {"id": 7, "sex": "F", "mother": 99, "father": 2},  # row 4: 99 as mother
+        ],
+    )
+    base = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
+    assert r.returncode == 2, r.stderr  # hard block
+    log = pd.read_csv(base / "validate.log", sep="\t")
+    finding = log[log["check"] == "parent_refs_sex_conflict"]
+    assert len(finding) == 1
+    detail = finding.iloc[0]["detail"]
+    assert "mother (row(s) [2, 4])" in detail
+    assert "father (row(s) [3])" in detail
+
+
 def test_orphan_unsexed_writes_minus_one_in_fixed_tsv(tmp_path):
     """Orphan-only pedigree (n_imputed==0) + --allow-missing-sex: orphan sex normalised to -1."""
     import gzip
