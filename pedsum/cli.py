@@ -418,6 +418,51 @@ def _timed(label: str) -> Iterator[None]:
     logger.info("%s in %.2fs", label, time.perf_counter() - t0)
 
 
+def _validation_kwargs(args: argparse.Namespace) -> dict:
+    """Shared validation config pulled off ``args``.
+
+    Both validation drivers — summarize's fail-fast ``load_and_validate`` and
+    validate's accumulating ``validate_pedigree`` (also re-run on summarize's
+    failure path to write the log) — take the same column-name / encoding /
+    tolerance options. Building them in one place keeps the call sites from
+    drifting.
+    """
+    return {
+        "id_col": args.id_col,
+        "sex_col": args.sex_col,
+        "mother_col": args.mother_col,
+        "father_col": args.father_col,
+        "sex_encoding": args.sex_encoding,
+        "zero_as_missing": False,
+        "allow_missing_sex": args.allow_missing_sex,
+        "override_asserted_sex": not args.no_override_asserted_sex,
+        "birth_year_col": args.birth_year_col,
+        "birth_year_min": args.birth_year_min,
+        "birth_year_max": args.birth_year_max,
+        "sep": args.sep,
+    }
+
+
+def _write_validation_failure_log(args: argparse.Namespace) -> None:
+    """Persist a full ``validate.log`` after summarize's fail-fast validation bailed.
+
+    ``load_and_validate`` raises on the *first* failing check carrying only a
+    short sample summary, so the user otherwise gets a one-line console error
+    and no record. Re-run the accumulating validator to capture every finding
+    and write the same ``validate.log`` the validate subcommand produces — the
+    extra pass only happens on the (already-failing) error path. Best-effort:
+    a secondary failure here is logged but must not mask the original error.
+    """
+    log_path = args.out_dir / "validate.log"
+    try:
+        _, _, findings, _ = validate_pedigree(args.in_path, **_validation_kwargs(args))
+        _write_validate_log(findings, log_path)
+    except (PedigreeError, FileNotFoundError, OSError) as e:
+        logger.error("could not write %s: %s", log_path, e)
+        return
+    logger.error("wrote %s — fix the reported issue(s) and re-run", log_path)
+
+
 def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
@@ -425,23 +470,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # Wrapped so the read/validation peak is attributed to a phase by the
         # benchmark profiler; load_and_validate already logs its own timing.
         with _timed("load+validate"):
-            df, children_csr = load_and_validate(
-                args.in_path,
-                id_col=args.id_col,
-                sex_col=args.sex_col,
-                mother_col=args.mother_col,
-                father_col=args.father_col,
-                sex_encoding=args.sex_encoding,
-                zero_as_missing=False,
-                allow_missing_sex=args.allow_missing_sex,
-                override_asserted_sex=not args.no_override_asserted_sex,
-                birth_year_col=args.birth_year_col,
-                birth_year_min=args.birth_year_min,
-                birth_year_max=args.birth_year_max,
-                sep=args.sep,
-            )
+            df, children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
+        _write_validation_failure_log(args)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
@@ -638,21 +670,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     try:
-        n_total, results, findings, ctx = validate_pedigree(
-            args.in_path,
-            id_col=args.id_col,
-            sex_col=args.sex_col,
-            mother_col=args.mother_col,
-            father_col=args.father_col,
-            sex_encoding=args.sex_encoding,
-            zero_as_missing=False,
-            allow_missing_sex=args.allow_missing_sex,
-            override_asserted_sex=not args.no_override_asserted_sex,
-            birth_year_col=args.birth_year_col,
-            birth_year_min=args.birth_year_min,
-            birth_year_max=args.birth_year_max,
-            sep=args.sep,
-        )
+        n_total, results, findings, ctx = validate_pedigree(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
         return 2

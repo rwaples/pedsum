@@ -224,6 +224,70 @@ def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# summarize persists validate.log when validation hard-fails
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_writes_validate_log_on_role_conflict(tmp_path):
+    """Summarize must write validate.log when validation hard-fails.
+
+    Regression: id=3 (asserted female) is used as a mother in one row and a
+    father in another. Fail-fast ``load_and_validate`` raises, and summarize
+    previously logged a one-line error and wrote nothing — the user got no log
+    to act on. summarize now re-runs the accumulating validator and writes the
+    same validate.log the validate subcommand produces.
+    """
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "F", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+            {"id": 3, "sex": "F", "mother": -1, "father": -1},
+            {"id": 4, "sex": "F", "mother": 3, "father": 2},  # uses 3 as mother
+            {"id": 5, "sex": "M", "mother": 1, "father": 3},  # uses 3 as father
+        ],
+    )
+    out = tmp_path / "s"
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
+    log = out / "validate.log"
+    assert log.exists(), f"summarize did not write validate.log\nstderr:\n{r.stderr}"
+    text = log.read_text()
+    assert "sex_role_consistency" in text
+    assert "id=3" in text
+    # No summary artifacts are produced when validation fails.
+    assert not (out / "summary.yaml").exists()
+
+
+def test_summarize_writes_validate_log_on_sex_ambiguity(tmp_path):
+    """The unsexed both-roles variant (sex_role_ambiguity) also persists the log."""
+    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    out = tmp_path / "s"
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
+    log = out / "validate.log"
+    assert log.exists(), f"summarize did not write validate.log\nstderr:\n{r.stderr}"
+    assert "sex_role_ambiguity" in log.read_text()
+
+
+def test_summarize_no_validate_log_when_valid(tmp_path):
+    """A clean pedigree must NOT leave a stray validate.log in the summarize out-dir."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1},
+            {"id": 3, "sex": "F", "mother": 2, "father": 1},
+        ],
+    )
+    out = tmp_path / "s"
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 0, r.stderr
+    assert (out / "summary.yaml").exists()
+    assert not (out / "validate.log").exists()
+
+
+# ---------------------------------------------------------------------------
 # Hard-refuse: --allow-missing-sex + --effective-size / --inbreeding
 # ---------------------------------------------------------------------------
 

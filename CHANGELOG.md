@@ -8,6 +8,10 @@
 
 - `reproduction.mate_count_male` / `reproduction.mate_count_female` are summary-stats distributions over **all** males / all females respectively (zero-included for the unmated). The previous fields `mating_pairs.male_mate_count` / `female_mate_count` summed only over parents-with-children. Means, quantiles, and totals will shift. Use `n_mates == 0` count if you want the old denominator.
 
+### Fixes
+
+- **`summarize` now writes `validate.log` when validation hard-fails.** Previously a fail-fast validation error — e.g. an individual used as a mother in one row and a father in another — printed a single truncated console line and left the output directory empty, leaving the user no record to act on. summarize now re-runs the accumulating validator on the failure path and writes the same `validate.log` the `validate` subcommand produces, capturing every finding across all failing checks (not just the first). Clean pedigrees are unaffected (no log is written on success).
+
 ### Section renames
 
 | 0.9 | 0.10 |
