@@ -88,6 +88,46 @@ def test_annotated_tsv_renames_colliding_input_column(tmp_path):
     assert "n_descendant_paths_input" in r.stderr
 
 
+def test_annotated_tsv_drops_reserved_sex_source_collision(tmp_path):
+    """A re-ingested ``sex_source`` column is regenerated, not kept as ``_input``.
+
+    ``validate.tsv.gz`` carries pedsum's own ``sex_source`` provenance column;
+    summarizing it must drop the stale copy (INFO, not WARNING) so the canonical
+    clean-then-summarize pipeline does not accumulate a ``sex_source_input``.
+    """
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1, "sex_source": "stale_a"},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1, "sex_source": "stale_b"},
+            {"id": 3, "sex": "M", "mother": 2, "father": 1, "sex_source": "stale_c"},
+        ],
+    )
+    out_dir = tmp_path / "out"
+    r = run_pedsum(
+        [
+            "summarize",
+            "--in",
+            str(ped),
+            "--out",
+            str(out_dir),
+            "--no-inbreeding",
+            "--no-effective-size",
+        ]
+    )
+    assert r.returncode == 0, r.stderr
+    ann = load_annotated_tsv_gz(out_dir)
+    assert "sex_source" in ann.columns  # freshly derived provenance
+    assert "sex_source_input" not in ann.columns  # stale copy dropped, not parked
+    # Derived values are pedsum's own vocabulary, not the stale input tokens.
+    derived = set(ann["sex_source"].tolist())
+    assert derived <= {"input", "imputed_from_missing", "imputed_from_role", "unresolved"}
+    assert "stale_a" not in ann["sex_source"].tolist()
+    # Reported at INFO ("regenerated"), not as a collision WARNING.
+    assert "regenerated" in r.stderr
+    assert "collide" not in r.stderr
+
+
 def test_annotated_tsv_renames_component_id_collision(tmp_path):
     """``component_id`` collision is handled the same way (more than one rename)."""
     ped = _write_ped(

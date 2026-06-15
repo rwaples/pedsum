@@ -41,6 +41,12 @@ _NUMERIC_COLS = (
     "n_descendant_paths",
 )
 
+# pedsum's own provenance columns that ride along in a re-ingestible
+# ``validate.tsv.gz``.  When such a file is later summarized they collide with
+# the freshly derived columns; the stale copy is regenerated, so it is dropped
+# rather than preserved under an ``_input`` suffix (see _write_annotated_tsv).
+_RESERVED_PROVENANCE_COLS = frozenset({"sex_source"})
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -512,13 +518,23 @@ def _write_annotated_tsv(
 
     derived_cols = set(idf.columns) - set(canonical)
     collisions = [c for c in extras.columns if c in derived_cols]
-    if collisions:
-        new_names = {c: f"{c}_input" for c in collisions}
+
+    # A re-ingested pedsum output carries its own provenance columns (e.g.
+    # ``sex_source`` from validate.tsv.gz).  Drop the stale copy — it is
+    # regenerated below — instead of parking it under an ``_input`` suffix.
+    reserved = [c for c in collisions if c in _RESERVED_PROVENANCE_COLS]
+    if reserved:
+        extras = extras.drop(columns=reserved)
+        logger.info("regenerated pedsum provenance column(s) %s; input copy dropped", reserved)
+
+    user_collisions = [c for c in collisions if c not in _RESERVED_PROVENANCE_COLS]
+    if user_collisions:
+        new_names = {c: f"{c}_input" for c in user_collisions}
         extras = extras.rename(columns=new_names)
         logger.warning(
             "input columns %s collide with derived columns; preserved as %s",
-            collisions,
-            [new_names[c] for c in collisions],
+            user_collisions,
+            [new_names[c] for c in user_collisions],
         )
 
     annotated = pd.concat([idf.reset_index(drop=True), extras], axis=1)
