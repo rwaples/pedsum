@@ -6,7 +6,7 @@ import logging
 
 _F_KERNEL_WARN_THRESHOLD = 1_000_000
 
-VERSION = "0.10.2"
+VERSION = "0.11.0"
 
 SEX_FEMALE = 0
 

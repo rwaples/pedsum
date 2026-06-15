@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 — validate --drop-offending (Reduced Pedigree)
+## 0.11.0 — 2026-06-15 — validate --drop-offending (Reduced Pedigree)
 
 ### Features
 
