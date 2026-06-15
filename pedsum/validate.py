@@ -1020,18 +1020,35 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
         if not drop_ids:
             break
         drop_rounds += 1
-        # _write_dropped_manifest collapses within-round duplicates (e.g. a
-        # self-loop flagged via both parent columns), so record them all here.
-        dropped.extend((int(f.id), f.check, rnd) for f in droppable if int(f.id) in drop_ids)
+        # Deduped (id, check) reasons for this round — one finding may flag an
+        # id twice (e.g. a self-loop via both parent columns).
+        round_pairs = {(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids}
+        dropped.extend((fid, check, rnd) for fid, check in round_pairs)
+
         drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))
         keep = ~np.isin(ctx.ids, drop_arr)
-        rows_removed += int((~keep).sum())
         surv_m = ctx.mothers[keep]
         surv_f = ctx.fathers[keep]
-        df_cur = df_cur[keep].reset_index(drop=True)
         m_hit = np.isin(surv_m, drop_arr)
         f_hit = np.isin(surv_f, drop_arr)
-        cleared_refs += int(m_hit.sum()) + int(f_hit.sum())
+        n_round_rows = int((~keep).sum())
+        n_round_cleared = int(m_hit.sum()) + int(f_hit.sum())
+        rows_removed += n_round_rows
+        cleared_refs += n_round_cleared
+
+        by_check: dict[str, int] = {}
+        for _fid, check in round_pairs:
+            by_check[check] = by_check.get(check, 0) + 1
+        logger.info(
+            "drop-offending round %d: dropped %d individual(s) — %s; removed %d row(s), cleared %d reference(s)",
+            rnd,
+            len(drop_ids),
+            ", ".join(f"{n} {check}" for check, n in sorted(by_check.items())),
+            n_round_rows,
+            n_round_cleared,
+        )
+
+        df_cur = df_cur[keep].reset_index(drop=True)
         df_cur.loc[m_hit, mother_col] = "-1"
         df_cur.loc[f_hit, father_col] = "-1"
         ctx = _build_context_from_df(df_cur, **rebuild_kwargs)
