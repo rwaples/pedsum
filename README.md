@@ -76,6 +76,7 @@ individuals, …) and writes:
 |---|---|
 | `DIR/validate.log` | per-finding TSV (one row per issue) |
 | `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied (omitted on hard-block findings) |
+| `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 
 When `--birth-year-col NAME` is passed, validate also runs three
 optional checks: `birth_year_dtype` (numeric parsing),
@@ -95,6 +96,25 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
 Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
 unresolved sex without `--allow-missing-sex`, sex-role ambiguity)
 cause the fixed TSV to be skipped — fix the source data first.
+
+**`--drop-offending`** turns those hard-blocks into a passing pedigree by
+*removing* the offending individuals rather than refusing. It iteratively drops
+every individual named in a droppable finding — clearing references to it, so
+its children become half-founders (no cascade) — and re-runs until the pedigree
+passes under the flags you gave, after the auto-fixes above. The result in
+`DIR/validate.tsv.gz` is then a **Reduced Pedigree**: a *different*, smaller
+pedigree, so relatedness, Ne, and founder counts computed on it differ from the
+input. Every removal is recorded in `DIR/validate.dropped.tsv` (`id`, `check`,
+the round it was dropped); pedsum warns when more than 10% of rows are removed
+and exits non-zero whenever anything was dropped. Column- and parse-level
+failures (a missing column, non-integer or negative IDs) still hard-block — no
+removal can fix those.
+
+The Reduced Pedigree is individual-level data (IDs, parents, and the dropped
+IDs in the manifest), not aggregate statistics — `--safe-attempt` redaction
+applies only to `summarize` output, never to `validate`. Treat
+`validate.tsv.gz` / `validate.dropped.tsv` as the cleaned source pedigree, not
+as a shareable artifact.
 
 ### Summarize a pedigree
 
