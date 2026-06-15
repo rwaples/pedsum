@@ -34,6 +34,10 @@ Output schema follows [CONTEXT.md](CONTEXT.md) as of 0.10. The glossary fixes se
 ## Flag and behavior version history
 
 See [CHANGELOG.md](CHANGELOG.md). Notable:
+- `validate --drop-offending` emits a **Reduced Pedigree** (0.11; see
+  [docs/adr/0003](docs/adr/0003-drop-offending-reduction.md)). `--no-sex-check`
+  now lives in the registry (`ValidationContext.no_sex_check`) so the tolerance
+  composes inside `_run_checks` rather than as a cli post-filter.
 - `--allow-unknown-sex` → `--allow-missing-sex` (0.8)
 - `ped_depth` sourced from `PedigreeGraph.generation` (0.4)
 

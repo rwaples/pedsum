@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
-from pedsum.checks import CheckResult
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import _compute_depth_unordered, _parent_rows
@@ -28,6 +27,7 @@ from pedsum.report import (
     _format_check_summary,
     _prepare_out_dir,
     _write_annotated_tsv,
+    _write_dropped_manifest,
     _write_long_tsv,
     _write_validate_log,
     _write_validate_tsv_gz,
@@ -44,10 +44,19 @@ from pedsum.sections import (
     compute_sibship_sizes,
     compute_size_structure,
 )
-from pedsum.validate import _CHECK_ORDER, load_and_validate, validate_pedigree
+from pedsum.validate import (
+    DROP_FRACTION_WARN,
+    DROPPABLE_CHECKS,
+    NON_REDUCIBLE_BLOCK_CHECKS,
+    load_and_validate,
+    reduce_pedigree,
+    validate_pedigree,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from pedsum.validate import ValidationContext
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -302,7 +311,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="DIR",
         help="output directory (created if needed); writes validate.log "
         "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
-        "auto-fixes applied; not written if a block is detected)",
+        "auto-fixes applied; not written if a block is detected). With "
+        "--drop-offending also writes validate.dropped.tsv (the removal manifest)",
     )
     p_val.add_argument(
         "--id-col",
@@ -333,6 +343,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="bypass the sex-conflict check on missing parents; auto-added "
         "founders default to sex=F when the role is ambiguous (default: off)",
+    )
+    p_val.add_argument(
+        "--drop-offending",
+        action="store_true",
+        help="produce a Reduced Pedigree: iteratively remove every individual "
+        "named in a droppable check finding (clearing references to it) until "
+        "the pedigree passes under the invoked flags. Writes validate.dropped.tsv "
+        "and exits 1 whenever anything was dropped. Column/parse-level failures "
+        "still BLOCK. WARNING: changes relatedness/Ne/founder counts (default: off)",
     )
     p_val.add_argument(
         "--birth-year-col",
@@ -440,7 +459,24 @@ def _validation_kwargs(args: argparse.Namespace) -> dict:
         "birth_year_min": args.birth_year_min,
         "birth_year_max": args.birth_year_max,
         "sep": args.sep,
+        # validate-only; summarize args lack it. The tolerance lives in the
+        # registry (ctx.no_sex_check) so it composes everywhere _run_checks runs.
+        "no_sex_check": getattr(args, "no_sex_check", False),
     }
+
+
+def _reduction_rebuild_kwargs(args: argparse.Namespace) -> dict:
+    """Context-rebuild kwargs for the ``--drop-offending`` loop / self-verify.
+
+    Exactly ``_validation_kwargs`` minus the file-only ``sep``, plus
+    ``require_birth_year_col=False`` — what ``_build_context_from_df`` needs to
+    rebuild a context from the reduced pedigree each round under the invoked
+    flags (so the tolerance flags compose).
+    """
+    kwargs = _validation_kwargs(args)
+    del kwargs["sep"]
+    kwargs["require_birth_year_col"] = False
+    return kwargs
 
 
 def _write_validation_failure_log(args: argparse.Namespace) -> None:
@@ -666,6 +702,124 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     return 0
 
 
+def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_dir: Path) -> int:
+    """Write ``validate.tsv.gz`` from ``ctx``; return total rows written.
+
+    Synthesizes founder rows for missing parents, folds sex imputation into the
+    sex column, topo-reorders (parents before children), and writes the gzipped
+    TSV. Shared by the normal validate path and ``--drop-offending`` (which
+    passes the reduced context).
+    """
+    n_total = len(ctx.df_raw)
+    added_founders: list[dict] = []
+    df_out = ctx.df_raw
+    if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
+        id_index = pd.Index(ctx.ids)
+        added_founders = _build_added_founders(ctx.mothers, ctx.fathers, id_index, args.no_sex_check)
+        # Fold sex imputation into the fixed output so the user's "fixed"
+        # file reflects the auto-fix instead of the original blanks.
+        sex_imp = ctx.get_imputation()
+        if sex_imp is not None:
+            df_out = df_out.copy()
+            imputed = sex_imp.imputed_sex
+            original_unknown = sex_imp.original_unknown_mask
+            overridden = sex_imp.overridden_mask
+            # Rewrite the sex column wherever pedsum changed it: missing→F/M
+            # imputation (0.8) and asserted→role overrides (0.9). Rows still
+            # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
+            # normalise to "-1" so the fixed TSV is self-consistent.
+            sex_col_values = df_out[args.sex_col].astype(object).copy()
+            modified = original_unknown | overridden
+            unresolved_mask = imputed == SEX_UNKNOWN
+            sex_col_values.loc[modified & (imputed == SEX_FEMALE)] = "F"
+            sex_col_values.loc[modified & (imputed == SEX_MALE)] = "M"
+            sex_col_values.loc[unresolved_mask] = "-1"
+            df_out[args.sex_col] = sex_col_values
+            if sex_imp.n_imputed > 0:
+                logger.info("validate: imputed sex for %d row(s) from parent role", int(sex_imp.n_imputed))
+            n_normalised = int(unresolved_mask.sum())
+            if n_normalised > 0:
+                logger.info("validate: normalised %d unresolved-sex row(s) to -1 in fixed output", n_normalised)
+            # Stamp sex_source BEFORE the topological reorder so pandas reorders
+            # the column along with the rest.
+            df_out["sex_source"] = sex_imp.sex_source
+        # Reorder so the fixed file is parents-before-children and feeds back
+        # into pedsum without further auto-fixes.
+        m_row, _ = _parent_rows(ctx.mothers, id_index)
+        f_row, _ = _parent_rows(ctx.fathers, id_index)
+        try:
+            depth = _compute_depth_unordered(m_row, f_row, len(ctx.ids))
+        except PedigreeError:
+            depth = None  # acyclic FAIL already surfaced; skip reorder
+        if depth is not None:
+            order = np.argsort(depth, kind="stable")
+            natural = np.arange(len(order))
+            if not np.array_equal(order, natural):
+                logger.info("validate: reordering %d row(s) into topological order", int((order != natural).sum()))
+                df_out = df_out.iloc[order].reset_index(drop=True)
+
+    out_path = out_dir / "validate.tsv.gz"
+    _write_validate_tsv_gz(
+        df_out, added_founders, args.id_col, args.sex_col, args.mother_col, args.father_col, out_path
+    )
+    n_total_out = n_total + len(added_founders)
+    sys.stderr.write(f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n")
+    return n_total_out
+
+
+def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, ctx: ValidationContext) -> int:
+    """``--drop-offending``: reduce the pedigree to a passing one (or BLOCK).
+
+    Column/parse-level failures still BLOCK (no row removal fixes them).
+    Otherwise iterate to a fixpoint, write the removal manifest + reduced
+    pedigree, self-verify the result passes under the invoked flags, and exit 1
+    if anything was dropped (0 if nothing needed dropping).
+    """
+    manifest_path = out_dir / "validate.dropped.tsv"
+    blocking = sorted(n for n in NON_REDUCIBLE_BLOCK_CHECKS if n in by_check and by_check[n].status == "FAIL")
+    if blocking:
+        sys.stderr.write("\nBLOCKED — --drop-offending cannot fix these by removing individuals:\n")
+        for n in blocking:
+            sys.stderr.write(f"  - {n}\n")
+        return 2
+
+    if not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
+        _write_dropped_manifest([], manifest_path)
+        _write_fixed_pedigree(ctx, args, out_dir)
+        sys.stderr.write("--drop-offending: nothing to drop; pedigree already passes\n")
+        return 0
+
+    result = reduce_pedigree(ctx, rebuild_kwargs=_reduction_rebuild_kwargs(args))
+    if len(result.df_current) == 0:
+        sys.stderr.write("\nBLOCKED — --drop-offending removed every individual (empty pedigree)\n")
+        return 2
+
+    _write_dropped_manifest(result.dropped, manifest_path)
+    sys.stderr.write(f"wrote {manifest_path} ({result.n_distinct_dropped} id(s) dropped)\n")
+    _write_fixed_pedigree(result.ctx_final, args, out_dir)
+
+    # Self-verify the written artifact passes under the invoked flags. The
+    # output is always tab-separated regardless of the input --sep, so sniff it.
+    out_path = out_dir / "validate.tsv.gz"
+    _n, vresults, _vf, _vctx = validate_pedigree(out_path, **{**_validation_kwargs(args), "sep": "auto"})
+    failed = sorted(r.name for r in vresults if r.status == "FAIL")
+    if failed:
+        raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {failed}")
+
+    pct = 100.0 * result.n_rows_removed / result.n_input_rows
+    sys.stderr.write(
+        f"--drop-offending: dropped {result.n_distinct_dropped} individual(s) / "
+        f"{result.n_rows_removed} row(s) of {result.n_input_rows} ({pct:.1f}%) over "
+        f"{result.n_rounds} round(s); cleared {result.n_cleared_refs} reference(s)\n"
+    )
+    if result.n_rows_removed / result.n_input_rows > DROP_FRACTION_WARN:
+        logger.warning(
+            "--drop-offending removed %.1f%% of rows; relatedness / Ne / founder counts reflect the reduced set",
+            pct,
+        )
+    return 1
+
+
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
@@ -679,15 +833,6 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 2
 
     by_check = {r.name: r for r in results}
-
-    if args.no_sex_check:
-        findings = [f for f in findings if f.check != "parent_refs_sex_conflict"]
-        by_check["parent_refs_sex_conflict"] = CheckResult(
-            name="parent_refs_sex_conflict",
-            status="SKIP",
-            skip_reason="bypassed via --no-sex-check",
-        )
-        results = [by_check[name] for name in _CHECK_ORDER]
 
     blocks: list[str] = []
     if by_check["duplicate_ids"].status == "FAIL":
@@ -713,87 +858,16 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     _write_validate_log(findings, log_path)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
+    if args.drop_offending:
+        return _run_validate_drop(args, by_check, out_dir, ctx)
+
     if blocks:
         sys.stderr.write("\nBLOCKED — fix the following before re-running:\n")
         for b in blocks:
             sys.stderr.write(f"  - {b}\n")
         return 2
 
-    added_founders: list[dict] = []
-    df_out = ctx.df_raw
-    if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
-        id_index = pd.Index(ctx.ids)
-        added_founders = _build_added_founders(
-            ctx.mothers,
-            ctx.fathers,
-            id_index,
-            args.no_sex_check,
-        )
-        # Fold sex imputation into the fixed output so the user's "fixed"
-        # file reflects the auto-fix instead of the original blanks.
-        sex_imp = ctx.get_imputation()
-        if sex_imp is not None:
-            df_out = df_out.copy()
-            imputed = sex_imp.imputed_sex
-            original_unknown = sex_imp.original_unknown_mask
-            overridden = sex_imp.overridden_mask
-            # Rewrite the sex column wherever pedsum changed it: missing→F/M
-            # imputation (0.8) and asserted→role overrides (0.9). Rows still
-            # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
-            # normalise to "-1" so the fixed TSV is self-consistent.
-            sex_col_values = df_out[args.sex_col].astype(object).copy()
-            modified = original_unknown | overridden
-            unresolved_mask = imputed == SEX_UNKNOWN
-            sex_col_values.loc[modified & (imputed == SEX_FEMALE)] = "F"
-            sex_col_values.loc[modified & (imputed == SEX_MALE)] = "M"
-            sex_col_values.loc[unresolved_mask] = "-1"
-            df_out[args.sex_col] = sex_col_values
-            if sex_imp.n_imputed > 0:
-                logger.info(
-                    "validate: imputed sex for %d row(s) from parent role",
-                    int(sex_imp.n_imputed),
-                )
-            n_normalised = int(unresolved_mask.sum())
-            if n_normalised > 0:
-                logger.info(
-                    "validate: normalised %d unresolved-sex row(s) to -1 in fixed output",
-                    n_normalised,
-                )
-            # 0.9 per-row audit: stamp sex_source onto the fixed output BEFORE
-            # the topological reorder below, so pandas reorders the column
-            # along with the rest.
-            df_out["sex_source"] = sex_imp.sex_source
-        # Reorder so the fixed file is parents-before-children and feeds
-        # back into pedsum without further auto-fixes.
-        m_row, _ = _parent_rows(ctx.mothers, id_index)
-        f_row, _ = _parent_rows(ctx.fathers, id_index)
-        try:
-            depth = _compute_depth_unordered(m_row, f_row, len(ctx.ids))
-        except PedigreeError:
-            depth = None  # acyclic FAIL already surfaced; skip reorder
-        if depth is not None:
-            order = np.argsort(depth, kind="stable")
-            natural = np.arange(len(order))
-            if not np.array_equal(order, natural):
-                logger.info(
-                    "validate: reordering %d row(s) into topological order",
-                    int((order != natural).sum()),
-                )
-                df_out = df_out.iloc[order].reset_index(drop=True)
-
-    out_path = out_dir / "validate.tsv.gz"
-    _write_validate_tsv_gz(
-        df_out,
-        added_founders,
-        args.id_col,
-        args.sex_col,
-        args.mother_col,
-        args.father_col,
-        out_path,
-    )
-    n_total_out = n_total + len(added_founders)
-    sys.stderr.write(f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n")
-
+    _write_fixed_pedigree(ctx, args, out_dir)
     return 0 if not findings else 1
 
 

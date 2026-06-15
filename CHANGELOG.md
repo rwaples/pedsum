@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 — validate --drop-offending (Reduced Pedigree)
+
+### Features
+
+- **`validate --drop-offending`** emits a **Reduced Pedigree** — it iteratively removes the individuals named in droppable check findings (clearing references to them) until the pedigree passes under the invoked flags, after all existing sex imputation and founder synthesis. Removal is clear-refs (a dropped parent's children become **half-founders**), not cascade; the loop re-imputes each round so a parent orphaned by a drop is re-evaluated. Writes a `validate.dropped.tsv` manifest (`id`, `check`, `round`), logs `dropped N individual(s) / R row(s) of M (X%) over K round(s); cleared P reference(s)`, warns when >10% of rows are removed (relatedness / Ne / founder counts reflect the reduced set), and exits 1 whenever anything was dropped. Column/parse-level failures (missing column, non-integer id, negative id, …) still `BLOCK`. `acyclic` drops only true cycle members (descendants survive). See [docs/adr/0003](docs/adr/0003-drop-offending-reduction.md).
+
+### Internal
+
+- `--no-sex-check` now SKIPs `parent_refs_sex_conflict` inside the check registry (`ValidationContext.no_sex_check`) instead of a `validate`-side post-filter, so the tolerance composes everywhere `_run_checks` runs (validate, the drop loop, and its self-verify). No change to observable `--no-sex-check` behavior.
+
 ## 0.10.2 — 2026-06-12 — validate.log pins the offending rows
 
 ### Fixes

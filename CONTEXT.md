@@ -127,6 +127,10 @@ _Avoid_: result, state, outcome (as bare nouns in this sense)
 A **Check** whose `FAIL` prevents `validate` from writing a fixed pedigree, surfaced to the user as `BLOCKED`. Non-blocking failures still write the fixed output and report **Findings**.
 _Avoid_: hard error, fatal, fatal error
 
+**Reduced Pedigree**:
+The pedigree `validate --drop-offending` emits after removing every individual named in a droppable **Finding** — and clearing references to each removed individual — so that the result passes every applicable **Check** under the flags it was produced with. A Reduced Pedigree is a *different* pedigree from the input: it has fewer individuals, individuals that lost a parent become **Half-Founders**, and relationships routed through removed individuals are gone — so relatedness, **F (Inbreeding Coefficient)**, **Effective Population Size (Ne)**, and **Founder** counts computed on it differ from the input. Column/file-level Checks (a missing column, a non-integer id column) are never resolvable by removal and still `BLOCK`.
+_Avoid_: "cleaned pedigree", "filtered pedigree", "fixed pedigree" (the latter is the un-reduced imputed + founder-added output)
+
 ## Relationships
 
 - **Depth** is a property of an individual, derivable from the pedigree.

@@ -572,6 +572,25 @@ def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
     df.to_csv(out_path, sep="\t", index=False)
 
 
+def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path) -> None:
+    """Tab-separated manifest of `validate --drop-offending` removals.
+
+    One row per distinct ``(id, check, round)`` — the id removed, the Check that
+    flagged it, and the reduction round in which it was dropped (later rounds
+    record offenders spawned by earlier drops). Written even when nothing was
+    dropped (header only) so downstream tooling can rely on its presence.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    seen: set[tuple[int, str, int]] = set()
+    rows = []
+    for fid, check, rnd in dropped:
+        if (fid, check, rnd) not in seen:
+            seen.add((fid, check, rnd))
+            rows.append({"id": fid, "check": check, "round": rnd})
+    df = pd.DataFrame(rows, columns=["id", "check", "round"])
+    df.to_csv(out_path, sep="\t", index=False)
+
+
 def _build_added_founders(
     mothers: np.ndarray,
     fathers: np.ndarray,

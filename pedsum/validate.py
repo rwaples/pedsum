@@ -221,6 +221,10 @@ class ValidationContext:
     # summarize requires a named --birth-year-col to exist (raises if absent);
     # validate treats a missing one as an inapplicable SKIP.
     require_birth_year_col: bool
+    # --no-sex-check tolerates parent_refs_sex_conflict (SKIP); lives in the
+    # context so the tolerance composes inside _run_checks (validate, the
+    # drop-offending loop, and its self-verify) rather than as a cli post-filter.
+    no_sex_check: bool = False
     # Populated by the parse Checks.
     ids: np.ndarray | None = None
     mothers: np.ndarray | None = None
@@ -263,6 +267,10 @@ class Check:
     run: Callable[[ValidationContext], CheckOutcome]
     label: str
     group: str
+    # Whether `validate --drop-offending` can resolve a FAIL by removing the
+    # flagged individual(s). Per-individual checks are droppable; column/file-
+    # level checks (missing column, parse failure, negative id, …) are not.
+    droppable: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +352,8 @@ def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
+    if ctx.no_sex_check:
+        return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
     return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index))
 
 
@@ -446,7 +456,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check("sex_tokens", ("required_columns",), _ck_sex_tokens, "sex column tokens recognized", "Columns & parsing"),
     Check("negative_ids", ("id_dtype",), _ck_negative_ids, "no negative IDs", "IDs"),
-    Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs"),
+    Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs", droppable=True),
     Check(
         "parent_token_range_mother",
         ("mother_dtype",),
@@ -481,6 +491,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_parent_refs_sex_conflict,
         "no missing-parent sex conflicts",
         "Parent references",
+        droppable=True,
     ),
     Check(
         "sex_role_ambiguity",
@@ -488,15 +499,24 @@ CHECKS: tuple[Check, ...] = (
         _ck_sex_role_ambiguity,
         "no role-ambiguous unsexed individuals",
         "Parent references",
+        droppable=True,
     ),
-    Check("self_loops", _IDS_PARENTS, _ck_self_loops, "no self-loops", "Graph structure"),
-    Check("parents_distinct", _IDS_PARENTS, _ck_parents_distinct, "mother and father distinct", "Parent references"),
+    Check("self_loops", _IDS_PARENTS, _ck_self_loops, "no self-loops", "Graph structure", droppable=True),
+    Check(
+        "parents_distinct",
+        _IDS_PARENTS,
+        _ck_parents_distinct,
+        "mother and father distinct",
+        "Parent references",
+        droppable=True,
+    ),
     Check(
         "sex_role_consistency",
         (*_IDS_PARENTS, "sex_tokens"),
         _ck_sex_role_consistency,
         "sex consistent with parent role",
         "Graph structure",
+        droppable=True,
     ),
     Check(
         "unknown_sex",
@@ -504,6 +524,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_unknown_sex,
         "all individuals have resolved sex",
         "Graph structure",
+        droppable=True,
     ),
     Check(
         "acyclic",
@@ -511,6 +532,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_acyclic,
         "acyclic (no descent cycles)",
         "Graph structure",
+        droppable=True,
     ),
     Check(
         "birth_year_dtype",
@@ -525,6 +547,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_birth_year_range,
         "birth years within sanity range",
         "Birth years (optional)",
+        droppable=True,
     ),
     Check(
         "birth_year_topology",
@@ -532,6 +555,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_birth_year_topology,
         "child birth_year >= parent birth_year",
         "Birth years (optional)",
+        droppable=True,
     ),
 )
 
@@ -540,6 +564,23 @@ _CHECKS_BY_NAME: dict[str, Check] = {c.name: c for c in CHECKS}
 # Derived from the registry (single source of truth).
 _CHECK_ORDER: tuple[str, ...] = tuple(c.name for c in CHECKS)
 _CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
+
+# Checks `validate --drop-offending` can resolve by removing the flagged
+# individual(s). Derived from the registry so the set never drifts.
+DROPPABLE_CHECKS: frozenset[str] = frozenset(c.name for c in CHECKS if c.droppable)
+
+# Non-droppable checks that must still BLOCK even under --drop-offending: no
+# row removal fixes a missing column / parse failure / negative id / etc.
+# parent_refs_present_* is excluded — it is auto-fixed by founder synthesis,
+# neither dropped nor blocking.
+NON_REDUCIBLE_BLOCK_CHECKS: frozenset[str] = frozenset(
+    c.name
+    for c in CHECKS
+    if not c.droppable and c.name not in ("parent_refs_present_mother", "parent_refs_present_father")
+)
+
+# Drop fraction (rows removed / input rows) above which --drop-offending warns.
+DROP_FRACTION_WARN: float = 0.10
 
 # Curated *display* grouping for the stderr summary. Order within a group
 # intentionally differs from execution order (e.g. parents_distinct), so this
@@ -635,6 +676,48 @@ def _run_checks(
     return results, findings
 
 
+def _build_context_from_df(
+    df: pd.DataFrame,
+    *,
+    id_col: str,
+    sex_col: str,
+    mother_col: str,
+    father_col: str,
+    sex_encoding: str,
+    zero_as_missing: bool,
+    allow_missing_sex: bool,
+    override_asserted_sex: bool,
+    birth_year_col: str | None,
+    birth_year_min: int,
+    birth_year_max: int | None,
+    require_birth_year_col: bool,
+    no_sex_check: bool = False,
+) -> ValidationContext:
+    """Assemble a `ValidationContext` from an in-memory DataFrame (no file read).
+
+    Used by `_build_context` (after reading the file) and by the
+    `validate --drop-offending` loop, which rebuilds a context from the reduced
+    pedigree each round so `_run_checks` re-runs the *same* registry — no second
+    check sequence (ADR 0002).
+    """
+    return ValidationContext(
+        df_raw=df,
+        id_col=id_col,
+        sex_col=sex_col,
+        mother_col=mother_col,
+        father_col=father_col,
+        birth_year_col=birth_year_col,
+        sex_encoding=sex_encoding,
+        zero_as_missing=zero_as_missing,
+        allow_missing_sex=allow_missing_sex,
+        override_asserted_sex=override_asserted_sex,
+        birth_year_min=birth_year_min,
+        birth_year_max=birth_year_max,
+        require_birth_year_col=require_birth_year_col,
+        no_sex_check=no_sex_check,
+    )
+
+
 def _build_context(
     path: Path,
     *,
@@ -652,6 +735,7 @@ def _build_context(
     sep: str,
     require_birth_year_col: bool,
     log_read: bool,
+    no_sex_check: bool = False,
 ) -> ValidationContext:
     """Read the table and assemble a `ValidationContext` (shared by both modes)."""
     t0 = time.perf_counter()
@@ -659,20 +743,21 @@ def _build_context(
     if log_read:
         logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
     _maybe_warn_csv(df)
-    return ValidationContext(
-        df_raw=df,
+    return _build_context_from_df(
+        df,
         id_col=id_col,
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        birth_year_col=birth_year_col,
         sex_encoding=sex_encoding,
         zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
+        birth_year_col=birth_year_col,
         birth_year_min=birth_year_min,
         birth_year_max=birth_year_max,
         require_birth_year_col=require_birth_year_col,
+        no_sex_check=no_sex_check,
     )
 
 
@@ -695,6 +780,7 @@ def load_and_validate(
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
     sep: str = "auto",
+    no_sex_check: bool = False,
 ) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC fail-fast, return (df, children_csr).
 
@@ -727,6 +813,7 @@ def load_and_validate(
         sep=sep,
         require_birth_year_col=True,
         log_read=True,
+        no_sex_check=no_sex_check,
     )
     _run_checks(ctx, on_fail="raise")
 
@@ -810,6 +897,7 @@ def validate_pedigree(
     birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
     birth_year_max: int | None = None,
     sep: str = "auto",
+    no_sex_check: bool = False,
 ) -> tuple[int, list[CheckResult], list[Finding], ValidationContext]:
     """Run every Check accumulating.
 
@@ -834,6 +922,126 @@ def validate_pedigree(
         sep=sep,
         require_birth_year_col=False,
         log_read=False,
+        no_sex_check=no_sex_check,
     )
     results, findings = _run_checks(ctx, on_fail="accumulate")
     return len(ctx.df_raw), list(results.values()), findings, ctx
+
+
+# ---------------------------------------------------------------------------
+# Reduction: validate --drop-offending (see docs/adr/0003)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReductionResult:
+    """Outcome of `reduce_pedigree`: the reduced frame plus a drop record."""
+
+    df_current: pd.DataFrame
+    dropped: list[tuple[int, str, int]]  # one per distinct (id, check, round)
+    n_rounds: int  # rounds that actually dropped something
+    n_input_rows: int
+    n_rows_removed: int
+    n_distinct_dropped: int
+    n_cleared_refs: int
+    ctx_final: ValidationContext  # fixpoint context (arrays + imputation populated)
+
+
+def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
+    """IDs in a true descent cycle (strongly-connected component, size >= 2).
+
+    `_check_acyclic` flags every node it cannot topologically order — cycle
+    members *and* their descendants. For reduction we drop only true cycle
+    members, so descendants survive (as half-founders once the cycle edge is
+    cleared) and re-validate the next round. Self-loops are size-1 SCCs here and
+    are handled by the `self_loops` check.
+    """
+    import scipy.sparse as sp
+    from scipy.sparse.csgraph import connected_components
+
+    ids = ctx.ids
+    n = len(ids)
+    id_index = ctx.id_index
+    rows: list[int] = []
+    cols: list[int] = []
+    for parents in (ctx.mothers, ctx.fathers):
+        prow = id_index.get_indexer(parents)
+        mask = (parents != -1) & (prow != -1)
+        child_rows = np.where(mask)[0]
+        rows.extend(child_rows.tolist())
+        cols.extend(prow[mask].tolist())
+    if not rows:
+        return set()
+    adj = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
+    _, labels = connected_components(adj, directed=True, connection="strong")
+    member_mask = (np.bincount(labels) >= 2)[labels]
+    return {int(i) for i in ids[member_mask]}
+
+
+def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]:
+    """IDs to drop this round.
+
+    Every droppable Finding's id, except `acyclic` contributes only true cycle
+    members (not the descendants it over-flags).
+    """
+    ids = {int(f.id) for f in findings if f.check != "acyclic" and f.id is not None}
+    if any(f.check == "acyclic" for f in findings):
+        ids |= _cycle_member_ids(ctx)
+    return ids
+
+
+def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> ReductionResult:
+    """Iteratively drop offending individuals until the pedigree passes (fixpoint).
+
+    Each round runs the registry (`_run_checks`, which re-imputes sex via a fresh
+    context), collects droppable Findings, drops the flagged ids (deletes their
+    rows and sets references to them to -1), and rebuilds the context from the
+    reduced frame. The full `df_current` is carried so extra columns survive and
+    the *original* declared sex tokens persist — a parent that loses its only
+    role correctly becomes `unknown_sex` the next round. See docs/adr/0003.
+    """
+    mother_col = ctx0.mother_col
+    father_col = ctx0.father_col
+    df_cur = ctx0.df_raw
+    n_input_rows = len(df_cur)
+    ctx = ctx0
+    dropped: list[tuple[int, str, int]] = []
+    rows_removed = 0
+    cleared_refs = 0
+    drop_rounds = 0
+    rnd = 0
+    while True:
+        rnd += 1
+        if rnd > n_input_rows + 1:
+            raise PedigreeError("drop-offending failed to converge")
+        _results, findings = _run_checks(ctx, on_fail="accumulate")
+        droppable = [f for f in findings if f.check in DROPPABLE_CHECKS and f.id is not None]
+        drop_ids = _round_drop_ids(droppable, ctx)
+        if not drop_ids:
+            break
+        drop_rounds += 1
+        # _write_dropped_manifest collapses within-round duplicates (e.g. a
+        # self-loop flagged via both parent columns), so record them all here.
+        dropped.extend((int(f.id), f.check, rnd) for f in droppable if int(f.id) in drop_ids)
+        drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))
+        keep = ~np.isin(ctx.ids, drop_arr)
+        rows_removed += int((~keep).sum())
+        surv_m = ctx.mothers[keep]
+        surv_f = ctx.fathers[keep]
+        df_cur = df_cur[keep].reset_index(drop=True)
+        m_hit = np.isin(surv_m, drop_arr)
+        f_hit = np.isin(surv_f, drop_arr)
+        cleared_refs += int(m_hit.sum()) + int(f_hit.sum())
+        df_cur.loc[m_hit, mother_col] = "-1"
+        df_cur.loc[f_hit, father_col] = "-1"
+        ctx = _build_context_from_df(df_cur, **rebuild_kwargs)
+    return ReductionResult(
+        df_current=df_cur,
+        dropped=dropped,
+        n_rounds=drop_rounds,
+        n_input_rows=n_input_rows,
+        n_rows_removed=rows_removed,
+        n_distinct_dropped=len({fid for fid, _c, _r in dropped}),
+        n_cleared_refs=cleared_refs,
+        ctx_final=ctx,
+    )
