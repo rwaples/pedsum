@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.2 — 2026-06-15 — summarize regenerates re-ingested provenance columns
+
+### Fixes
+
+- **`summarize` no longer warns when re-ingesting its own provenance columns.** A `validate.tsv.gz` (including one produced by `validate --drop-offending`) carries pedsum's own `sex_source` column; summarizing it re-derived `sex_source` and the collision guard preserved the stale copy as `sex_source_input` plus a `WARNING` — so the canonical clean-then-summarize pipeline always emitted spurious noise and a redundant column. pedsum-reserved provenance columns (currently `sex_source`) are now regenerated: the stale input copy is dropped with an `INFO` line. Genuine user-column collisions are unchanged (still preserved as `<name>_input` with a `WARNING`).
+
 ## 0.11.1 — 2026-06-15 — per-round drop-offending logging
 
 ### Features
