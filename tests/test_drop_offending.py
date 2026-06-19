@@ -78,6 +78,8 @@ def test_drop_spawned_offender_reaches_fixpoint(tmp_path):
     assert rounds[9] == 2  # 9 only droppable once its child 10 is removed
     assert max(manifest["round"]) == 2
     assert "2 round(s)" in r.stderr
+    # An INFO line announces the loop start before the per-round detail.
+    assert "starting reduction loop" in r.stderr
     # Per-round INFO lines list the changes made each iteration.
     assert "drop-offending round 1:" in r.stderr
     assert "drop-offending round 2:" in r.stderr

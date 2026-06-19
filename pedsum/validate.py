@@ -1010,6 +1010,7 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
     cleared_refs = 0
     drop_rounds = 0
     rnd = 0
+    logger.info("--drop-offending: starting reduction loop over %d input row(s)", n_input_rows)
     while True:
         rnd += 1
         if rnd > n_input_rows + 1:
