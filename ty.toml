@@ -1,0 +1,12 @@
+# ty config for pedsum (uses standalone ruff.toml, no pyproject.toml).
+[environment]
+python-version = "3.13"
+# pedigree_graph is an import-hook editable install; point ty at its source.
+extra-paths = ["../pedigree-graph"]
+
+[src]
+include = ["pedsum"]
+exclude = ["tests"]
+
+[terminal]
+error-on-warning = false
