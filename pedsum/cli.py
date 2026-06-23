@@ -801,7 +801,7 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
     # Self-verify the written artifact passes under the invoked flags. The
     # output is always tab-separated regardless of the input --sep, so sniff it.
     out_path = out_dir / "validate.tsv.gz"
-    _n, vresults, _vf, _vctx = validate_pedigree(out_path, **{**_validation_kwargs(args), "sep": "auto"})
+    _n, vresults, _vf, _vctx = validate_pedigree(out_path, **{**_validation_kwargs(args), "sep": "auto"})  # ty: ignore[invalid-argument-type]
     failed = sorted(r.name for r in vresults if r.status == "FAIL")
     if failed:
         raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {failed}")

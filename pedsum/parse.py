@@ -279,7 +279,7 @@ def _read_pedigree_table(
     else:
         chosen = _SEP_MAP.get(sep, sep)
     engine = "python" if chosen == r"\s+" else None
-    return pd.read_csv(path, sep=chosen, dtype=dtype, engine=engine)
+    return pd.read_csv(path, sep=chosen, dtype=dtype, engine=engine)  # ty: ignore[no-matching-overload]
 
 
 def _as_parent_int_col(

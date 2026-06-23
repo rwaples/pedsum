@@ -451,7 +451,7 @@ def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
         return CheckOutcome("SKIP", skip_reason=f"column {ctx.birth_year_col!r} not present in file")
     ctx.birth_year, fail = _try_parse(
         "birth_year_dtype",
-        lambda: _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col),
+        lambda: _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col),  # ty: ignore[invalid-argument-type]
     )
     return fail or _PASS
 
@@ -1059,7 +1059,7 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
         drop_rounds += 1
         # Deduped (id, check) reasons for this round — one finding may flag an
         # id twice (e.g. a self-loop via both parent columns).
-        round_pairs = {(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids}
+        round_pairs = {(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids}  # ty: ignore[invalid-argument-type]
         dropped.extend((fid, check, rnd) for fid, check in round_pairs)
 
         drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))

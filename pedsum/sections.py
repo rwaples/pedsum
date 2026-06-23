@@ -218,7 +218,7 @@ def compute_founder_summary(
         active_counts = counts[counts > 0]
         by_depth.append(
             {
-                "depth": int(depth),
+                "depth": int(depth),  # ty: ignore[invalid-argument-type]
                 "n": len(rows),
                 "active_founders": len(active),
                 "active_founder_frac": len(active) / n_founders,
@@ -227,17 +227,19 @@ def compute_founder_summary(
             }
         )
 
-    nonempty = [row for row in by_depth if row["n"] > 0]
+    nonempty = [row for row in by_depth if row["n"] > 0]  # ty: ignore[unsupported-operator]
     if nonempty:
         min_active = min(row["active_founders"] for row in nonempty)
         min_eff = min(row["effective_founders_by_descendants"] for row in nonempty)
         bottleneck = {
             "min_active_founders": int(min_active),
             "min_active_founder_frac": min_active / n_founders,
-            "min_active_depths": [int(row["depth"]) for row in nonempty if row["active_founders"] == min_active],
+            "min_active_depths": [int(row["depth"]) for row in nonempty if row["active_founders"] == min_active],  # ty: ignore[invalid-argument-type]
             "min_effective_founders_by_descendants": float(min_eff),
             "min_effective_depths": [
-                int(row["depth"]) for row in nonempty if row["effective_founders_by_descendants"] == min_eff
+                int(row["depth"])  # ty: ignore[invalid-argument-type]
+                for row in nonempty
+                if row["effective_founders_by_descendants"] == min_eff
             ],
         }
     else:
@@ -377,7 +379,7 @@ def compute_aggregate_sections(
     for depth, sub in idf.groupby("ped_depth", sort=True):
         d_reproductive = sub["n_offspring"] > 0
         row = {
-            "depth": int(depth),
+            "depth": int(depth),  # ty: ignore[invalid-argument-type]
             "n": len(sub),
             "n_male": int((sub["sex"] == SEX_MALE).sum()),
             "n_female": int((sub["sex"] == SEX_FEMALE).sum()),

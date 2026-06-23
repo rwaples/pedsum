@@ -18,7 +18,7 @@ def _augment_pair_counts(named: dict[str, int]) -> dict:
     by_degree = dict.fromkeys(range(6), 0)
     for code, count in named.items():
         by_degree[REL_REGISTRY[code].degree] += int(count)
-    out["by_degree"] = by_degree
+    out["by_degree"] = by_degree  # ty: ignore[invalid-assignment]
     return out
 
 
