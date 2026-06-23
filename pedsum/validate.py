@@ -240,6 +240,10 @@ class ValidationContext:
     @cached_property
     def imputation(self) -> _SexImputation:
         """Sex imputation from parent-role usage; computed once, shared by the sex checks."""
+        assert self.sex is not None
+        assert self.ids is not None
+        assert self.mothers is not None
+        assert self.fathers is not None
         return _impute_sex_from_roles(
             self.sex,
             self.ids,
@@ -251,6 +255,18 @@ class ValidationContext:
     def get_imputation(self) -> _SexImputation | None:
         """Return the imputation only if already computed (never triggers it)."""
         return self.__dict__.get("imputation")
+
+    def require_id_parents(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return the parsed ``(ids, mothers, fathers)``.
+
+        Asserts the id/parent parse Checks populated them — guaranteed for any
+        consuming Check by the ``requires`` gating in :func:`_run_checks`. One
+        guarded accessor for the Checks that need the full pedigree.
+        """
+        assert self.ids is not None
+        assert self.mothers is not None
+        assert self.fathers is not None
+        return self.ids, self.mothers, self.fathers
 
     @property
     def by_max(self) -> int:
@@ -299,6 +315,7 @@ def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
     ctx.ids, fail = _try_parse("id_dtype", lambda: _as_int_col(ctx.df_raw[ctx.id_col], ctx.id_col))
     if fail:
         return fail
+    assert ctx.ids is not None
     logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids))
     return _PASS
 
@@ -328,41 +345,51 @@ def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_negative_ids(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.ids is not None
     return _from_findings(_check_negative_ids(ctx.ids))
 
 
 def _ck_duplicate_ids(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.ids is not None
     return _from_findings(_check_duplicate_ids(ctx.ids))
 
 
 def _ck_parent_token_range_mother(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.mothers is not None
     return _from_findings(_check_parent_token_range(ctx.mothers, "mother"))
 
 
 def _ck_parent_token_range_father(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.fathers is not None
     return _from_findings(_check_parent_token_range(ctx.fathers, "father"))
 
 
 def _ck_parent_refs_present_mother(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.mothers is not None
     return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.id_index))
 
 
 def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.fathers is not None
     return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.id_index))
 
 
 def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
     if ctx.no_sex_check:
         return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
+    assert ctx.mothers is not None
+    assert ctx.fathers is not None
     return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index))
 
 
 def _ck_self_loops(ctx: ValidationContext) -> CheckOutcome:
-    return _from_findings(_check_self_loops(ctx.ids, ctx.mothers, ctx.fathers))
+    ids, mothers, fathers = ctx.require_id_parents()
+    return _from_findings(_check_self_loops(ids, mothers, fathers))
 
 
 def _ck_parents_distinct(ctx: ValidationContext) -> CheckOutcome:
-    return _from_findings(_check_parents_distinct(ctx.ids, ctx.mothers, ctx.fathers))
+    ids, mothers, fathers = ctx.require_id_parents()
+    return _from_findings(_check_parents_distinct(ids, mothers, fathers))
 
 
 def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
@@ -370,12 +397,13 @@ def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
     if ctx.allow_missing_sex:
         n = int(imp.ambiguous_mask.sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
+    ids, mothers, fathers = ctx.require_id_parents()
     return _from_findings(
         _check_sex_role_ambiguity(
-            ctx.ids,
+            ids,
             imp.ambiguous_mask,
-            ctx.mothers,
-            ctx.fathers,
+            mothers,
+            fathers,
         )
     )
 
@@ -385,6 +413,8 @@ def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
     # Always run the real check: the override clears asserted-vs-role
     # contradictions only for rows used in a SINGLE role; a row asserted M and
     # used as BOTH mother and father stays unoverridable and must still FAIL.
+    assert ctx.mothers is not None
+    assert ctx.fathers is not None
     findings = _check_sex_role_consistency(
         ctx.mothers,
         ctx.fathers,
@@ -405,11 +435,13 @@ def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
     if ctx.allow_missing_sex:
         n = int(((imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
+    assert ctx.ids is not None
     return _from_findings(_check_unknown_sex(ctx.ids, imp.imputed_sex, imp.ambiguous_mask))
 
 
 def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
-    return _from_findings(_check_acyclic(ctx.ids, ctx.mothers, ctx.fathers, ctx.id_index))
+    ids, mothers, fathers = ctx.require_id_parents()
+    return _from_findings(_check_acyclic(ids, mothers, fathers, ctx.id_index))
 
 
 def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
@@ -425,15 +457,19 @@ def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
+    assert ctx.ids is not None
+    assert ctx.birth_year is not None
     return _from_findings(_check_birth_year_range(ctx.ids, ctx.birth_year, ctx.birth_year_min, ctx.by_max))
 
 
 def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
+    ids, mothers, fathers = ctx.require_id_parents()
+    assert ctx.birth_year is not None
     return _from_findings(
         _check_birth_year_topology(
-            ctx.ids,
-            ctx.mothers,
-            ctx.fathers,
+            ids,
+            mothers,
+            fathers,
             ctx.birth_year,
             ctx.id_index,
         )
@@ -816,10 +852,11 @@ def load_and_validate(
         no_sex_check=no_sex_check,
     )
     _run_checks(ctx, on_fail="raise")
+    ids, mothers, fathers = ctx.require_id_parents()
 
     imp = ctx.imputation
     sex = imp.imputed_sex
-    n = len(ctx.ids)
+    n = len(ids)
     n_overridden = int(imp.overridden_mask.sum())
     n_unresolved = int((sex == SEX_UNKNOWN).sum())
     if imp.n_imputed > 0 or n_overridden > 0 or n_unresolved > 0:
@@ -840,7 +877,6 @@ def load_and_validate(
 
     # Map parent IDs to row indices, run a fixed-point depth sweep tolerant of
     # arbitrary input row order, and sort by depth (parents before children).
-    ids, mothers, fathers = ctx.ids, ctx.mothers, ctx.fathers
     birth_year = ctx.birth_year
     id_index = ctx.id_index
     m_row, mask_m = _parent_rows(mothers, id_index)
@@ -959,12 +995,12 @@ def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
     import scipy.sparse as sp
     from scipy.sparse.csgraph import connected_components
 
-    ids = ctx.ids
+    ids, mothers, fathers = ctx.require_id_parents()
     n = len(ids)
     id_index = ctx.id_index
     rows: list[int] = []
     cols: list[int] = []
-    for parents in (ctx.mothers, ctx.fathers):
+    for parents in (mothers, fathers):
         prow = id_index.get_indexer(parents)
         mask = (parents != -1) & (prow != -1)
         child_rows = np.where(mask)[0]
@@ -1027,9 +1063,10 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
         dropped.extend((fid, check, rnd) for fid, check in round_pairs)
 
         drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))
-        keep = ~np.isin(ctx.ids, drop_arr)
-        surv_m = ctx.mothers[keep]
-        surv_f = ctx.fathers[keep]
+        ids, mothers, fathers = ctx.require_id_parents()
+        keep = ~np.isin(ids, drop_arr)
+        surv_m = mothers[keep]
+        surv_f = fathers[keep]
         m_hit = np.isin(surv_m, drop_arr)
         f_hit = np.isin(surv_f, drop_arr)
         n_round_rows = int((~keep).sum())

@@ -466,6 +466,7 @@ def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
                 stdout=fh_out,
             ) as proc,
         ):
+            assert proc.stdin is not None  # opened with stdin=PIPE above
             df.to_csv(proc.stdin, sep="\t", index=False)
             proc.stdin.close()
             if proc.wait() != 0:
