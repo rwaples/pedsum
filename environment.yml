@@ -10,6 +10,7 @@ dependencies:
   - numba
   # - pigz  # optional: ~3× faster .tsv.gz writes; pedsum falls back to gzip if missing
   - pytest
+  - hypothesis
   - ruff
   - pip
   - pip:

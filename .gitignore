@@ -5,6 +5,7 @@ __pycache__/
 
 # Test / lint / type-check caches
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
 .mypy_cache/
 .pyright/

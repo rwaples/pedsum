@@ -634,7 +634,12 @@ def _build_inbreeding_summary(F: np.ndarray) -> dict:
     n = len(F)
     inbred = F > INBRED_TOL
     n_inbred = int(inbred.sum())
-    edges = [0.0, 0.0625, 0.125, 0.25, 1.0]
+    # First edge is INBRED_TOL (not 0.0) so the first range bucket is
+    # (INBRED_TOL, 0.0625] — exactly complementary to the "0" bucket
+    # (F <= INBRED_TOL). Starting at 0.0 double-counts F in (0, INBRED_TOL]
+    # (in both the "0" bucket and the first range bucket), inflating the
+    # histogram past 1.0. CONTEXT.md: values 0 <= F <= 1e-9 are the zero bucket.
+    edges = [INBRED_TOL, 0.0625, 0.125, 0.25, 1.0]
     hist: dict[str, float] = {}
     hist["0"] = float((F <= INBRED_TOL).sum()) / n if n else 0.0
     for lo, hi in pairwise(edges):
