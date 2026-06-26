@@ -33,6 +33,7 @@ conda activate pedsum
 # run like this:
 python pedigree_summary.py validate --in ...
 python pedigree_summary.py summarize --in ...
+python pedigree_summary.py epimight-input --in ...
 ```
 
 ```bash 
@@ -44,8 +45,9 @@ A 200-individual, 5-generation example pedigree
 (`example_pedigree.tsv`) ships with the repo. Try it:
 
 ```bash
-python pedigree_summary.py validate  --in example_pedigree.tsv --out /tmp/demo-validate
-python pedigree_summary.py summarize --in example_pedigree.tsv --out /tmp/demo
+python pedigree_summary.py validate      --in example_pedigree.tsv --out /tmp/demo-validate
+python pedigree_summary.py summarize     --in example_pedigree.tsv --out /tmp/demo
+python pedigree_summary.py epimight-input --in example_pedigree.tsv --out /tmp/demo-epimight --pairs
 ```
 
 `--out` is a directory (created if needed). The bare `summarize` writes
@@ -181,6 +183,51 @@ Flags:
   opposite (asserted M used only as mother → F; asserted F used only
   as father → M). The missing→F/M imputation is unaffected. Reverts
   to hard-blocking on sex/role contradictions.
+
+### Emit EPIMIGHT input
+
+```bash
+python pedigree_summary.py epimight-input --in PED.tsv --out DIR [options]
+```
+
+Builds the *structural skeleton* of an [EPIMIGHT](https://github.com/BioPsyk/epimight)
+long-form input — one row per `person × disorder × relationship_kind` over the
+eight relationship codes `PO, FS, HS, mHS, pHS, Av, 1G, 1C`. The columns a
+pedigree determines are computed; the columns that need phenotype/affection/
+demography are left as empty placeholders to fill downstream:
+
+| Column | Source |
+|---|---|
+| `person_id`, `relationship_kind`, `relatives`, `born_at_year` | computed from the pedigree |
+| `failure_status`, `failure_time`, `relatives_diagnosed`, `dead_at_year` | empty placeholders |
+
+`--out DIR` is a directory (created if needed). Files written inside:
+
+| File | When | Contents |
+|---|---|---|
+| `pipeline_input.tsv` | always | the long-form skeleton (one row per person × disorder × relationship_kind) |
+| `relative_pairs.tsv` | with `--pairs` | the relative pairs backing the counts (`id1, id2, relationship_kind, kinship`) |
+| `pipeline_input.parquet` / `relative_pairs.parquet` | with `--parquet` | parquet form of each emitted table (the format EPIMIGHT reads natively) |
+
+Flags:
+
+- `--pairs` — also write `relative_pairs.tsv`, the list of relative pairs that
+  the skeleton's `relatives` counts aggregate. For directional kinds (`PO`,
+  `Av`, `1G`) `id1` is the younger member; symmetric kinds are canonicalized
+  `id1 < id2`. Materialises every pair, so it can be large on pair-dense
+  pedigrees (cousins scale ~quadratically).
+- `--parquet` — additionally write the parquet form of each emitted table
+  (requires `pyarrow`).
+- `--rels CODES` — comma-separated relationship codes to emit, in order
+  (default: all eight).
+- `--disorder NAME` — label for the single emitted `disorder` block (default
+  `trait1`; a pedigree carries no trait).
+- `--base-year YEAR` — calendar offset for the derived `born_at_year`
+  (`base-year + generation`, default `1960`). No-op when `--birth-year-col` is
+  set, in which case the real birth year is used.
+- `--drop-founders` — drop founder-generation rows (off by default; useful when
+  the output feeds an estimator, where a founder's degenerate full-sib stratum
+  can break h² estimation).
 
 ## Input format
 

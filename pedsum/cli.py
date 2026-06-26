@@ -14,6 +14,15 @@ import numpy as np
 import pandas as pd
 
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
+from pedsum.epimight import (
+    BASE_YEAR,
+    EPIMIGHT_RELATIONSHIP_ORDER,
+    PLACEHOLDER_COLUMNS,
+    build_epimight_skeleton,
+    build_relative_pairs,
+    relationship_diagnostics,
+    validate_relationship_codes,
+)
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import _compute_depth_unordered, _parent_rows
@@ -379,6 +388,115 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_format_args(p_val)
     _add_logging_args(p_val)
+
+    p_epi = sub.add_parser(
+        "epimight-input",
+        help="emit the structural skeleton of an EPIMIGHT long-form input (TSV; --parquet for the native format)",
+    )
+    p_epi.add_argument("--in", dest="in_path", required=True, type=Path, help="input pedigree (.tsv or .tsv.gz)")
+    p_epi.add_argument(
+        "--out",
+        dest="out_dir",
+        required=True,
+        type=Path,
+        metavar="DIR",
+        help="output directory (created if needed); writes pipeline_input.tsv "
+        "(and pipeline_input.parquet under --parquet). Structural columns "
+        "(person_id, relationship_kind, relatives, born_at_year) are computed; "
+        "phenotype columns (failure_status, failure_time, relatives_diagnosed, "
+        "dead_at_year) are emitted as empty placeholders to fill downstream.",
+    )
+    p_epi.add_argument(
+        "--id-col",
+        default="id",
+        metavar="NAME",
+        help="column name for individual ID (int) (default: %(default)s)",
+    )
+    p_epi.add_argument(
+        "--sex-col",
+        default="sex",
+        metavar="NAME",
+        help="column name for sex (validated but unused by relationship extraction) (default: %(default)s)",
+    )
+    p_epi.add_argument(
+        "--mother-col",
+        default="mother",
+        metavar="NAME",
+        help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
+    )
+    p_epi.add_argument(
+        "--father-col",
+        default="father",
+        metavar="NAME",
+        help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
+    )
+    p_epi.add_argument(
+        "--birth-year-col",
+        default=None,
+        metavar="NAME",
+        help="optional birth-year column; when set it becomes born_at_year "
+        "(unknown -> empty), else born_at_year = --base-year + generation.",
+    )
+    p_epi.add_argument(
+        "--birth-year-min",
+        type=int,
+        default=_BIRTH_YEAR_DEFAULT_MIN,
+        metavar="YEAR",
+        help="inclusive lower bound for birth_year sanity check (default: %(default)s). No-op without --birth-year-col.",
+    )
+    p_epi.add_argument(
+        "--birth-year-max",
+        type=int,
+        default=None,
+        metavar="YEAR",
+        help="inclusive upper bound for birth_year sanity check (default: current calendar year + 1). "
+        "No-op without --birth-year-col.",
+    )
+    p_epi.add_argument(
+        "--rels",
+        default=",".join(EPIMIGHT_RELATIONSHIP_ORDER),
+        metavar="CODES",
+        help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s).",
+    )
+    p_epi.add_argument(
+        "--disorder",
+        default="trait1",
+        metavar="NAME",
+        help="disorder label for the single emitted block (a pedigree carries no "
+        "trait; EPIMIGHT long form is one block per disorder) (default: %(default)s).",
+    )
+    p_epi.add_argument(
+        "--base-year",
+        type=int,
+        default=BASE_YEAR,
+        metavar="YEAR",
+        help="calendar offset for the derived born_at_year = base-year + generation "
+        "(default: %(default)s). No-op when --birth-year-col is set.",
+    )
+    p_epi.add_argument(
+        "--drop-founders",
+        action="store_true",
+        help="drop founder-generation rows (off by default; the fitACE emitter "
+        "drops them because a founder's degenerate full-sib stratum breaks h2 "
+        "estimation — opt in when the output feeds estimation).",
+    )
+    p_epi.add_argument(
+        "--pairs",
+        action="store_true",
+        help="also write relative_pairs.tsv — the list of relative pairs backing "
+        "the skeleton's counts (one row per pair per relationship_kind: id1, id2, "
+        "relationship_kind, kinship). Materialises every pair, so it can be large "
+        "on pair-dense pedigrees (cousins scale ~quadratically).",
+    )
+    p_epi.add_argument(
+        "--parquet",
+        action="store_true",
+        help="also write the parquet form of each emitted table (pipeline_input "
+        "and, under --pairs, relative_pairs), the format EPIMIGHT's R Pipeline "
+        "reads natively (requires pyarrow).",
+    )
+    _add_format_args(p_epi)
+    _add_logging_args(p_epi)
 
     args = parser.parse_args(argv)
     if args.subcommand is None:
@@ -871,6 +989,92 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     return 0 if not findings else 1
 
 
+def _write_epimight_table(frame: pd.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> int:
+    """Write ``frame`` to ``<out_dir>/<stem>.tsv`` (and ``.parquet`` if requested).
+
+    Returns 0 on success, or 2 when ``--parquet`` was asked for but pyarrow is
+    unavailable.
+    """
+    tsv_path = out_dir / f"{stem}.tsv"
+    frame.to_csv(tsv_path, sep="\t", index=False)
+    logger.info("wrote %s (%d rows)", tsv_path, len(frame))
+    if parquet:
+        parquet_path = out_dir / f"{stem}.parquet"
+        try:
+            frame.to_parquet(parquet_path, index=False)
+        except ImportError as e:
+            logger.error("--parquet requires pyarrow (or fastparquet): %s", e)
+            return 2
+        logger.info("wrote %s", parquet_path)
+    return 0
+
+
+def _run_epimight_input(args: argparse.Namespace) -> int:
+    """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
+    if _prepare_out_dir(args.out_dir) != 0:
+        return 1
+    try:
+        rels = validate_relationship_codes([r.strip() for r in args.rels.split(",") if r.strip()])
+    except ValueError as e:
+        logger.error("%s", e)
+        return 2
+
+    try:
+        with _timed("load+validate"):
+            df, _children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
+    except PedigreeError as e:
+        logger.error("validation failed: %s", e)
+        _write_validation_failure_log(args)
+        return 1
+    except (FileNotFoundError, OSError) as e:
+        logger.error("file error: %s", e)
+        return 2
+
+    with _timed("built PedigreeGraph"):
+        pg = _build_pedigree_graph(df)
+
+    # Extract once; both the skeleton and the optional pairs list read it.
+    with _timed("extract pairs"):
+        all_pairs = pg.extract_pairs()
+
+    with _timed("epimight skeleton"):
+        frame = build_epimight_skeleton(
+            df,
+            pg,
+            all_pairs=all_pairs,
+            rels=rels,
+            disorder=args.disorder,
+            base_year=args.base_year,
+            drop_founders=args.drop_founders,
+        )
+
+    out_dir = args.out_dir
+    rc = _write_epimight_table(frame, out_dir, "pipeline_input", parquet=args.parquet)
+    if rc != 0:
+        return rc
+
+    if args.pairs:
+        with _timed("relative pairs"):
+            pairs = build_relative_pairs(df, pg, all_pairs=all_pairs, rels=rels)
+        rc = _write_epimight_table(pairs, out_dir, "relative_pairs", parquet=args.parquet)
+        if rc != 0:
+            return rc
+
+    logger.info(
+        "structural columns computed; placeholder column(s) left empty: %s",
+        ", ".join(PLACEHOLDER_COLUMNS),
+    )
+    for code, n_with, mean_rel in relationship_diagnostics(frame, rels):
+        logger.info(
+            "  %s %3s: %d person(s) with relatives, mean relatives %.3f",
+            args.disorder,
+            code,
+            n_with,
+            mean_rel,
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns process exit code."""
     args = _parse_args(argv)
@@ -880,4 +1084,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_summarize(args, cmd)
     if args.subcommand == "validate":
         return _run_validate(args, cmd)
+    if args.subcommand == "epimight-input":
+        return _run_epimight_input(args)
     return 1

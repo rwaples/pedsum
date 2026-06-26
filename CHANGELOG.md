@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0 — 2026-06-26 — epimight-input subcommand
+
+### Features
+
+- **`epimight-input`** emits the *structural skeleton* of an EPIMIGHT long-form input from a pedigree — one row per `person × disorder × relationship_kind` over the eight EPIMIGHT relationship codes (`PO, FS, HS, mHS, pHS, Av, 1G, 1C`). The columns a pedigree determines are computed (`person_id`, `relationship_kind`, `relatives` via the pedigree-graph pair extractor, `born_at_year` from a birth-year column or `--base-year + generation`); the columns that need phenotype/affection/demography (`failure_status`, `failure_time`, `relatives_diagnosed`, `dead_at_year`) are emitted as empty `<NA>` placeholders (schema-correct nullable integers) for filling downstream. Reuses `summarize`/`validate`'s loader (delimiter sniffing, sex decode, QC, topological sort), so the same text pedigrees work. Writes `pipeline_input.tsv` by default; `--parquet` additionally writes the parquet EPIMIGHT's R Pipeline reads natively (requires `pyarrow`, imported lazily). `--rels` selects/orders the kinds, `--disorder` labels the single emitted block, `--drop-founders` matches the fitACE emitter's founder drop. The relationship grouping mirrors `fitace.relationships` (pedsum cannot import the private `fitace`); keep them in sync.
+- **`epimight-input --pairs`** additionally writes `relative_pairs.tsv` — the list of relative pairs backing the skeleton's counts: one row per pair per `relationship_kind` with columns `id1, id2, relationship_kind, kinship`. Directional kinds (`PO`, `Av`, `1G`) put the younger member in `id1`; symmetric kinds are canonicalized `id1 < id2`. Shares the single `extract_pairs()` with the skeleton, honors the same `--rels`, and is written as parquet too under `--parquet`. Because the EPIMIGHT codes overlap, a maternal half-sib pair is listed under both `HS` and `mHS` and MZ twins appear as `FS`, so `kinship` is the nominal per-kind coefficient. Materialises every pair, so it can be large on pair-dense pedigrees.
+
 ## 0.11.2 — 2026-06-15 — summarize regenerates re-ingested provenance columns
 
 ### Fixes
