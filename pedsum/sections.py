@@ -456,12 +456,12 @@ def compute_relationship_summary(
         return {
             "computed": False,
             "skip_reason": "relationship pair lists are only available from the matrix engine",
-            "n_possible_pairs": int(n_possible),
+            "n_individual_pairs": int(n_possible),
         }
     if n == 0:
         return {
             "computed": True,
-            "n_possible_pairs": 0,
+            "n_individual_pairs": 0,
             "n_related_pairs": 0,
             "n_unrelated_pairs": 0,
             "related_pair_density": 0.0,
@@ -469,7 +469,7 @@ def compute_relationship_summary(
             "closest_relationship_per_individual": {"none": 0, **{str(d): 0 for d in range(1, 6)}},
             "relatives_by_degree": {str(d): _numeric_distribution(np.array([], dtype=np.int64)) for d in range(1, 6)},
             "relatives_total": _numeric_distribution(np.array([], dtype=np.int64)),
-            "related_pair_density_by_generation": [],
+            "related_pair_density_by_depth": [],
         }
 
     keys_parts = []
@@ -495,7 +495,7 @@ def compute_relationship_summary(
         closest_degree = np.zeros(n, dtype=np.int8)
         return {
             "computed": True,
-            "n_possible_pairs": int(n_possible),
+            "n_individual_pairs": int(n_possible),
             "n_related_pairs": 0,
             "n_unrelated_pairs": int(n_possible),
             "related_pair_density": 0.0,
@@ -506,7 +506,7 @@ def compute_relationship_summary(
             },
             "relatives_by_degree": {str(d): _numeric_distribution(np.zeros(n, dtype=np.int64)) for d in range(1, 6)},
             "relatives_total": _numeric_distribution(np.zeros(n, dtype=np.int64)),
-            "related_pair_density_by_generation": [],
+            "related_pair_density_by_depth": [],
         }
 
     keys = np.concatenate(keys_parts)

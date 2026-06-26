@@ -625,7 +625,7 @@ class TestSectionEdgeCases:
         assert skipped["computed"] is False
 
         empty = compute_relationship_summary(pd.DataFrame({"ped_depth": []}), {})
-        assert empty["n_possible_pairs"] == 0
+        assert empty["n_individual_pairs"] == 0
 
         no_valid = compute_relationship_summary(
             df,
