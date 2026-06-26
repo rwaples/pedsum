@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.1 — 2026-06-26 — exact kinship for relative pairs
+
+### Features
+
+- **`epimight-input --exact-kinship`** adds a `kinship_exact` column to `relative_pairs.tsv` carrying the **exact pedigree** kinship from `pedigree_graph.compute_pair_kinship` — inbreeding-, MZ-, and multi-path-aware, so it can exceed the nominal coefficient (inbred full sibs `0.375` not `0.25`; double first cousins `0.125` not `0.0625`). Computed over every emitted pair via the kinship recurrence (no `n×n` matrix), so cost scales with pair count × pedigree depth; off by default and a no-op (with a warning) without `--pairs`.
+
+### Docs
+
+- Clarified that the `relative_pairs.tsv` `kinship` column is the **nominal** coefficient looked up by `relationship_kind` (identical for every pair of a kind), **not** computed from the pedigree — so it ignores inbreeding and multiple relatedness paths. Use `--exact-kinship` for the pedigree-derived value. README, `--pairs` help, and the `build_relative_pairs` docstring updated.
+
 ## 0.12.0 — 2026-06-26 — epimight-input subcommand
 
 ### Features

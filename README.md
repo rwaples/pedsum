@@ -209,6 +209,12 @@ demography are left as empty placeholders to fill downstream:
 | `relative_pairs.tsv` | with `--pairs` | the relative pairs backing the counts (`id1, id2, relationship_kind, kinship`) |
 | `pipeline_input.parquet` / `relative_pairs.parquet` | with `--parquet` | parquet form of each emitted table (the format EPIMIGHT reads natively) |
 
+In `relative_pairs.tsv`, the `kinship` column is the **nominal** coefficient
+looked up by `relationship_kind` (the same value for every pair of a kind, e.g.
+`FS → 0.25`, `1C → 0.0625`) — it is *not* computed from the pedigree, so it does
+not reflect inbreeding or multiple relatedness paths. Pass `--exact-kinship` for
+the pedigree-derived value.
+
 Flags:
 
 - `--pairs` — also write `relative_pairs.tsv`, the list of relative pairs that
@@ -216,6 +222,11 @@ Flags:
   `Av`, `1G`) `id1` is the younger member; symmetric kinds are canonicalized
   `id1 < id2`. Materialises every pair, so it can be large on pair-dense
   pedigrees (cousins scale ~quadratically).
+- `--exact-kinship` — add a `kinship_exact` column to `relative_pairs.tsv` with
+  the **exact pedigree** kinship (inbreeding-, MZ-, and multi-path-aware), which
+  can exceed the nominal value — e.g. inbred sibs (`0.375` not `0.25`) or double
+  first cousins (`0.125` not `0.0625`). Runs the kinship recurrence over every
+  pair, so cost scales with pair count × pedigree depth. No-op without `--pairs`.
 - `--parquet` — additionally write the parquet form of each emitted table
   (requires `pyarrow`).
 - `--rels CODES` — comma-separated relationship codes to emit, in order

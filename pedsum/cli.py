@@ -485,8 +485,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="also write relative_pairs.tsv — the list of relative pairs backing "
         "the skeleton's counts (one row per pair per relationship_kind: id1, id2, "
-        "relationship_kind, kinship). Materialises every pair, so it can be large "
-        "on pair-dense pedigrees (cousins scale ~quadratically).",
+        "relationship_kind, kinship). The kinship column is the nominal coefficient "
+        "looked up by relationship_kind (not computed from the pedigree). "
+        "Materialises every pair, so it can be large on pair-dense pedigrees "
+        "(cousins scale ~quadratically).",
+    )
+    p_epi.add_argument(
+        "--exact-kinship",
+        action="store_true",
+        help="add a kinship_exact column to relative_pairs with the exact pedigree "
+        "kinship (inbreeding-, MZ-, and multi-path-aware), which can exceed the "
+        "nominal value. Runs the kinship recurrence over every pair; cost scales "
+        "with pair count × pedigree depth. No-op without --pairs.",
     )
     p_epi.add_argument(
         "--parquet",
@@ -1053,9 +1063,12 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
     if rc != 0:
         return rc
 
+    if args.exact_kinship and not args.pairs:
+        logger.warning("--exact-kinship has no effect without --pairs")
+
     if args.pairs:
         with _timed("relative pairs"):
-            pairs = build_relative_pairs(df, pg, all_pairs=all_pairs, rels=rels)
+            pairs = build_relative_pairs(df, pg, all_pairs=all_pairs, rels=rels, exact_kinship=args.exact_kinship)
         rc = _write_epimight_table(pairs, out_dir, "relative_pairs", parquet=args.parquet)
         if rc != 0:
             return rc

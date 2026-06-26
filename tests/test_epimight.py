@@ -47,6 +47,18 @@ _PEDIGREE = [
     {"id": 8, "sex": "F", "mother": 3, "father": 6},
 ]
 
+# Inbred pedigree: full sibs 3,4 mate, so their children 5,6 are inbred full
+# sibs. Exact kinship φ(5,6) = ¼[φ(3,3)+2φ(3,4)+φ(4,4)] = ¼[0.5+2(0.25)+0.5] =
+# 0.375, vs the nominal FS coefficient 0.25.
+_INBRED = [
+    {"id": 1, "sex": "F", "mother": -1, "father": -1},
+    {"id": 2, "sex": "M", "mother": -1, "father": -1},
+    {"id": 3, "sex": "F", "mother": 1, "father": 2},
+    {"id": 4, "sex": "M", "mother": 1, "father": 2},
+    {"id": 5, "sex": "F", "mother": 3, "father": 4},
+    {"id": 6, "sex": "M", "mother": 3, "father": 4},
+]
+
 
 def _load_graph(rows, tmp_path):
     """Write ``rows`` to a TSV, run pedsum's validator, and build the PedigreeGraph."""
@@ -280,3 +292,41 @@ def test_emitted_outputs_consistent_per_person(tmp_path):
         charged = block["id1"] if rel in _DIRECTIONAL else pd.concat([block["id1"], block["id2"]])
         from_pairs = charged.value_counts().reindex(counts.index, fill_value=0)
         assert (counts.to_numpy() == from_pairs.to_numpy()).all(), rel
+
+
+# --- exact (pedigree) kinship ------------------------------------------------
+
+
+def test_exact_kinship_is_inbreeding_aware(tmp_path):
+    """`kinship_exact` reflects the pedigree (inbreeding) while `kinship` stays nominal."""
+    pairs = _pairs_from_rows(_INBRED, tmp_path, rels=("FS",), exact_kinship=True)
+    assert "kinship_exact" in pairs.columns
+    assert (pairs["kinship"] == 0.25).all()  # nominal is constant per kind
+
+    inbred = pairs[(pairs["id1"] == 5) & (pairs["id2"] == 6)].iloc[0]
+    assert inbred["kinship_exact"] == 0.375  # inbred full sibs (parents are sibs)
+    outbred = pairs[(pairs["id1"] == 3) & (pairs["id2"] == 4)].iloc[0]
+    assert outbred["kinship_exact"] == 0.25  # unrelated-founder parents
+
+
+def test_cli_exact_kinship_adds_column(tmp_path):
+    """`--pairs --exact-kinship` adds a kinship_exact column; without it, it is absent."""
+    out = tmp_path / "out"
+    res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--pairs", "--exact-kinship"])
+    assert res.returncode == 0, res.stderr
+    with_exact = pd.read_csv(out / "relative_pairs.tsv", sep="\t")
+    assert list(with_exact.columns) == [*RELATIVE_PAIR_COLUMNS, "kinship_exact"]
+
+    out2 = tmp_path / "out2"
+    assert _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out2), "--pairs"]).returncode == 0
+    without = pd.read_csv(out2 / "relative_pairs.tsv", sep="\t")
+    assert list(without.columns) == list(RELATIVE_PAIR_COLUMNS)
+
+
+def test_exact_kinship_without_pairs_warns(tmp_path):
+    """`--exact-kinship` without `--pairs` is a no-op that warns and writes no pairs file."""
+    out = tmp_path / "out"
+    res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--exact-kinship"])
+    assert res.returncode == 0, res.stderr
+    assert "no effect without --pairs" in res.stderr
+    assert not (out / "relative_pairs.tsv").exists()

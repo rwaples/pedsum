@@ -297,21 +297,32 @@ def build_relative_pairs(
     *,
     all_pairs: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
+    exact_kinship: bool = False,
 ) -> pd.DataFrame:
     """Build the long list of relative pairs backing the skeleton's counts.
 
     One row per relative pair per relationship code, with columns
     ``id1, id2, relationship_kind, kinship``. For directional kinds (``PO``,
     ``Av``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
-    symmetric kinds are canonicalized so ``id1 < id2``. Because the EPIMIGHT codes
-    overlap, a maternal half-sib pair is listed under both ``HS`` and ``mHS``, and
-    MZ twins appear as ``FS`` — so ``kinship`` is the nominal per-kind coefficient.
+    symmetric kinds are canonicalized so ``id1 < id2``.
+
+    ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
+    (identical for every pair of a kind) — not computed from the pedigree. Because
+    the EPIMIGHT codes overlap, a maternal half-sib pair is listed under both
+    ``HS`` and ``mHS`` and MZ twins appear as ``FS``, so the nominal value is the
+    dominant-case coefficient. With ``exact_kinship=True`` an extra
+    ``kinship_exact`` column carries the **exact pedigree** kinship from
+    ``pg.compute_pair_kinship`` — inbreeding-, MZ-, and multi-path-aware, so it can
+    exceed the nominal value (e.g. inbred sibs, double first cousins).
 
     Args:
         df: the frame from ``load_and_validate`` (provides the ``id`` column).
         pg: a ``PedigreeGraph`` built from ``df`` (its ``generation`` orients pairs).
         all_pairs: the dict from ``pg.extract_pairs()``; extracted here when None.
         rels: EPIMIGHT relationship codes to emit, in output order.
+        exact_kinship: add a ``kinship_exact`` column with exact pedigree kinship.
+            Runs the kinship recurrence over every pair (no ``n×n`` matrix), so
+            cost scales with pair count × pedigree depth.
 
     Returns:
         A DataFrame of relative pairs sorted by ``relationship_kind``, ``id1``,
@@ -322,27 +333,33 @@ def build_relative_pairs(
     generations = np.asarray(pg.generation)
     if all_pairs is None:
         all_pairs = pg.extract_pairs()
+    columns = (*RELATIVE_PAIR_COLUMNS, "kinship_exact") if exact_kinship else RELATIVE_PAIR_COLUMNS
+
+    # First pass: the (idx1, idx2) row indices per code. Computing exact kinship
+    # over all codes in one call lets compute_pair_kinship share its DP work.
+    code_idx: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for code in rels:
+        pair_blocks = [b for b in _relationship_pair_blocks(all_pairs, code, generations) if len(b[0])]
+        if pair_blocks:
+            idx1 = np.concatenate([a for a, _ in pair_blocks])
+            idx2 = np.concatenate([b for _, b in pair_blocks])
+            code_idx[code] = (idx1, idx2)
+    exact = pg.compute_pair_kinship(code_idx) if (exact_kinship and code_idx) else {}
 
     blocks: list[pd.DataFrame] = []
-    for code in rels:
-        rel = _EPI_REGISTRY[code]
-        pair_blocks = [b for b in _relationship_pair_blocks(all_pairs, code, generations) if len(b[0])]
-        if not pair_blocks:
-            continue
-        id1 = ids[np.concatenate([idx1 for idx1, _ in pair_blocks])]
-        id2 = ids[np.concatenate([idx2 for _, idx2 in pair_blocks])]
-        if not rel.directional:
-            # Symmetric: canonicalize so the smaller id comes first.
+    for code, (idx1, idx2) in code_idx.items():
+        id1, id2 = ids[idx1], ids[idx2]
+        if not _EPI_REGISTRY[code].directional:
+            # Symmetric: canonicalize so the smaller id comes first. compute_pair_kinship
+            # is symmetric, so this column swap leaves kinship_exact aligned.
             id1, id2 = np.minimum(id1, id2), np.maximum(id1, id2)
-        blocks.append(
-            pd.DataFrame(
-                {"id1": id1, "id2": id2, "relationship_kind": code, "kinship": rel.kinship},
-                columns=RELATIVE_PAIR_COLUMNS,
-            )
-        )
+        data = {"id1": id1, "id2": id2, "relationship_kind": code, "kinship": _EPI_REGISTRY[code].kinship}
+        if exact_kinship:
+            data["kinship_exact"] = exact[code]
+        blocks.append(pd.DataFrame(data, columns=columns))
 
     if not blocks:
-        return pd.DataFrame(columns=RELATIVE_PAIR_COLUMNS)
+        return pd.DataFrame(columns=columns)
     out = pd.concat(blocks, ignore_index=True)
     return out.sort_values(["relationship_kind", "id1", "id2"], kind="stable", ignore_index=True)
 
