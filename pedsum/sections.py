@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -146,6 +146,22 @@ def _offspring_dist(counts: np.ndarray, n: int) -> dict:
     return out
 
 
+class _DepthRow(TypedDict):
+    """One row of :func:`compute_founder_summary`'s ``by_depth`` table.
+
+    Declared rather than left as a bare ``dict`` so per-key types survive
+    lookup: an inferred ``dict[str, int | float | dict]`` collapses every
+    ``row[...]`` to that union, which then fails comparison and ``min()``.
+    """
+
+    depth: int
+    n: int
+    active_founders: int
+    active_founder_frac: float
+    effective_founders_by_descendants: float
+    founder_ancestors: dict
+
+
 def compute_founder_summary(
     idf: pd.DataFrame,
     max_lineage_cells: int = 5_000_000,
@@ -202,7 +218,7 @@ def compute_founder_summary(
         dtype=np.int32,
     )
 
-    by_depth = []
+    by_depth: list[_DepthRow] = []
     for depth, sub in idf.groupby("ped_depth", sort=True):
         rows = sub.index.to_numpy()
         active: set[int] = set()
@@ -227,19 +243,17 @@ def compute_founder_summary(
             }
         )
 
-    nonempty = [row for row in by_depth if row["n"] > 0]  # ty: ignore[unsupported-operator]
+    nonempty = [row for row in by_depth if row["n"] > 0]
     if nonempty:
         min_active = min(row["active_founders"] for row in nonempty)
         min_eff = min(row["effective_founders_by_descendants"] for row in nonempty)
         bottleneck = {
             "min_active_founders": int(min_active),
             "min_active_founder_frac": min_active / n_founders,
-            "min_active_depths": [int(row["depth"]) for row in nonempty if row["active_founders"] == min_active],  # ty: ignore[invalid-argument-type]
+            "min_active_depths": [int(row["depth"]) for row in nonempty if row["active_founders"] == min_active],
             "min_effective_founders_by_descendants": float(min_eff),
             "min_effective_depths": [
-                int(row["depth"])  # ty: ignore[invalid-argument-type]
-                for row in nonempty
-                if row["effective_founders_by_descendants"] == min_eff
+                int(row["depth"]) for row in nonempty if row["effective_founders_by_descendants"] == min_eff
             ],
         }
     else:

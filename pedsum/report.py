@@ -473,7 +473,7 @@ def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
                 raise PedigreeError(f"pigz exited with status {proc.returncode}")
         return
     with gzip.open(out_path, "wb", compresslevel=1) as fh:
-        df.to_csv(fh, sep="\t", index=False)
+        df.to_csv(fh, sep="\t", index=False)  # ty: ignore[no-matching-overload]
 
 
 def _write_annotated_tsv(
