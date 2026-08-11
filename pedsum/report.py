@@ -194,8 +194,8 @@ def _drop_distribution_extrema(obj: object) -> None:
     """Remove min/max from nested distribution dicts for safe-attempt output."""
     if isinstance(obj, dict):
         if {"mean", "q1", "median", "q3", "min", "max"}.issubset(obj.keys()):
-            obj.pop("min", None)  # ty: ignore[no-matching-overload]
-            obj.pop("max", None)  # ty: ignore[no-matching-overload]
+            obj.pop("min", None)
+            obj.pop("max", None)
         for v in obj.values():
             _drop_distribution_extrema(v)
     elif isinstance(obj, list):
