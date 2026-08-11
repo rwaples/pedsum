@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pedsum"
+description = "Pedigree summary CLI: structure, relatedness, inbreeding, Ne estimators."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dynamic = ["version"]
+dependencies = [
+    "numpy>=2.2,<3",
+    "scipy>=1.14,<2",
+    "pandas>=2.2,<3",
+    "pyyaml>=6,<7",
+    # Not published to PyPI — supplied by environment.yml (git tag) or an
+    # editable checkout, same arrangement the fitACE sisters use for simace.
+    "pedigree-graph>=0.5.3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9,<10",
+    "hypothesis>=6,<7",
+    "ruff>=0.16,<0.17",
+]
+typecheck = ["ty==0.0.70"]
+
+[project.urls]
+Homepage = "https://github.com/rwaples/pedsum"
+
+# Single source of truth stays pedsum/base.py, which also feeds `--version` and
+# the version field of both report formats. Reading it here rather than
+# restating it keeps `python pedigree_summary.py` working in an uninstalled
+# checkout, which importlib.metadata would not.
+[tool.setuptools.dynamic]
+version = { attr = "pedsum.base.VERSION" }
+
+[tool.setuptools.packages.find]
+include = ["pedsum*"]
+
+# Lint and type-check config deliberately stay in the standalone ruff.toml and
+# ty.toml. ty.toml in particular carries an `extra-paths` entry pointing at the
+# sibling pedigree-graph checkout; both files take precedence over pyproject
+# sections, so adding this file does not change either tool's behaviour.
