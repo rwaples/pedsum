@@ -345,6 +345,7 @@ keep a lookup table:
 
 ```python
 import pandas as pd
+
 df = pd.read_csv("clinical.tsv", sep="\t", dtype=str)
 all_ids = pd.unique(df[["id", "mother", "father"]].values.ravel())
 lut = {sid: i for i, sid in enumerate(sorted(all_ids[all_ids != "-1"]))}
