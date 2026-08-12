@@ -278,7 +278,7 @@ def build_epimight_skeleton(
                     "born_at_year": born_at_year,
                     "dead_at_year": na_i16,  # placeholder: needs death age
                 },
-                columns=EPIMIGHT_COLUMNS,  # ty: ignore[invalid-argument-type]
+                columns=EPIMIGHT_COLUMNS,
             )
         )
 
@@ -356,10 +356,10 @@ def build_relative_pairs(
         data = {"id1": id1, "id2": id2, "relationship_kind": code, "kinship": _EPI_REGISTRY[code].kinship}
         if exact_kinship:
             data["kinship_exact"] = exact[code]
-        blocks.append(pd.DataFrame(data, columns=columns))  # ty: ignore[invalid-argument-type]
+        blocks.append(pd.DataFrame(data, columns=columns))
 
     if not blocks:
-        return pd.DataFrame(columns=columns)  # ty: ignore[invalid-argument-type]
+        return pd.DataFrame(columns=columns)
     out = pd.concat(blocks, ignore_index=True)
     return out.sort_values(["relationship_kind", "id1", "id2"], kind="stable", ignore_index=True)
 

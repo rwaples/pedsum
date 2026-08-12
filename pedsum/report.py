@@ -431,7 +431,7 @@ def _write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(_flatten_long(_round_floats(data)))
-    df = pd.DataFrame(rows, columns=["section", "key", "subkey", "value"])  # ty: ignore[invalid-argument-type]
+    df = pd.DataFrame(rows, columns=["section", "key", "subkey", "value"])
     df.to_csv(path, sep="\t", index=False)
 
 
@@ -585,7 +585,7 @@ def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
         }
         for f in findings
     ]
-    df = pd.DataFrame(rows, columns=["check", "id", "row", "detail"])  # ty: ignore[invalid-argument-type]
+    df = pd.DataFrame(rows, columns=["check", "id", "row", "detail"])
     df.to_csv(out_path, sep="\t", index=False)
 
 
@@ -604,7 +604,7 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
         if (fid, check, rnd) not in seen:
             seen.add((fid, check, rnd))
             rows.append({"id": fid, "check": check, "round": rnd})
-    df = pd.DataFrame(rows, columns=["id", "check", "round"])  # ty: ignore[invalid-argument-type]
+    df = pd.DataFrame(rows, columns=["id", "check", "round"])
     df.to_csv(out_path, sep="\t", index=False)
 
 
