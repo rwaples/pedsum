@@ -13,7 +13,7 @@ dynamic = ["version"]
 dependencies = [
     "numpy>=2.2,<3",
     "scipy>=1.14,<2",
-    "pandas>=2.2,<3",
+    "pandas>=2.2,<4",
     "pyyaml>=6,<7",
     # Not published to PyPI — supplied by environment.yml (git tag) or an
     # editable checkout, same arrangement the fitACE sisters use for simace.
