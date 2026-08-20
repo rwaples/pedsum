@@ -43,7 +43,7 @@ permutations.
 from __future__ import annotations
 
 import math
-from contextlib import contextmanager
+from contextlib import nullcontext
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
@@ -53,7 +53,7 @@ import numpy as np
 from pedsum.base import SEX_MALE, logger
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
 
     import pandas as pd
 
@@ -281,7 +281,7 @@ def sample_concordance_numpy(
     0.97x at ``B=100, G=200k``) — while allocating 160 MB there.
 
     Args:
-        sizes: Eligible group sizes.
+        sizes: Eligible group sizes, in canonical group order.
         n_male: ``M``, held fixed across permutations.
         n_permutations: ``B``, the number of draws.
         seed: Seed for a fresh :class:`numpy.random.Generator`.
@@ -371,7 +371,6 @@ def _sampler_bound(backend: str) -> int:
 def _run_permutations(
     sizes: np.ndarray,
     n_male: int,
-    n_total: int,
     observed: int,
     expected: float,
     n_permutations: int,
@@ -388,6 +387,7 @@ def _run_permutations(
     """
     sampler = load_numba_sampler()
     backend = "numba" if sampler is not None else "numpy"
+    n_total = int(sizes.sum())
     block: dict = {
         "requested": int(n_permutations),
         "completed": 0,
@@ -485,8 +485,37 @@ def _build_group_index(keys: tuple[np.ndarray, ...], is_male: np.ndarray, sex_so
     )
 
 
-def _eligibility_counts(index: _GroupIndex, admitted: np.ndarray) -> dict:
-    """Reduce an admitted-offspring mask to per-group counts and count metadata.
+@dataclass(frozen=True)
+class _Projection:
+    """One provenance mask reduced to the groups it makes eligible."""
+
+    sizes: np.ndarray
+    """Admitted offspring per *eligible* group."""
+
+    male_counts: np.ndarray
+    """Admitted males per eligible group, aligned with ``sizes``."""
+
+    eligible_row: np.ndarray
+    """Sorted-row mask of the offspring the statistic actually uses."""
+
+    counts: dict
+    """Eligibility/exclusion metadata, emitted verbatim into the report block."""
+
+
+_COUNT_KEYS: tuple[str, ...] = (
+    "n_groups_total",
+    "n_groups_eligible",
+    "n_groups_incomplete",
+    "n_groups_too_small",
+    "n_offspring_total",
+    "n_offspring_eligible",
+    "n_offspring_sex_excluded",
+    "n_offspring_in_small_groups",
+)
+
+
+def _project(index: _GroupIndex, admitted: np.ndarray) -> _Projection:
+    """Reduce an admitted-offspring mask to eligible groups and count metadata.
 
     ``admitted`` marks offspring whose sex is resolved *and* whose provenance
     the analysis admits. Eligible members of a group are retained even when
@@ -495,22 +524,8 @@ def _eligibility_counts(index: _GroupIndex, admitted: np.ndarray) -> dict:
     """
     n_groups = index.group_sizes.size
     if n_groups == 0:
-        zeros = np.empty(0, dtype=np.int64)
-        return {
-            "sizes": zeros,
-            "male_counts": zeros,
-            "eligible_row": np.empty(0, dtype=bool),
-            "counts": {
-                "n_groups_total": 0,
-                "n_groups_eligible": 0,
-                "n_groups_incomplete": 0,
-                "n_groups_too_small": 0,
-                "n_offspring_total": 0,
-                "n_offspring_eligible": 0,
-                "n_offspring_sex_excluded": 0,
-                "n_offspring_in_small_groups": 0,
-            },
-        }
+        empty = np.empty(0, dtype=np.int64)
+        return _Projection(empty, empty, np.empty(0, dtype=bool), dict.fromkeys(_COUNT_KEYS, 0))
     admitted_i = admitted.astype(np.int64)
     admitted_per_group = np.add.reduceat(admitted_i, index.group_starts)
     male_per_group = np.add.reduceat(admitted_i * index.is_male, index.group_starts)
@@ -518,11 +533,11 @@ def _eligibility_counts(index: _GroupIndex, admitted: np.ndarray) -> dict:
     n_admitted = int(admitted_i.sum())
     n_eligible = int(admitted_per_group[keep].sum())
     n_offspring = int(index.group_sizes.sum())
-    return {
-        "sizes": admitted_per_group[keep],
-        "male_counts": male_per_group[keep],
-        "eligible_row": admitted & keep[index.group_of_row],
-        "counts": {
+    return _Projection(
+        sizes=admitted_per_group[keep],
+        male_counts=male_per_group[keep],
+        eligible_row=admitted & keep[index.group_of_row],
+        counts={
             "n_groups_total": int(n_groups),
             "n_groups_eligible": int(keep.sum()),
             "n_groups_incomplete": int((keep & (admitted_per_group < index.group_sizes)).sum()),
@@ -532,7 +547,7 @@ def _eligibility_counts(index: _GroupIndex, admitted: np.ndarray) -> dict:
             "n_offspring_sex_excluded": n_offspring - n_admitted,
             "n_offspring_in_small_groups": n_admitted - n_eligible,
         },
-    }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -611,23 +626,48 @@ _SKIP_MESSAGES = {
 }
 
 
-def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: bool) -> dict:
+def _direction(observed: int, expected: Fraction) -> str:
+    """Classify the excess exactly, so the verdict never hinges on float rounding."""
+    if Fraction(observed) > expected:
+        return "over_concordant"
+    if Fraction(observed) < expected:
+        return "under_concordant"
+    return "none"
+
+
+@dataclass(frozen=True)
+class _Analysis:
+    """One analysis pass: the report block plus what permutation calibration needs.
+
+    Keeping the arrays here rather than smuggling them through the block means
+    the block is only ever the emitted payload.
+    """
+
+    block: dict
+    sizes: np.ndarray
+    male_counts: np.ndarray
+    n_male: int
+    observed: int
+    moments: Moments
+
+
+def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: bool) -> _Analysis:
     """Eligibility counts, the pair-concordance statistic, and analytical inference.
 
     Shared by the headline (``input`` provenance only) and the all-resolved
     sensitivity pass; the two differ only in ``admitted``.
     """
-    projection = _eligibility_counts(index, admitted)
-    sizes = projection["sizes"]
-    male_counts = projection["male_counts"]
-    counts = projection["counts"]
+    projection = _project(index, admitted)
+    sizes = projection.sizes
+    male_counts = projection.male_counts
+    counts = projection.counts
 
-    by_source = dict.fromkeys(ALL_RESOLVED_SEX_SOURCES, 0)
-    eligible_row = projection["eligible_row"]
-    if eligible_row.size:
-        codes = index.sex_source_code[eligible_row]
-        for name in ALL_RESOLVED_SEX_SOURCES:
-            by_source[name] = int((codes == _SEX_SOURCE_CODE[name]).sum())
+    # One pass over the analysed rows, then read off the sources we report.
+    # ``minlength`` is what makes the lookup safe: without it bincount sizes its
+    # result to max(code) + 1, so a pedigree of purely input sex would return a
+    # length-1 tally and IndexError on the imputed slots.
+    tally = np.bincount(index.sex_source_code[projection.eligible_row], minlength=len(_SEX_SOURCE_ORDER))
+    by_source = {name: int(tally[_SEX_SOURCE_CODE[name]]) for name in ALL_RESOLVED_SEX_SOURCES}
 
     n_male = int(male_counts.sum())
     n_total = int(sizes.sum())
@@ -636,15 +676,19 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
     observed = concordant_pairs(male_counts, sizes)
     n_pairs = moments.n_pairs
 
+    # Every eligible group holds at least MIN_GROUP_SIZE offspring, so a
+    # non-empty ``sizes`` always contributes at least one pair: ``n_pairs`` and
+    # ``n_total`` are zero together, and one guard covers all three ratios.
+    n_max = int(sizes.max()) if n_pairs else 0
     out: dict = {
         "computed": False,
         "skip_reason": None,
         "skip_message": None,
         **counts,
         "eligible_by_sex_source": by_source,
-        "conditioning_male_fraction": (n_male / n_total) if n_total else None,
+        "conditioning_male_fraction": (n_male / n_total) if n_pairs else None,
         "n_within_group_pairs": n_pairs,
-        "max_group_pair_share": None,
+        "max_group_pair_share": (n_max * (n_max - 1) // 2) / n_pairs if n_pairs else None,
         "observed_pair_concordance": (observed / n_pairs) if n_pairs else None,
         "expected_pair_concordance": None,
         "excess_concordance": None,
@@ -652,9 +696,6 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
         "z": None,
         "p_analytical": None,
     }
-    if sizes.size:
-        n_max = int(sizes.max())
-        out["max_group_pair_share"] = (n_max * (n_max - 1) // 2) / n_pairs if n_pairs else None
 
     # Offspring admitted by provenance, before the min-group-size cut — so a
     # pedigree whose only input-sex offspring sit in singleton groups reports
@@ -670,39 +711,25 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
         skip = "single_sex"
     elif moments.variance == 0:
         skip = "zero_variance"
-    if skip is not None:
+
+    if skip is None:
+        expected = moments.expected
+        z = (observed - float(expected)) / math.sqrt(float(moments.variance))
+        out.update(
+            {
+                "computed": True,
+                "expected_pair_concordance": float(expected / n_pairs),
+                "excess_concordance": float((Fraction(observed) - expected) / n_pairs),
+                "direction": _direction(observed, expected),
+                "z": z,
+                "p_analytical": _two_sided_normal_p(z),
+            },
+        )
+    else:
         out["skip_reason"] = skip
         out["skip_message"] = _SKIP_MESSAGES[skip]
-        return out
 
-    expected = moments.expected
-    z = (observed - float(expected)) / math.sqrt(float(moments.variance))
-    out.update(
-        {
-            "computed": True,
-            "expected_pair_concordance": float(expected / n_pairs),
-            # Exact comparison: the direction never hinges on float rounding.
-            "excess_concordance": float((Fraction(observed) - expected) / n_pairs),
-            "direction": (
-                "over_concordant"
-                if Fraction(observed) > expected
-                else ("under_concordant" if Fraction(observed) < expected else "none")
-            ),
-            "z": z,
-            "p_analytical": _two_sided_normal_p(z),
-        },
-    )
-    out["_moments"] = moments
-    out["_observed"] = observed
-    out["_sizes"] = sizes
-    out["_n_male"] = n_male
-    out["_male_counts"] = male_counts
-    return out
-
-
-def _strip_internals(block: dict) -> dict:
-    """Drop the underscore-prefixed carriers that never reach the report."""
-    return {k: v for k, v in block.items() if not k.startswith("_")}
+    return _Analysis(out, sizes, male_counts, n_male, observed, moments)
 
 
 # ---------------------------------------------------------------------------
@@ -710,11 +737,10 @@ def _strip_internals(block: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@contextmanager
-def _null_timer(label: str) -> Iterator[None]:
+def _null_timer(label: str) -> AbstractContextManager[None]:
     """No-op stand-in for the CLI's ``_timed`` phase logger; ``label`` is ignored."""
     del label
-    yield
+    return nullcontext()
 
 
 def compute_offspring_sex_concordance(
@@ -769,7 +795,8 @@ def compute_offspring_sex_concordance(
         },
     }
 
-    blocks: dict[str, dict] = {}
+    headline: dict[str, _Analysis] = {}
+    sensitivity: dict[str, dict] = {}
     for name, parent_cols in GROUPINGS:
         with timed(f"sex concordance grouping ({name})"):
             parents = [df[col].to_numpy() for col in parent_cols]
@@ -782,71 +809,71 @@ def compute_offspring_sex_concordance(
                 sex_source_code[in_scope],
             )
         with timed(f"sex concordance analytical ({name})"):
-            headline = _analyse(
+            headline[name] = _analyse(
                 index,
                 np.isin(index.sex_source_code, headline_codes),
                 require_input_sex=True,
             )
-            headline["_sensitivity"] = _analyse(
+            sensitivity[name] = _analyse(
                 index,
                 np.isin(index.sex_source_code, all_resolved_codes),
                 require_input_sex=False,
-            )
-        blocks[name] = headline
+            ).block
 
     # Multiplicity across whichever groupings are computable.
-    analytical_holm = holm_adjust({n: b["p_analytical"] for n, b in blocks.items() if b["computed"]})
+    computable = {name: a for name, a in headline.items() if a.block["computed"]}
+    analytical_holm = holm_adjust({name: a.block["p_analytical"] for name, a in computable.items()})
 
-    permutation_raw: dict[str, float] = {}
+    permutation_blocks: dict[str, dict] = {}
     if permutations > 0:
-        for name, block in blocks.items():
-            if not block["computed"]:
-                continue
+        for name, analysis in computable.items():
             with timed(f"sex concordance permutations ({name})"):
-                perm = _run_permutations(
-                    block["_sizes"],
-                    block["_n_male"],
-                    int(block["_sizes"].sum()),
-                    block["_observed"],
-                    float(block["_moments"].expected),
+                permutation_blocks[name] = _run_permutations(
+                    analysis.sizes,
+                    analysis.n_male,
+                    analysis.observed,
+                    float(analysis.moments.expected),
                     permutations,
                     seed,
                 )
-            block["_permutations"] = perm
-            if perm["p_raw"] is not None:
-                permutation_raw[name] = perm["p_raw"]
-    permutation_holm = holm_adjust(permutation_raw)
+    permutation_holm = holm_adjust(
+        {name: p["p_raw"] for name, p in permutation_blocks.items() if p["p_raw"] is not None},
+    )
 
-    for name, block in blocks.items():
-        sensitivity = _strip_internals(block.pop("_sensitivity"))
-        perm = block.pop("_permutations", None)
-        moments = block.pop("_moments", None)
-        block.pop("_observed", None)
-        male_counts = block.pop("_male_counts", None)
-        sizes = block.pop("_sizes", None)
-        block.pop("_n_male", None)
-
+    for name, analysis in headline.items():
+        block = analysis.block
         block["p_analytical_holm"] = analytical_holm.get(name)
-        if perm is not None and perm["p_raw"] is not None:
-            perm["p_holm"] = permutation_holm.get(name)
-        elif perm is not None:
-            perm["p_holm"] = None
-        block["permutations"] = perm
-        use_perm = perm is not None and perm["p_raw"] is not None
-        block["p_source"] = "permutation" if use_perm else ("analytical" if block["computed"] else None)
-        block["p_holm"] = perm["p_holm"] if use_perm else block["p_analytical_holm"]
-        block["all_resolved_excess_concordance"] = sensitivity["excess_concordance"]
-        block["all_resolved"] = sensitivity
-        if block["computed"] and sizes is not None and moments is not None:
-            block["male_proportion_distribution"] = _proportion_distribution(male_counts / sizes)
+
+        permutation_block = permutation_blocks.get(name)
+        use_permutation = permutation_block is not None and permutation_block["p_raw"] is not None
+        if permutation_block is not None:
+            permutation_block["p_holm"] = permutation_holm.get(name)
+        block["permutations"] = permutation_block
+
+        if use_permutation:
+            block["p_source"] = "permutation"
+            block["p_holm"] = permutation_block["p_holm"]
+        elif block["computed"]:
+            block["p_source"] = "analytical"
+            block["p_holm"] = block["p_analytical_holm"]
+        else:
+            block["p_source"] = None
+            block["p_holm"] = None
+
+        block["all_resolved_excess_concordance"] = sensitivity[name]["excess_concordance"]
+        block["all_resolved"] = sensitivity[name]
+
+        if block["computed"]:
+            block["male_proportion_distribution"] = _proportion_distribution(analysis.male_counts / analysis.sizes)
             block["by_group_size"] = _by_group_size(
-                sizes,
-                male_counts,
-                float(moments.expected / moments.n_pairs),
+                analysis.sizes,
+                analysis.male_counts,
+                float(analysis.moments.expected / analysis.moments.n_pairs),
             )
         else:
             block["male_proportion_distribution"] = None
             block["by_group_size"] = []
+
         _warn_if_unpermuted_tail(name, block)
         section[name] = block
     return section

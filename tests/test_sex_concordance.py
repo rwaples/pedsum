@@ -615,7 +615,7 @@ def test_numpy_fallback_when_numba_is_unimportable(monkeypatch):
     assert sc.load_numba_sampler() is None
 
     sizes = np.full(20, 4, dtype=np.int64)
-    block = sc._run_permutations(sizes, 40, 80, 30, 28.0, 50, 3)
+    block = sc._run_permutations(sizes, 40, 30, 28.0, 50, 3)
     assert block["backend"] == "numpy"
     assert block["completed"] == 50
     assert block["p_raw"] is not None
@@ -626,14 +626,14 @@ def test_backend_is_recorded_for_the_compiled_path():
     if sc.load_numba_sampler() is None:
         pytest.skip("numba is not installed")
     sizes = np.full(20, 4, dtype=np.int64)
-    assert sc._run_permutations(sizes, 40, 80, 30, 28.0, 50, 3)["backend"] == "numba"
+    assert sc._run_permutations(sizes, 40, 30, 28.0, 50, 3)["backend"] == "numba"
 
 
 def test_permutation_p_uses_the_finite_monte_carlo_form():
     """``p = (b+1)/(B+1)``: never zero, always an exact multiple of ``1/(B+1)``."""
     sizes = np.full(30, 4, dtype=np.int64)
     n_permutations = 199
-    block = sc._run_permutations(sizes, 60, 120, 120, 44.0, n_permutations, 1)
+    block = sc._run_permutations(sizes, 60, 120, 44.0, n_permutations, 1)
     assert block["completed"] == n_permutations
     assert block["p_raw"] >= 1 / (n_permutations + 1)
     numerator = block["p_raw"] * (n_permutations + 1)
@@ -646,8 +646,8 @@ def test_permutation_two_sided_extremeness_counts_both_tails():
     n_total = 120
     n_male = 60
     expected = float(sc.analytical_moments(sizes, n_male, n_total - n_male).expected)
-    low = sc._run_permutations(sizes, n_male, n_total, 0, expected, 200, 4)
-    high = sc._run_permutations(sizes, n_male, n_total, 2 * round(expected), expected, 200, 4)
+    low = sc._run_permutations(sizes, n_male, 0, expected, 200, 4)
+    high = sc._run_permutations(sizes, n_male, 2 * round(expected), expected, 200, 4)
     assert low["p_raw"] == pytest.approx(high["p_raw"])
 
 
@@ -655,8 +655,9 @@ def test_sampler_size_limit_refuses_cleanly():
     """Beyond the backend's bound, permutations are skipped — analytics survive."""
     backend = "numba" if sc.load_numba_sampler() is not None else "numpy"
     bound = sc._sampler_bound(backend)
-    sizes = np.full(4, 2, dtype=np.int64)
-    block = sc._run_permutations(sizes, 4, bound, 3, 2.0, 10, 0)
+    # Two enormous group sizes reach the bound without allocating a big array.
+    sizes = np.array([bound // 2, bound - bound // 2], dtype=np.int64)
+    block = sc._run_permutations(sizes, 4, 3, 2.0, 10, 0)
     assert block["completed"] == 0
     assert block["p_raw"] is None
     assert block["skip_reason"] == f"sampler_size_limit_{backend}"
@@ -954,6 +955,67 @@ def test_safe_attempt_drops_male_proportion_extrema(tmp_path):
     assert dist is not None
     assert "min" not in dist
     assert "max" not in dist
+
+
+def test_real_imputation_feeds_the_provenance_tally(tmp_path):
+    """The three ``sex_source`` values ``validate`` emits land in the right slots.
+
+    Guards a cross-module coupling the fabricated-frame tests cannot: they
+    supply ``sex_source`` themselves, so they would still pass if ``validate``
+    renamed a provenance — while every real pedigree silently reported zeros.
+
+    The Sibship of six under (1, 2) is built so pedsum's own imputation
+    produces all three: two offspring with input sex, two whose sex is missing
+    and who are each used as exactly one parent role (``imputed_from_missing``),
+    and two whose asserted sex is contradicted by their role
+    (``imputed_from_role``).
+    """
+    rows = [
+        {"id": 1, "sex": 2, "mother": -1, "father": -1},
+        {"id": 2, "sex": 1, "mother": -1, "father": -1},
+        {"id": 3, "sex": 1, "mother": 1, "father": 2},
+        {"id": 4, "sex": 2, "mother": 1, "father": 2},
+        {"id": 5, "sex": -1, "mother": 1, "father": 2},  # used only as a mother
+        {"id": 6, "sex": -1, "mother": 1, "father": 2},  # used only as a father
+        {"id": 7, "sex": 1, "mother": 1, "father": 2},  # asserted M, used as a mother
+        {"id": 8, "sex": 2, "mother": 1, "father": 2},  # asserted F, used as a father
+        {"id": 9, "sex": 1, "mother": -1, "father": -1},
+        {"id": 10, "sex": 2, "mother": -1, "father": -1},
+        {"id": 11, "sex": 1, "mother": -1, "father": -1},
+        {"id": 12, "sex": 2, "mother": -1, "father": -1},
+    ]
+    next_id = 13
+    for mother, father in ((5, 9), (10, 6), (7, 11), (12, 8)):
+        for sex in (1, 2):
+            rows.append({"id": next_id, "sex": sex, "mother": mother, "father": father})
+            next_id += 1
+    ped = write_ped(tmp_path / "mixed_provenance.tsv", rows)
+
+    out_dir = tmp_path / "out"
+    res = _run(
+        [
+            "summarize",
+            "--in",
+            str(ped),
+            "--out",
+            str(out_dir),
+            "--sex-concordance",
+            "--no-effective-size",
+            "--no-inbreeding",
+        ],
+    )
+    assert res.returncode == 0, res.stderr
+    slim = _load_yaml(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]
+    extra = _load_extra(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]
+
+    # Headline admits only the input-sex offspring; the imputed slots stay zero.
+    assert extra["eligible_by_sex_source"] == {"input": 10, "imputed_from_missing": 0, "imputed_from_role": 0}
+    assert slim["n_offspring_eligible"] == 10
+
+    sensitivity = extra["all_resolved"]
+    assert sensitivity["eligible_by_sex_source"] == {"input": 10, "imputed_from_missing": 2, "imputed_from_role": 2}
+    assert sensitivity["n_offspring_eligible"] == 14
+    assert sum(sensitivity["eligible_by_sex_source"].values()) == sensitivity["n_offspring_eligible"]
 
 
 def test_no_input_sex_pedigree_skips_with_its_message(tmp_path):
