@@ -10,7 +10,7 @@ suite.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -48,7 +48,7 @@ def _sex_series(draw: st.DrawFn) -> tuple[str, list[str], list[int]]:
 def test_decode_sex_round_trip(case: tuple) -> None:
     """Decoding valid tokens recovers the original sexes; output is int8 in {-1, 0, 1}."""
     encoding, tokens, expected = case
-    out = _decode_sex(pd.Series(tokens, dtype=object), encoding=encoding)
+    out = _decode_sex(pl.Series(tokens, dtype=pl.String), encoding=encoding)
     assert out.dtype == np.int8
     assert set(np.unique(out)).issubset({-1, 0, 1})
     np.testing.assert_array_equal(out, np.array(expected, dtype=np.int8))
@@ -61,11 +61,11 @@ def test_decode_sex_round_trip(case: tuple) -> None:
 )
 def test_missing_tokens_decode_to_unknown(tokens: list[str], encoding: str) -> None:
     """Every missing token decodes to ``SEX_UNKNOWN`` under any encoding."""
-    out = _decode_sex(pd.Series(tokens, dtype=object), encoding=encoding)
+    out = _decode_sex(pl.Series(tokens, dtype=pl.String), encoding=encoding)
     assert (out == SEX_UNKNOWN).all()
 
 
 def test_decode_sex_case_insensitive() -> None:
     """Word tokens decode the same regardless of case."""
-    out = _decode_sex(pd.Series(["M", "m", "male", "MALE"], dtype=object), encoding="default")
+    out = _decode_sex(pl.Series(["M", "m", "male", "MALE"], dtype=pl.String), encoding="default")
     assert (out == SEX_MALE).all()

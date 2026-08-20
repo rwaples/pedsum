@@ -12,8 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import pandas as pd
-import pytest
+from collections import Counter
+
+import polars as pl
 from conftest import EXAMPLE, write_ped
 from conftest import run_pedsum as _run
 
@@ -70,27 +71,27 @@ def _load_graph(rows, tmp_path):
     return df, _build_pedigree_graph(df)
 
 
-def _skeleton_from_rows(rows, tmp_path, **kwargs) -> pd.DataFrame:
+def _skeleton_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:
     """Build the EPIMIGHT skeleton frame from raw pedigree rows."""
     df, pg = _load_graph(rows, tmp_path)
     return build_epimight_skeleton(df, pg, **kwargs)
 
 
-def _pairs_from_rows(rows, tmp_path, **kwargs) -> pd.DataFrame:
+def _pairs_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:
     """Build the relative-pairs frame from raw pedigree rows."""
     df, pg = _load_graph(rows, tmp_path)
     return build_relative_pairs(df, pg, **kwargs)
 
 
-def _relatives(frame: pd.DataFrame, person_id: str, rel: str) -> int:
+def _relatives(frame: pl.DataFrame, person_id: str, rel: str) -> int:
     """Pull the ``relatives`` count for one (person, relationship_kind) cell."""
-    mask = (frame["person_id"].astype(str) == person_id) & (frame["relationship_kind"] == rel)
-    return int(frame.loc[mask, "relatives"].iloc[0])
+    block = frame.filter((pl.col("person_id").cast(pl.String) == person_id) & (pl.col("relationship_kind") == rel))
+    return int(block["relatives"][0])
 
 
-def _pair_set(pairs: pd.DataFrame, rel: str) -> set[tuple[int, int]]:
+def _pair_set(pairs: pl.DataFrame, rel: str) -> set[tuple[int, int]]:
     """All ``(id1, id2)`` pairs for one relationship kind."""
-    block = pairs[pairs["relationship_kind"] == rel]
+    block = pairs.filter(pl.col("relationship_kind") == rel)
     return {(int(a), int(b)) for a, b in zip(block["id1"], block["id2"], strict=True)}
 
 
@@ -105,22 +106,21 @@ def test_cli_emits_tsv_skeleton(tmp_path):
 
     tsv = out / "pipeline_input.tsv"
     assert tsv.exists()
-    df = pd.read_csv(tsv, sep="\t")
+    df = pl.read_csv(tsv, separator="\t")
     assert list(df.columns) == list(EPIMIGHT_COLUMNS)
     # 200 people × 8 relationship kinds.
     assert len(df) == 200 * len(EPIMIGHT_RELATIONSHIP_ORDER)
-    assert sorted(df["relationship_kind"].unique()) == sorted(EPIMIGHT_RELATIONSHIP_ORDER)
+    assert sorted(df["relationship_kind"].unique().to_list()) == sorted(EPIMIGHT_RELATIONSHIP_ORDER)
     # Phenotype columns are unfillable from a pedigree → all empty.
     for col in PLACEHOLDER_COLUMNS:
-        assert df[col].isna().all(), col
+        assert df[col].is_null().all(), col
     # Structural columns are populated.
-    assert df["born_at_year"].notna().all()
-    assert df["relatives"].notna().all()
+    assert df["born_at_year"].is_not_null().all()
+    assert df["relatives"].is_not_null().all()
 
 
 def test_cli_parquet_opt_in(tmp_path):
     """`--parquet` also writes the native parquet with nullable integer dtypes."""
-    pytest.importorskip("pyarrow")
     out = tmp_path / "out"
     res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--parquet"])
     assert res.returncode == 0, res.stderr
@@ -128,12 +128,12 @@ def test_cli_parquet_opt_in(tmp_path):
     assert (out / "pipeline_input.tsv").exists()
     parquet = out / "pipeline_input.parquet"
     assert parquet.exists()
-    df = pd.read_parquet(parquet)
-    # Placeholder columns keep schema-correct nullable-integer dtype, all <NA>.
-    assert str(df["failure_status"].dtype) == "Int8"
-    assert str(df["relatives_diagnosed"].dtype) == "Int32"
-    assert df["failure_status"].isna().all()
-    assert str(df["relatives"].dtype) == "int32"
+    df = pl.read_parquet(parquet)
+    # Placeholder columns keep schema-correct (nullable) integer dtype, all null.
+    assert df.schema["failure_status"] == pl.Int8
+    assert df.schema["relatives_diagnosed"] == pl.Int32
+    assert df["failure_status"].is_null().all()
+    assert df.schema["relatives"] == pl.Int32
 
 
 def test_unknown_rel_code_exits_rc2(tmp_path):
@@ -149,9 +149,9 @@ def test_cli_disorder_and_rels_subset(tmp_path):
     out = tmp_path / "out"
     res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--rels", "PO,FS", "--disorder", "MDD"])
     assert res.returncode == 0, res.stderr
-    df = pd.read_csv(out / "pipeline_input.tsv", sep="\t")
-    assert df["disorder"].unique().tolist() == ["MDD"]
-    assert sorted(df["relationship_kind"].unique()) == ["FS", "PO"]
+    df = pl.read_csv(out / "pipeline_input.tsv", separator="\t")
+    assert df["disorder"].unique().to_list() == ["MDD"]
+    assert sorted(df["relationship_kind"].unique().to_list()) == ["FS", "PO"]
 
 
 # --- exact relationship counts ----------------------------------------------
@@ -184,17 +184,21 @@ def test_relationship_counts_exact(tmp_path):
     assert _relatives(frame, "8", "1G") == 2
 
     # No half sibs anywhere in this pedigree.
-    assert frame.loc[frame["relationship_kind"].isin(["HS", "mHS", "pHS"]), "relatives"].sum() == 0
+    assert frame.filter(pl.col("relationship_kind").is_in(["HS", "mHS", "pHS"]))["relatives"].sum() == 0
 
 
 def test_born_at_year_derived_from_generation(tmp_path):
     """Without a birth-year column, born_at_year = base_year + generation."""
     frame = _skeleton_from_rows(_PEDIGREE, tmp_path, base_year=2000)
-    fs = frame[frame["relationship_kind"] == "FS"].set_index("person_id")
+    fs = frame.filter(pl.col("relationship_kind") == "FS")
+
+    def _born(pid: str) -> int:
+        return int(fs.filter(pl.col("person_id") == pid)["born_at_year"][0])
+
     # Founders (gen 0) → 2000; gen1 (5,6) → 2001; gen2 (7,8) → 2002.
-    assert int(fs.loc["1", "born_at_year"]) == 2000
-    assert int(fs.loc["5", "born_at_year"]) == 2001
-    assert int(fs.loc["7", "born_at_year"]) == 2002
+    assert _born("1") == 2000
+    assert _born("5") == 2001
+    assert _born("7") == 2002
 
 
 def test_drop_founders_removes_generation_zero(tmp_path):
@@ -202,10 +206,10 @@ def test_drop_founders_removes_generation_zero(tmp_path):
     full = _skeleton_from_rows(_PEDIGREE, tmp_path)
     dropped = _skeleton_from_rows(_PEDIGREE, tmp_path, drop_founders=True)
     founders = {"1", "2", "3", "4"}
-    assert founders.issubset(set(full["person_id"].astype(str)))
-    assert founders.isdisjoint(set(dropped["person_id"].astype(str)))
+    assert founders.issubset(set(full["person_id"].cast(pl.String).to_list()))
+    assert founders.isdisjoint(set(dropped["person_id"].cast(pl.String).to_list()))
     # Non-founders survive (e.g. the cousins).
-    assert {"5", "6", "7", "8"}.issubset(set(dropped["person_id"].astype(str)))
+    assert {"5", "6", "7", "8"}.issubset(set(dropped["person_id"].cast(pl.String).to_list()))
 
 
 # --- relative pairs ----------------------------------------------------------
@@ -219,20 +223,19 @@ def test_pairs_only_under_flag(tmp_path):
 
     out2 = tmp_path / "out2"
     assert _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out2), "--pairs"]).returncode == 0
-    pairs = pd.read_csv(out2 / "relative_pairs.tsv", sep="\t")
+    pairs = pl.read_csv(out2 / "relative_pairs.tsv", separator="\t")
     assert list(pairs.columns) == list(RELATIVE_PAIR_COLUMNS)
     assert len(pairs) > 0
 
 
 def test_pairs_parquet_dtypes(tmp_path):
     """`--pairs --parquet` writes relative_pairs.parquet with a float kinship column."""
-    pytest.importorskip("pyarrow")
     out = tmp_path / "out"
     res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--pairs", "--parquet"])
     assert res.returncode == 0, res.stderr
-    pairs = pd.read_parquet(out / "relative_pairs.parquet")
-    assert str(pairs["kinship"].dtype) == "float64"
-    assert set(pairs["relationship_kind"]) <= set(EPIMIGHT_RELATIONSHIP_ORDER)
+    pairs = pl.read_parquet(out / "relative_pairs.parquet")
+    assert pairs.schema["kinship"] == pl.Float64
+    assert set(pairs["relationship_kind"].to_list()) <= set(EPIMIGHT_RELATIONSHIP_ORDER)
 
 
 def test_pairs_reconcile_with_skeleton_counts(tmp_path):
@@ -241,7 +244,7 @@ def test_pairs_reconcile_with_skeleton_counts(tmp_path):
     pairs = _pairs_from_rows(_PEDIGREE, tmp_path)
     for rel in EPIMIGHT_RELATIONSHIP_ORDER:
         n_pairs = int((pairs["relationship_kind"] == rel).sum())
-        rel_sum = int(skeleton.loc[skeleton["relationship_kind"] == rel, "relatives"].sum())
+        rel_sum = int(skeleton.filter(pl.col("relationship_kind") == rel)["relatives"].sum())
         expected = n_pairs if rel in _DIRECTIONAL else 2 * n_pairs
         assert rel_sum == expected, rel
 
@@ -253,7 +256,7 @@ def test_pairs_exact_and_orientation(tmp_path):
     # Symmetric kinds are canonicalized id1 < id2.
     assert _pair_set(pairs, "FS") == {(5, 6)}
     assert _pair_set(pairs, "1C") == {(7, 8)}
-    sym = pairs[~pairs["relationship_kind"].isin(_DIRECTIONAL)]
+    sym = pairs.filter(~pl.col("relationship_kind").is_in(list(_DIRECTIONAL)))
     assert (sym["id1"] < sym["id2"]).all()
 
     # Directional kinds put the younger member first.
@@ -265,7 +268,7 @@ def test_pairs_exact_and_orientation(tmp_path):
     assert _pair_set(pairs, "HS") == set()
 
     # Kinship is the per-kind coefficient.
-    by_kind = pairs.groupby("relationship_kind")["kinship"].first()
+    by_kind = dict(pairs.group_by("relationship_kind").agg(pl.col("kinship").first()).iter_rows())
     assert by_kind["FS"] == 0.25
     assert by_kind["Av"] == 0.125
     assert by_kind["1C"] == 0.0625
@@ -283,15 +286,22 @@ def test_emitted_outputs_consistent_per_person(tmp_path):
     assert res.returncode == 0, res.stderr
 
     # Read ids as strings so the skeleton's person_id and the pairs' id1/id2 align.
-    skeleton = pd.read_csv(out / "pipeline_input.tsv", sep="\t", dtype={"person_id": str})
-    pairs = pd.read_csv(out / "relative_pairs.tsv", sep="\t", dtype={"id1": str, "id2": str})
+    skeleton = pl.read_csv(out / "pipeline_input.tsv", separator="\t", schema_overrides={"person_id": pl.String})
+    pairs = pl.read_csv(
+        out / "relative_pairs.tsv", separator="\t", schema_overrides={"id1": pl.String, "id2": pl.String}
+    )
 
     for rel in EPIMIGHT_RELATIONSHIP_ORDER:
-        counts = skeleton[skeleton["relationship_kind"] == rel].set_index("person_id")["relatives"]
-        block = pairs[pairs["relationship_kind"] == rel]
-        charged = block["id1"] if rel in _DIRECTIONAL else pd.concat([block["id1"], block["id2"]])
-        from_pairs = charged.value_counts().reindex(counts.index, fill_value=0)
-        assert (counts.to_numpy() == from_pairs.to_numpy()).all(), rel
+        block_sk = skeleton.filter(pl.col("relationship_kind") == rel)
+        block_pairs = pairs.filter(pl.col("relationship_kind") == rel)
+        charged = (
+            block_pairs["id1"].to_list()
+            if rel in _DIRECTIONAL
+            else [*block_pairs["id1"].to_list(), *block_pairs["id2"].to_list()]
+        )
+        from_pairs = Counter(charged)
+        for person, relatives in zip(block_sk["person_id"], block_sk["relatives"], strict=True):
+            assert from_pairs.get(person, 0) == relatives, (rel, person)
 
 
 # --- exact (pedigree) kinship ------------------------------------------------
@@ -303,9 +313,9 @@ def test_exact_kinship_is_inbreeding_aware(tmp_path):
     assert "kinship_exact" in pairs.columns
     assert (pairs["kinship"] == 0.25).all()  # nominal is constant per kind
 
-    inbred = pairs[(pairs["id1"] == 5) & (pairs["id2"] == 6)].iloc[0]
+    inbred = pairs.filter((pl.col("id1") == 5) & (pl.col("id2") == 6)).row(0, named=True)
     assert inbred["kinship_exact"] == 0.375  # inbred full sibs (parents are sibs)
-    outbred = pairs[(pairs["id1"] == 3) & (pairs["id2"] == 4)].iloc[0]
+    outbred = pairs.filter((pl.col("id1") == 3) & (pl.col("id2") == 4)).row(0, named=True)
     assert outbred["kinship_exact"] == 0.25  # unrelated-founder parents
 
 
@@ -314,12 +324,12 @@ def test_cli_exact_kinship_adds_column(tmp_path):
     out = tmp_path / "out"
     res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--pairs", "--exact-kinship"])
     assert res.returncode == 0, res.stderr
-    with_exact = pd.read_csv(out / "relative_pairs.tsv", sep="\t")
+    with_exact = pl.read_csv(out / "relative_pairs.tsv", separator="\t")
     assert list(with_exact.columns) == [*RELATIVE_PAIR_COLUMNS, "kinship_exact"]
 
     out2 = tmp_path / "out2"
     assert _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out2), "--pairs"]).returncode == 0
-    without = pd.read_csv(out2 / "relative_pairs.tsv", sep="\t")
+    without = pl.read_csv(out2 / "relative_pairs.tsv", separator="\t")
     assert list(without.columns) == list(RELATIVE_PAIR_COLUMNS)
 
 

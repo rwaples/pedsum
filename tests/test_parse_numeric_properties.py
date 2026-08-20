@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -34,7 +34,7 @@ def missing_token_variants(draw: st.DrawFn) -> str:
 @given(st.lists(missing_token_variants() | st.none(), min_size=1, max_size=50))
 def test_missing_parent_tokens_parse_to_sentinel(tokens: list[str | None]) -> None:
     """Recognized parent missing tokens and null cells parse to ``-1``."""
-    parsed = _as_parent_int_col(pd.Series(tokens, dtype=object), "mother")
+    parsed = _as_parent_int_col(pl.Series(tokens, dtype=pl.String), "mother")
     assert parsed.dtype == np.int64
     assert parsed.tolist() == [-1] * len(tokens)
 
@@ -43,15 +43,15 @@ def test_missing_parent_tokens_parse_to_sentinel(tokens: list[str | None]) -> No
 def test_replace_missing_with_uses_requested_sentinel(tokens: list[str | None]) -> None:
     """Missing-token normalization uses the caller-provided sentinel exactly."""
     sentinel = "<missing>"
-    cleaned = _replace_missing_with(pd.Series(tokens, dtype=object), _PARENT_MISSING_TOKENS, sentinel)
-    assert cleaned.tolist() == [sentinel] * len(tokens)
+    cleaned = _replace_missing_with(pl.Series(tokens, dtype=pl.String), _PARENT_MISSING_TOKENS, sentinel)
+    assert cleaned.to_list() == [sentinel] * len(tokens)
 
 
 @given(st.lists(st.integers(min_value=0, max_value=1_000_000), min_size=1, max_size=100))
 def test_parent_int_parser_preserves_integer_tokens(values: list[int]) -> None:
     """Valid integer parent IDs round-trip when zero is not treated as missing."""
     tokens = [f"  {value}  " for value in values]
-    parsed = _as_parent_int_col(pd.Series(tokens), "father", zero_as_missing=False)
+    parsed = _as_parent_int_col(pl.Series(tokens, dtype=pl.String), "father", zero_as_missing=False)
     assert parsed.tolist() == values
 
 
@@ -59,7 +59,7 @@ def test_parent_int_parser_preserves_integer_tokens(values: list[int]) -> None:
 def test_parent_int_parser_can_treat_zero_as_missing(values: list[int]) -> None:
     """PLINK-style zero-as-missing maps only literal zero to ``-1``."""
     tokens = [str(value) for value in values]
-    parsed = _as_parent_int_col(pd.Series(tokens), "father", zero_as_missing=True)
+    parsed = _as_parent_int_col(pl.Series(tokens, dtype=pl.String), "father", zero_as_missing=True)
     expected = [-1 if value == 0 else value for value in values]
     assert parsed.tolist() == expected
 
@@ -76,9 +76,9 @@ def test_parent_int_parser_can_treat_zero_as_missing(values: list[int]) -> None:
 )
 def test_birth_year_parser_matches_int32_cast(tokens: list[str]) -> None:
     """Birth-year parsing accepts numeric tokens and follows NumPy int32 casting."""
-    series = pd.Series(tokens)
+    series = pl.Series(tokens, dtype=pl.String)
     parsed = _as_birth_year_col(series, "birth_year")
-    expected = pd.to_numeric(series, errors="raise").to_numpy(dtype=np.float64).astype(np.int32)
+    expected = np.array([float(t) for t in tokens], dtype=np.float64).astype(np.int32)
     assert parsed.dtype == np.int32
     assert np.array_equal(parsed, expected)
 
@@ -87,11 +87,11 @@ def test_birth_year_parser_matches_int32_cast(tokens: list[str]) -> None:
 def test_parent_int_parser_rejects_non_numeric_tokens(token: str) -> None:
     """Parent-ID parsing rejects non-numeric non-missing tokens."""
     with pytest.raises(PedigreeError):
-        _as_parent_int_col(pd.Series([token]), "mother")
+        _as_parent_int_col(pl.Series([token], dtype=pl.String), "mother")
 
 
 @given(st.sampled_from(_INVALID_NUMERIC_TOKENS))
 def test_birth_year_parser_rejects_non_numeric_tokens(token: str) -> None:
     """Birth-year parsing rejects non-numeric non-missing tokens."""
     with pytest.raises(PedigreeError):
-        _as_birth_year_col(pd.Series([token]), "birth_year")
+        _as_birth_year_col(pl.Series([token], dtype=pl.String), "birth_year")

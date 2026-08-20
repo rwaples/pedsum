@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 
-import pandas as pd
+import polars as pl
 import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
@@ -238,9 +238,9 @@ def test_birth_year_fixed_output_includes_topological_reorder(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
-        fixed = pd.read_csv(fh, sep="\t", dtype=str)
+    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rb") as fh:
+        fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     assert "birth_year" in fixed.columns
-    ids_in_order = fixed["id"].astype(int).tolist()
+    ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(1) < ids_in_order.index(3)
     assert ids_in_order.index(2) < ids_in_order.index(3)

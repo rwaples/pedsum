@@ -9,11 +9,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
-from pedsum.parse import _read_pedigree_table
+from pedsum.parse import _as_int_col, _read_pedigree_table
+from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
 from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
@@ -159,7 +160,7 @@ def _build_pedigree_data(
 
 
 def _build_individual_data(
-    idf: pd.DataFrame,
+    idf: pl.DataFrame,
     path: Path,
     cmd: str,
     include_inbreeding: bool,
@@ -427,12 +428,32 @@ def _write_yaml(data: dict, path: Path) -> None:
         yaml.safe_dump(_round_floats(data), fh, sort_keys=False, default_flow_style=False)
 
 
+def _render_cell(value: object) -> str | None:
+    """One long-TSV cell, rendered exactly as the historical pandas writer did.
+
+    pandas ``to_csv`` applied ``str()`` to every object-column cell and wrote
+    ``None`` as an empty field. Empty cells are kept as nulls (not ``""``) so
+    the polars CSV writer emits a bare empty field instead of a quoted ``""``.
+    """
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
 def _write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(_flatten_long(_round_floats(data)))
-    df = pd.DataFrame(rows, columns=["section", "key", "subkey", "value"])
-    df.to_csv(path, sep="\t", index=False)
+    df = pl.DataFrame(
+        {
+            "section": [r[0] for r in rows],
+            "key": [r[1] for r in rows],
+            "subkey": [_render_cell(r[2]) for r in rows],
+            "value": [_render_cell(r[3]) for r in rows],
+        },
+        schema={"section": pl.String, "key": pl.String, "subkey": pl.String, "value": pl.String},
+    )
+    df.write_csv(path, separator="\t")
 
 
 def _prepare_out_dir(path: Path) -> int:
@@ -450,12 +471,28 @@ def _prepare_out_dir(path: Path) -> int:
     return 0
 
 
-def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
+def _csv_ready(df: pl.DataFrame) -> pl.DataFrame:
+    """Pre-format columns whose polars CSV rendering differs from pandas'.
+
+    Boolean columns render as ``True`` / ``False`` (polars writes lowercase);
+    nulls stay null (written as empty fields either way).
+    """
+    bool_cols = [name for name, dtype in df.schema.items() if dtype == pl.Boolean]
+    if not bool_cols:
+        return df
+    return df.with_columns(
+        pl.when(pl.col(c).is_null()).then(None).when(pl.col(c)).then(pl.lit("True")).otherwise(pl.lit("False")).alias(c)
+        for c in bool_cols
+    )
+
+
+def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
     """Write ``df`` as gzipped TSV; uses pigz when available, else gzip level 1.
 
     Output is standard .gz either way.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    df = _csv_ready(df)
     pigz = shutil.which("pigz")
     if pigz is not None:
         with (
@@ -467,19 +504,19 @@ def _to_csv_gz(df: pd.DataFrame, out_path: Path) -> None:
             ) as proc,
         ):
             assert proc.stdin is not None  # opened with stdin=PIPE above
-            df.to_csv(proc.stdin, sep="\t", index=False)
+            df.write_csv(proc.stdin, separator="\t")
             proc.stdin.close()
             if proc.wait() != 0:
                 raise PedigreeError(f"pigz exited with status {proc.returncode}")
         return
     with gzip.open(out_path, "wb", compresslevel=1) as fh:
-        df.to_csv(fh, sep="\t", index=False)  # ty: ignore[no-matching-overload]
+        df.write_csv(fh, separator="\t")  # ty: ignore[invalid-argument-type]
 
 
 def _write_annotated_tsv(
     in_path: Path,
     args: argparse.Namespace,
-    idf: pd.DataFrame,
+    idf: pl.DataFrame,
     out_path: Path,
 ) -> None:
     """Re-read input pedigree, append derived columns, write annotated tsv.gz.
@@ -498,24 +535,23 @@ def _write_annotated_tsv(
     }
     rename_map = {k: v for k, v in rename_map.items() if k != v}
     if rename_map:
-        raw = raw.rename(columns=rename_map)
+        raw = raw.rename(rename_map)
 
-    raw_ids = pd.to_numeric(raw["id"], errors="raise").astype(np.int64).to_numpy()
+    raw_ids = _as_int_col(raw["id"], "id")
     idf_ids = idf["id"].to_numpy()
     if not np.array_equal(raw_ids, idf_ids):
         # ``load_and_validate`` may have reordered rows into topological
         # order when the input was not already sorted parents-before-
         # children.  Realign the raw read to ``idf`` order by ID.
-        raw_id_to_row = pd.Series(np.arange(len(raw_ids), dtype=np.int64), index=raw_ids)
-        perm = raw_id_to_row.reindex(idf_ids).to_numpy()
-        if np.isnan(perm).any() or len(perm) != len(idf_ids):
+        perm = IdIndex(raw_ids).get_indexer(idf_ids)
+        if (perm == -1).any() or len(perm) != len(idf_ids):
             # Truly mismatched (rows added or dropped between input and
             # idf) — not a benign reorder.
             raise PedigreeError("internal: row order mismatch between input and individual table")
-        raw = raw.iloc[perm.astype(np.int64)].reset_index(drop=True)
+        raw = raw[perm]
 
     canonical = ("id", "sex", "mother", "father")
-    extras = raw.drop(columns=[c for c in canonical if c in raw.columns]).reset_index(drop=True)
+    extras = raw.drop([c for c in canonical if c in raw.columns])
 
     derived_cols = set(idf.columns) - set(canonical)
     collisions = [c for c in extras.columns if c in derived_cols]
@@ -525,20 +561,20 @@ def _write_annotated_tsv(
     # regenerated below — instead of parking it under an ``_input`` suffix.
     reserved = [c for c in collisions if c in _RESERVED_PROVENANCE_COLS]
     if reserved:
-        extras = extras.drop(columns=reserved)
+        extras = extras.drop(reserved)
         logger.info("regenerated pedsum provenance column(s) %s; input copy dropped", reserved)
 
     user_collisions = [c for c in collisions if c not in _RESERVED_PROVENANCE_COLS]
     if user_collisions:
         new_names = {c: f"{c}_input" for c in user_collisions}
-        extras = extras.rename(columns=new_names)
+        extras = extras.rename(new_names)
         logger.warning(
             "input columns %s collide with derived columns; preserved as %s",
             user_collisions,
             [new_names[c] for c in user_collisions],
         )
 
-    annotated = pd.concat([idf.reset_index(drop=True), extras], axis=1)
+    annotated = pl.concat([idf, extras], how="horizontal")
     _to_csv_gz(annotated, out_path)
 
 
@@ -576,17 +612,18 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
 def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
     """Tab-separated log: one row per finding (check / id / row / detail)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    rows = [
+    # Missing id/row are nulls (not "") so the CSV writer emits a bare empty
+    # field; polars quotes explicit empty strings as "".
+    df = pl.DataFrame(
         {
-            "check": f.check,
-            "id": "" if f.id is None else f.id,
-            "row": "" if f.row is None else f.row,
-            "detail": f.detail,
-        }
-        for f in findings
-    ]
-    df = pd.DataFrame(rows, columns=["check", "id", "row", "detail"])
-    df.to_csv(out_path, sep="\t", index=False)
+            "check": [f.check for f in findings],
+            "id": [None if f.id is None else str(f.id) for f in findings],
+            "row": [None if f.row is None else str(f.row) for f in findings],
+            "detail": [f.detail for f in findings],
+        },
+        schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String},
+    )
+    df.write_csv(out_path, separator="\t")
 
 
 def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path) -> None:
@@ -599,19 +636,26 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     seen: set[tuple[int, str, int]] = set()
-    rows = []
+    rows: list[tuple[int, str, int]] = []
     for fid, check, rnd in dropped:
         if (fid, check, rnd) not in seen:
             seen.add((fid, check, rnd))
-            rows.append({"id": fid, "check": check, "round": rnd})
-    df = pd.DataFrame(rows, columns=["id", "check", "round"])
-    df.to_csv(out_path, sep="\t", index=False)
+            rows.append((fid, check, rnd))
+    df = pl.DataFrame(
+        {
+            "id": [r[0] for r in rows],
+            "check": [r[1] for r in rows],
+            "round": [r[2] for r in rows],
+        },
+        schema={"id": pl.Int64, "check": pl.String, "round": pl.Int64},
+    )
+    df.write_csv(out_path, separator="\t")
 
 
 def _build_added_founders(
     mothers: np.ndarray,
     fathers: np.ndarray,
-    id_index: pd.Index,
+    id_index: IdIndex,
     no_sex_check: bool,
 ) -> list[dict]:
     """Synthesize founder rows for missing parent IDs, sorted by ID."""
@@ -654,7 +698,7 @@ def _build_added_founders(
 
 
 def _write_validate_tsv_gz(
-    df_raw: pd.DataFrame,
+    df_raw: pl.DataFrame,
     added_founders: list[dict],
     id_col: str,
     sex_col: str,
@@ -664,12 +708,16 @@ def _write_validate_tsv_gz(
 ) -> None:
     """Write input pedigree (gzipped TSV), with new founder rows prepended at top."""
     if added_founders:
-        new_rows = pd.DataFrame({col: [""] * len(added_founders) for col in df_raw.columns})
-        new_rows[id_col] = [str(f["id"]) for f in added_founders]
-        new_rows[sex_col] = [f["sex"] for f in added_founders]
-        new_rows[mother_col] = ["-1"] * len(added_founders)
-        new_rows[father_col] = ["-1"] * len(added_founders)
-        out_df = pd.concat([new_rows, df_raw.reset_index(drop=True)], ignore_index=True)
+        n_new = len(added_founders)
+        # Filler cells are nulls (not "") so the CSV writer emits bare empty
+        # fields; polars quotes explicit empty strings as "".
+        data: dict[str, list[str | None]] = {col: [None] * n_new for col in df_raw.columns}
+        data[id_col] = [str(f["id"]) for f in added_founders]
+        data[sex_col] = [f["sex"] for f in added_founders]
+        data[mother_col] = ["-1"] * n_new
+        data[father_col] = ["-1"] * n_new
+        new_rows = pl.DataFrame(data, schema=dict.fromkeys(df_raw.columns, pl.String))
+        out_df = pl.concat([new_rows, df_raw.cast(pl.String)])
     else:
         out_df = df_raw
     _to_csv_gz(out_df, out_path)

@@ -212,7 +212,7 @@ def test_summarize_missing_sex_with_flag_and_opt_outs(tmp_path):
     """``--allow-missing-sex --no-inbreeding --no-effective-size`` lets summarize finish on a mixed pedigree."""
     import gzip
 
-    import pandas as pd
+    import polars as pl
 
     ped = _mixed_pedigree(tmp_path / "ped.tsv")
     out_dir = tmp_path / "out"
@@ -230,10 +230,10 @@ def test_summarize_missing_sex_with_flag_and_opt_outs(tmp_path):
     )
     assert res.returncode == 0, res.stderr
     # Annotated TSV should contain both originally-unsexed rows with sex=-1.
-    with gzip.open(out_dir / "annotated.tsv.gz", "rt") as fh:
-        ann = pd.read_csv(fh, sep="\t")
+    with gzip.open(out_dir / "annotated.tsv.gz", "rb") as fh:
+        ann = pl.read_csv(fh.read(), separator="\t")
     for orig_id in (7, 8):
-        row = ann.loc[ann["id"] == orig_id].iloc[0]
+        row = ann.filter(pl.col("id") == orig_id).row(0, named=True)
         assert int(row["sex"]) == -1, f"id={orig_id} sex={row['sex']}"
 
 

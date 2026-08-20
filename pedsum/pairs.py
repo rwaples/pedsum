@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
-import pandas as pd
 from pedigree_graph import REL_REGISTRY, PedigreeGraph
+
+from pedsum.pedigree_ops import IdIndex
+
+if TYPE_CHECKING:
+    import polars as pl
 
 
 def _augment_pair_counts(named: dict[str, int]) -> dict:
@@ -22,7 +28,7 @@ def _augment_pair_counts(named: dict[str, int]) -> dict:
     return out
 
 
-def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = None) -> dict:
+def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """Sparse matrix enumerator that retains pair lists for richer summaries.
 
     Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``;
@@ -32,7 +38,7 @@ def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = 
 
     Assumes every non-``-1`` parent ID appears in ``df['id']``; this is
     enforced by ``load_and_validate``'s ``parent_refs_present_*`` checks
-    and lets the internal ID-compaction ``reindex`` skip NaN handling.
+    and lets the internal ID-compaction remap skip missing-ID handling.
 
     When ``pg`` is supplied the wrapper reuses it instead of building a
     fresh compacted PedigreeGraph; saves one compaction pass when the
@@ -48,7 +54,7 @@ def _count_pairs_matrix_with_lists(df: pd.DataFrame, pg: PedigreeGraph | None = 
     return out
 
 
-def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
+def _build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     """Compact arbitrary IDs to ``0..n-1`` and build a full ``PedigreeGraph``.
 
     Threads ``sex`` through to ``PedigreeGraph.from_arrays`` so downstream
@@ -76,14 +82,10 @@ def _build_pedigree_graph(df: pd.DataFrame) -> PedigreeGraph:
     ids = df["id"].to_numpy()
     n = len(ids)
     new_ids = np.arange(n, dtype=np.int64)
-    id_to_compact = pd.Series(new_ids, index=ids)
+    id_index = IdIndex(ids)
 
     def _remap(parents: np.ndarray) -> np.ndarray:
-        return np.where(
-            parents == -1,
-            -1,
-            id_to_compact.reindex(parents).to_numpy(),
-        ).astype(np.int64)
+        return np.where(parents == -1, -1, id_index.get_indexer(parents)).astype(np.int64)
 
     birth_year = df["birth_year"].to_numpy().astype(np.int32) if "birth_year" in df.columns else None
     return PedigreeGraph.from_arrays(

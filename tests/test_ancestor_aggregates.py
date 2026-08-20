@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from pedigree_summary import (
     SEX_FEMALE,
@@ -21,8 +21,8 @@ from pedigree_summary import (
 )
 
 
-def _individual_df() -> pd.DataFrame:
-    return pd.DataFrame(
+def _individual_df() -> pl.DataFrame:
+    return pl.DataFrame(
         {
             "id": [1, 2, 3],
             "sex": [SEX_MALE, SEX_FEMALE, SEX_MALE],

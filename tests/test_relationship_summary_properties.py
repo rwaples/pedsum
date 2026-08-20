@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -12,7 +12,7 @@ from pedigree_graph import REL_REGISTRY
 from pedsum.sections import compute_relationship_summary
 
 PairLists = dict[str, tuple[np.ndarray, np.ndarray]]
-RelationshipInput = tuple[pd.DataFrame, PairLists]
+RelationshipInput = tuple[pl.DataFrame, PairLists]
 
 _CODE_BY_DEGREE = {
     degree: next(code for code, rel in REL_REGISTRY.items() if rel.degree == degree) for degree in range(1, 6)
@@ -24,7 +24,7 @@ def relationship_inputs(draw: st.DrawFn) -> RelationshipInput:
     """Generate row-index pair lists, including duplicates, reversals, and self-pairs."""
     n = draw(st.integers(min_value=0, max_value=25))
     depths = draw(st.lists(st.integers(min_value=0, max_value=5), min_size=n, max_size=n))
-    df = pd.DataFrame({"ped_depth": np.array(depths, dtype=np.int32)})
+    df = pl.DataFrame({"ped_depth": np.array(depths, dtype=np.int32)})
     if n == 0:
         return df, {}
 
@@ -69,7 +69,7 @@ def _closest_pair_degrees(pair_lists: PairLists) -> dict[tuple[int, int], int]:
 @given(st.lists(st.integers(min_value=0, max_value=5), max_size=25))
 def test_relationship_summary_skip_branch_uses_individual_pair_name(depths: list[int]) -> None:
     """Skipped summaries still report the canonical Individual Pair denominator."""
-    df = pd.DataFrame({"ped_depth": np.array(depths, dtype=np.int32)})
+    df = pl.DataFrame({"ped_depth": np.array(depths, dtype=np.int32)})
     summary = compute_relationship_summary(df, None)
     assert summary["computed"] is False
     assert "n_possible_pairs" not in summary

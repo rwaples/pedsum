@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
 from pedsum.epimight import (
@@ -25,7 +25,7 @@ from pedsum.epimight import (
 )
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
-from pedsum.pedigree_ops import _compute_depth_unordered, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
 from pedsum.report import (
     SAFE_MIN_CELL,
     _apply_safe_attempt,
@@ -162,7 +162,7 @@ def _positive_int(v: str) -> int:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = _FullHelpParser(
         prog="pedigree_summary.py",
-        description=("Pedigree summary CLI. Depends on numpy, scipy, pandas, pyyaml, and pedigree-graph."),
+        description=("Pedigree summary CLI. Depends on numpy, scipy, polars, pyyaml, and pedigree-graph."),
     )
     parser.add_argument(
         "--version",
@@ -503,7 +503,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="also write the parquet form of each emitted table (pipeline_input "
         "and, under --pairs, relative_pairs), the format EPIMIGHT's R Pipeline "
-        "reads natively (requires pyarrow).",
+        "reads natively.",
     )
     _add_format_args(p_epi)
     _add_logging_args(p_epi)
@@ -669,9 +669,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     # summary function runs — six callers read it.
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
-        df["ped_depth"] = np.asarray(pg.generation, dtype=np.int32)
+        df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.generation, dtype=np.int32)))
 
-    id_index = pd.Index(df["id"].to_numpy())
+    id_index = IdIndex(df["id"].to_numpy())
 
     with _timed("size+structure"):
         size, comp_labels = compute_size_structure(df, children_csr)
@@ -760,7 +760,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             sex_source,
         )
         founder_summary, n_founder_anc = compute_founder_summary(idf)
-        idf["n_founder_ancestors"] = n_founder_anc
+        idf = idf.with_columns(pl.Series("n_founder_ancestors", n_founder_anc))
 
     with _timed("aggregate pedigree sections"):
         aggregates = compute_aggregate_sections(
@@ -842,13 +842,12 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
     added_founders: list[dict] = []
     df_out = ctx.df_raw
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
-        id_index = pd.Index(ctx.ids)
+        id_index = IdIndex(ctx.ids)
         added_founders = _build_added_founders(ctx.mothers, ctx.fathers, id_index, args.no_sex_check)
         # Fold sex imputation into the fixed output so the user's "fixed"
         # file reflects the auto-fix instead of the original blanks.
         sex_imp = ctx.get_imputation()
         if sex_imp is not None:
-            df_out = df_out.copy()
             imputed = sex_imp.imputed_sex
             original_unknown = sex_imp.original_unknown_mask
             overridden = sex_imp.overridden_mask
@@ -856,21 +855,37 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
             # imputation (0.8) and asserted→role overrides (0.9). Rows still
             # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
             # normalise to "-1" so the fixed TSV is self-consistent.
-            sex_col_values = df_out[args.sex_col].astype(object).copy()
             modified = original_unknown | overridden
             unresolved_mask = imputed == SEX_UNKNOWN
-            sex_col_values.loc[modified & (imputed == SEX_FEMALE)] = "F"
-            sex_col_values.loc[modified & (imputed == SEX_MALE)] = "M"
-            sex_col_values.loc[unresolved_mask] = "-1"
-            df_out[args.sex_col] = sex_col_values
+            # Priority mirrors the historical sequential assignment (F, then M,
+            # then unresolved last): the first matching branch wins, so
+            # unresolved is checked first.
+            df_out = (
+                df_out.with_columns(
+                    pl.Series("__to_f", modified & (imputed == SEX_FEMALE)),
+                    pl.Series("__to_m", modified & (imputed == SEX_MALE)),
+                    pl.Series("__unres", unresolved_mask),
+                )
+                .with_columns(
+                    pl.when(pl.col("__unres"))
+                    .then(pl.lit("-1"))
+                    .when(pl.col("__to_m"))
+                    .then(pl.lit("M"))
+                    .when(pl.col("__to_f"))
+                    .then(pl.lit("F"))
+                    .otherwise(pl.col(args.sex_col))
+                    .alias(args.sex_col)
+                )
+                .drop("__to_f", "__to_m", "__unres")
+            )
             if sex_imp.n_imputed > 0:
                 logger.info("validate: imputed sex for %d row(s) from parent role", int(sex_imp.n_imputed))
             n_normalised = int(unresolved_mask.sum())
             if n_normalised > 0:
                 logger.info("validate: normalised %d unresolved-sex row(s) to -1 in fixed output", n_normalised)
-            # Stamp sex_source BEFORE the topological reorder so pandas reorders
-            # the column along with the rest.
-            df_out["sex_source"] = sex_imp.sex_source
+            # Stamp sex_source BEFORE the topological reorder so the column is
+            # reordered along with the rest.
+            df_out = df_out.with_columns(pl.Series("sex_source", sex_imp.sex_source.astype(str)))
         # Reorder so the fixed file is parents-before-children and feeds back
         # into pedsum without further auto-fixes.
         m_row, _ = _parent_rows(ctx.mothers, id_index)
@@ -884,7 +899,7 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
             natural = np.arange(len(order))
             if not np.array_equal(order, natural):
                 logger.info("validate: reordering %d row(s) into topological order", int((order != natural).sum()))
-                df_out = df_out.iloc[order].reset_index(drop=True)
+                df_out = df_out[order]
 
     out_path = out_dir / "validate.tsv.gz"
     _write_validate_tsv_gz(
@@ -999,22 +1014,18 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     return 0 if not findings else 1
 
 
-def _write_epimight_table(frame: pd.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> int:
+def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> int:
     """Write ``frame`` to ``<out_dir>/<stem>.tsv`` (and ``.parquet`` if requested).
 
-    Returns 0 on success, or 2 when ``--parquet`` was asked for but pyarrow is
-    unavailable.
+    Returns 0 on success. (polars writes parquet natively, so ``--parquet``
+    no longer needs pyarrow.)
     """
     tsv_path = out_dir / f"{stem}.tsv"
-    frame.to_csv(tsv_path, sep="\t", index=False)
+    frame.write_csv(tsv_path, separator="\t")
     logger.info("wrote %s (%d rows)", tsv_path, len(frame))
     if parquet:
         parquet_path = out_dir / f"{stem}.parquet"
-        try:
-            frame.to_parquet(parquet_path, index=False)
-        except ImportError as e:
-            logger.error("--parquet requires pyarrow (or fastparquet): %s", e)
-            return 2
+        frame.write_parquet(parquet_path)
         logger.info("wrote %s", parquet_path)
     return 0
 

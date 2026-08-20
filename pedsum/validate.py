@@ -16,7 +16,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.checks import (
@@ -49,7 +49,7 @@ from pedsum.parse import (
     _maybe_warn_csv,
     _read_pedigree_table,
 )
-from pedsum.pedigree_ops import _build_children_csr, _compute_depth_unordered, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _build_children_csr, _compute_depth_unordered, _parent_rows
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -206,7 +206,7 @@ class ValidationContext:
     access. Carries the CLI config a Check needs (column names, flags, bounds).
     """
 
-    df_raw: pd.DataFrame
+    df_raw: pl.DataFrame
     id_col: str
     sex_col: str
     mother_col: str
@@ -233,9 +233,9 @@ class ValidationContext:
     birth_year: np.ndarray | None = None
 
     @cached_property
-    def id_index(self) -> pd.Index:
+    def id_index(self) -> IdIndex:
         """Row lookup over the parsed IDs; built once (IDs are fixed after parse)."""
-        return pd.Index(self.ids)
+        return IdIndex(self.ids)
 
     @cached_property
     def imputation(self) -> _SexImputation:
@@ -713,7 +713,7 @@ def _run_checks(
 
 
 def _build_context_from_df(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     id_col: str,
     sex_col: str,
@@ -817,7 +817,7 @@ def load_and_validate(
     birth_year_max: int | None = None,
     sep: str = "auto",
     no_sex_check: bool = False,
-) -> tuple[pd.DataFrame, sp.csr_matrix | None]:
+) -> tuple[pl.DataFrame, sp.csr_matrix | None]:
     """Load TSV, run all QC fail-fast, return (df, children_csr).
 
     df has columns id, sex (int8), mother, father, sex_source, and
@@ -893,26 +893,26 @@ def load_and_validate(
             n_oo,
             n,
         )
-        out = pd.DataFrame(
+        out = pl.DataFrame(
             {
                 "id": ids[order],
                 "sex": sex[order],
                 "mother": mothers[order],
                 "father": fathers[order],
-                "sex_source": imp.sex_source[order],
+                "sex_source": imp.sex_source[order].astype(str),
             },
         )
         if birth_year is not None:
-            out["birth_year"] = birth_year[order]
-        reordered_index = pd.Index(out["id"].to_numpy())
+            out = out.with_columns(pl.Series("birth_year", birth_year[order]))
+        reordered_index = IdIndex(out["id"].to_numpy())
         m_row, mask_m = _parent_rows(out["mother"].to_numpy(), reordered_index)
         f_row, mask_f = _parent_rows(out["father"].to_numpy(), reordered_index)
     else:
-        out = pd.DataFrame(
-            {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source},
+        out = pl.DataFrame(
+            {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source.astype(str)},
         )
         if birth_year is not None:
-            out["birth_year"] = birth_year
+            out = out.with_columns(pl.Series("birth_year", birth_year))
 
     children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
@@ -973,7 +973,7 @@ def validate_pedigree(
 class ReductionResult:
     """Outcome of `reduce_pedigree`: the reduced frame plus a drop record."""
 
-    df_current: pd.DataFrame
+    df_current: pl.DataFrame
     dropped: list[tuple[int, str, int]]  # one per distinct (id, check, round)
     n_rounds: int  # rounds that actually dropped something
     n_input_rows: int
@@ -1086,9 +1086,15 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
             n_round_cleared,
         )
 
-        df_cur = df_cur[keep].reset_index(drop=True)
-        df_cur.loc[m_hit, mother_col] = "-1"
-        df_cur.loc[f_hit, father_col] = "-1"
+        df_cur = (
+            df_cur.filter(pl.Series(keep))
+            .with_columns(pl.Series("__m_hit", m_hit), pl.Series("__f_hit", f_hit))
+            .with_columns(
+                pl.when(pl.col("__m_hit")).then(pl.lit("-1")).otherwise(pl.col(mother_col)).alias(mother_col),
+                pl.when(pl.col("__f_hit")).then(pl.lit("-1")).otherwise(pl.col(father_col)).alias(father_col),
+            )
+            .drop("__m_hit", "__f_hit")
+        )
         ctx = _build_context_from_df(df_cur, **rebuild_kwargs)
     return ReductionResult(
         df_current=df_cur,

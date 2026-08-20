@@ -3,7 +3,7 @@
 ``_numeric_distribution`` must produce ordered quantiles with the mean inside the
 support and be permutation-invariant; ``_effective_count_from_weights`` must obey
 its closed form ``1 / sum(p^2)`` and the bound ``0 <= Ne <= n_positive``. Inputs
-are bounded, finite numeric arrays so pandas/NumPy reductions can't overflow.
+are bounded, finite numeric arrays so NumPy reductions cannot overflow.
 """
 
 from __future__ import annotations

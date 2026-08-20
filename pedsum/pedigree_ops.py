@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
 
 from pedsum.base import PedigreeError
+
+if TYPE_CHECKING:
+    import polars as pl
 
 
 def _id_list(ids, max_show: int = 5) -> str:
@@ -16,7 +20,46 @@ def _id_list(ids, max_show: int = 5) -> str:
     return ", ".join(str(i) for i in ids[:max_show]) + f", ... ({len(ids)} total)"
 
 
-def _parent_rows(parents: np.ndarray, id_index: pd.Index) -> tuple[np.ndarray, np.ndarray]:
+class IdIndex:
+    """ID → row-position lookup over an int array (argsort + searchsorted).
+
+    Replaces the pandas ``Index.get_indexer`` idiom: ``get_indexer(values)``
+    returns, for each value, the row position of that ID in the original
+    array, or ``-1`` when absent. With duplicate IDs the first occurrence
+    (lowest row) wins — callers that care about duplicates gate on the
+    ``duplicate_ids`` check first.
+    """
+
+    def __init__(self, ids) -> None:
+        """Build the lookup from ``ids`` (any int-convertible 1-D sequence)."""
+        self._ids = np.asarray(ids, dtype=np.int64)
+        self._order = np.argsort(self._ids, kind="stable")
+        self._sorted = self._ids[self._order]
+
+    def __len__(self) -> int:
+        """Number of indexed IDs."""
+        return len(self._ids)
+
+    def to_numpy(self) -> np.ndarray:
+        """Return the original (unsorted) ID array."""
+        return self._ids
+
+    def get_indexer(self, values) -> np.ndarray:
+        """Row position of each value in the original ID array; -1 if absent."""
+        vals = np.asarray(values, dtype=np.int64)
+        out = np.full(vals.shape, -1, dtype=np.int64)
+        n = self._sorted.size
+        if n == 0 or vals.size == 0:
+            return out
+        pos = np.searchsorted(self._sorted, vals)
+        ok = pos < n
+        cand = np.where(ok, pos, 0)
+        match = ok & (self._sorted[cand] == vals)
+        out[match] = self._order[cand[match]]
+        return out
+
+
+def _parent_rows(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:
     """Map parent IDs to row indices; -1 for missing. Returns (row_index, present_mask)."""
     out = np.full(len(parents), -1, dtype=np.int64)
     mask = parents != -1
@@ -25,34 +68,57 @@ def _parent_rows(parents: np.ndarray, id_index: pd.Index) -> tuple[np.ndarray, n
     return out, mask
 
 
-def _full_sib_groups(df: pd.DataFrame) -> tuple[np.ndarray, pd.Series, np.ndarray]:
+def _group_sizes_per_row(keys: np.ndarray) -> np.ndarray:
+    """Size of each row's group, where ``keys`` labels the group of each row.
+
+    Vectorized ``groupby(key).size()`` + per-row lookup: rows sharing a key
+    value all receive that key's total count. ``keys`` may be any 1-D or 2-D
+    (row-wise composite key) integer array.
+    """
+    if keys.ndim == 1:
+        _, inv, counts = np.unique(keys, return_inverse=True, return_counts=True)
+    else:
+        _, inv, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
+    return counts[inv]
+
+
+def _full_sib_groups(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per-row full-sib counts plus underlying mating-pair group sizes.
 
-    Returns (fs_count, fs_groups, both_present) where fs_count[i] is the
-    number of full sibs of row i (0 if either parent is unknown), fs_groups
-    is the groupby-size series indexed by (mother, father), and both_present
-    is the boolean row mask for rows with both parents known.
+    Returns (fs_count, fs_group_sizes, both_present) where fs_count[i] is the
+    number of full sibs of row i (0 if either parent is unknown),
+    fs_group_sizes is the array of distinct (mother, father) group sizes, and
+    both_present is the boolean row mask for rows with both parents known.
     """
     n = len(df)
     fs_count = np.zeros(n, dtype=np.int64)
-    both_present = ((df["mother"] != -1) & (df["father"] != -1)).to_numpy()
+    mothers = df["mother"].to_numpy()
+    fathers = df["father"].to_numpy()
+    both_present = (mothers != -1) & (fathers != -1)
     if not both_present.any():
-        return fs_count, pd.Series(dtype=np.int64), both_present
-    children = df.loc[both_present]
-    fs_groups = children.groupby(["mother", "father"]).size()
-    idx = pd.MultiIndex.from_arrays(
-        [children["mother"].to_numpy(), children["father"].to_numpy()],
-        names=["mother", "father"],
-    )
-    fs_count[np.where(both_present)[0]] = fs_groups.reindex(idx).to_numpy() - 1
-    return fs_count, fs_groups, both_present
+        return fs_count, np.array([], dtype=np.int64), both_present
+    pair_keys = np.column_stack([mothers[both_present], fathers[both_present]])
+    _, inv, counts = np.unique(pair_keys, axis=0, return_inverse=True, return_counts=True)
+    fs_count[np.where(both_present)[0]] = counts[inv] - 1
+    return fs_count, counts, both_present
 
 
-def _grandparent_arrays(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _grandparent_arrays(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return (mm, mf, fm, ff) arrays of grandparent IDs (-1 for unknown)."""
-    parent_lookup = df.set_index("id")[["mother", "father"]]
-    return tuple(
-        df[outer].map(parent_lookup[inner]).fillna(-1).astype(np.int64).to_numpy()
+    id_index = IdIndex(df["id"].to_numpy())
+    mothers = df["mother"].to_numpy()
+    fathers = df["father"].to_numpy()
+    parent_cols = {"mother": mothers, "father": fathers}
+
+    def _lookup(outer: np.ndarray, inner: np.ndarray) -> np.ndarray:
+        rows, present = _parent_rows(outer, id_index)
+        out = np.full(len(outer), -1, dtype=np.int64)
+        hit = present & (rows != -1)
+        out[hit] = inner[rows[hit]]
+        return out
+
+    return tuple(  # ty: ignore[invalid-return-type]
+        _lookup(parent_cols[outer], parent_cols[inner])
         for outer, inner in (
             ("mother", "mother"),
             ("mother", "father"),

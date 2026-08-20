@@ -5,7 +5,7 @@ dependencies:
   - python>=3.13
   - numpy
   - scipy
-  - pandas>=3,<4
+  - polars>=1.43.2,<2
   - pyyaml
   # pedsum itself never imports numba; it is pedigree-graph's compiled
   # dependency, listed here so conda-forge supplies it rather than pip pulling a

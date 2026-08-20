@@ -7,14 +7,14 @@ under the invoked flags. See docs/adr/0003-drop-offending-reduction.md.
 
 from __future__ import annotations
 
-import pandas as pd
+import polars as pl
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
-def _read_manifest(out_dir) -> pd.DataFrame:
+def _read_manifest(out_dir) -> pl.DataFrame:
     """Read ``validate.dropped.tsv`` from an output dir."""
-    return pd.read_csv(out_dir / "validate.dropped.tsv", sep="\t")
+    return pl.read_csv(out_dir / "validate.dropped.tsv", separator="\t")
 
 
 def _role_conflict_pedigree(path):
@@ -39,9 +39,9 @@ def test_drop_role_conflict_reduces_and_passes(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 1, r.stderr  # exit 1 because something was dropped
     manifest = _read_manifest(out)
-    assert manifest["id"].tolist() == [3]
-    assert manifest["check"].tolist() == ["sex_role_consistency"]
-    assert manifest["round"].tolist() == [1]
+    assert manifest["id"].to_list() == [3]
+    assert manifest["check"].to_list() == ["sex_role_consistency"]
+    assert manifest["round"].to_list() == [1]
     r2 = run_pedsum(["validate", "--in", str(out / "validate.tsv.gz"), "--out", str(tmp_path / "out2")])
     assert r2.returncode == 0, r2.stderr  # reduced pedigree re-validates clean
 
@@ -52,10 +52,10 @@ def test_drop_preserves_extra_columns_and_clears_refs(tmp_path):
     out = tmp_path / "out"
     run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     df = load_validate_tsv_gz(out)
-    assert "3" not in df["id"].tolist()  # offender gone
+    assert "3" not in df["id"].to_list()  # offender gone
     assert "note" in df.columns  # extra column survives
-    assert df.loc[df["id"] == "4", "mother"].iloc[0] == "-1"  # ref to 3 cleared
-    assert df.loc[df["id"] == "5", "father"].iloc[0] == "-1"
+    assert df.filter(pl.col("id") == "4")["mother"][0] == "-1"  # ref to 3 cleared
+    assert df.filter(pl.col("id") == "5")["father"][0] == "-1"
 
 
 def test_drop_spawned_offender_reaches_fixpoint(tmp_path):
@@ -100,8 +100,8 @@ def test_drop_acyclic_drops_cycle_members_only(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending", "--allow-missing-sex"])
     assert r.returncode == 1, r.stderr
     df = load_validate_tsv_gz(out)
-    assert df["id"].tolist() == ["3"]  # descendant survives
-    assert df.loc[df["id"] == "3", "mother"].iloc[0] == "-1"  # ref to dropped 1 cleared
+    assert df["id"].to_list() == ["3"]  # descendant survives
+    assert df.filter(pl.col("id") == "3")["mother"][0] == "-1"  # ref to dropped 1 cleared
     assert set(_read_manifest(out)["id"]) == {1, 2}  # only cycle members dropped
 
 
@@ -119,8 +119,8 @@ def test_drop_duplicate_drops_all_copies(tmp_path):
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 1, r.stderr
-    assert "5" not in load_validate_tsv_gz(out)["id"].tolist()  # both copies removed
-    assert _read_manifest(out)["id"].tolist() == [5]  # one distinct id
+    assert "5" not in load_validate_tsv_gz(out)["id"].to_list()  # both copies removed
+    assert _read_manifest(out)["id"].to_list() == [5]  # one distinct id
 
 
 def test_drop_composes_with_allow_missing_sex(tmp_path):
@@ -145,7 +145,7 @@ def test_drop_composes_with_allow_missing_sex(tmp_path):
     # The reduced output keeps id 3 as -1; that it re-validated clean during
     # self-verify proves the verify ran under --allow-missing-sex (plain
     # validate would FAIL on the unresolved-sex row).
-    assert load_validate_tsv_gz(out).loc[lambda d: d["id"] == "3", "sex"].iloc[0] == "-1"
+    assert load_validate_tsv_gz(out).filter(pl.col("id") == "3")["sex"][0] == "-1"
 
 
 def test_drop_no_sex_check_does_not_drop_missing_parent_conflict(tmp_path):
@@ -162,8 +162,8 @@ def test_drop_no_sex_check_does_not_drop_missing_parent_conflict(tmp_path):
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending", "--no-sex-check"])
     assert r.returncode == 0, r.stderr  # nothing dropped; conflict tolerated
-    assert _read_manifest(out).empty
-    assert "99" in load_validate_tsv_gz(out)["id"].tolist()  # synthesized founder, refs not cleared
+    assert _read_manifest(out).is_empty()
+    assert "99" in load_validate_tsv_gz(out)["id"].to_list()  # synthesized founder, refs not cleared
 
 
 def test_drop_non_reducible_failure_blocks(tmp_path):
@@ -214,7 +214,7 @@ def test_drop_clean_input_writes_header_only_manifest(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 0, r.stderr
     manifest = _read_manifest(out)
-    assert manifest.empty
+    assert manifest.is_empty()
     assert list(manifest.columns) == ["id", "check", "round"]
     assert (out / "validate.tsv.gz").exists()
 
@@ -234,4 +234,4 @@ def test_drop_off_by_default_unchanged(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
     assert r.returncode == 1, r.stderr
     assert not (out / "validate.dropped.tsv").exists()
-    assert "3" in load_validate_tsv_gz(out)["id"].tolist()  # offender NOT dropped
+    assert "3" in load_validate_tsv_gz(out)["id"].to_list()  # offender NOT dropped
