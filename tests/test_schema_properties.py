@@ -14,12 +14,14 @@ from hypothesis import strategies as st
 
 from pedsum.schema import (
     _PAIRS_SLIM_KEYS,
+    _SEX_CONCORDANCE_SLIM_KEYS,
     _SEX_SUMMARY_SLIM_KEYS,
     INDIVIDUAL_SLIM_COLS,
     INDIVIDUAL_SLIM_DIST_KEYS,
     _is_effective_size_array_key,
     _split_effective_size,
     _split_individual_distributions,
+    _split_offspring_sex_concordance,
     _split_sex_summary,
     _split_summary,
 )
@@ -46,6 +48,9 @@ _DIST_KEYS = ["mean", "median", "min", "q1", "q3", "max", "std", "nz"]
 _OTHER_DIST_COLS = ["age", "depth", "custom"]
 
 _PAIRS_EXTRA_KEYS = ["foo", "bar", "baz", "quux"]
+
+_CONCORDANCE_GROUPINGS = ["sibship", "maternal_offspring_group", "paternal_offspring_group"]
+_CONCORDANCE_EXTRA_KEYS = ["z", "p_analytical", "n_groups_total", "by_group_size", "all_resolved"]
 
 
 @st.composite
@@ -129,6 +134,45 @@ def test_split_sex_summary_partitions_keys(sex: dict) -> None:
     for stratum, value in sex.items():
         slim_keys = set(slim.get(stratum, {}))
         extra_keys = set(extra.get(stratum, {}))
+        assert slim_keys & extra_keys == set()
+        assert slim_keys | extra_keys == set(value)
+        assert slim_keys <= slim_keyset
+        assert extra_keys & slim_keyset == set()
+
+
+@st.composite
+def _concordance_dicts(draw: st.DrawFn) -> dict:
+    """Build an offspring_sex_concordance dict: null_model plus grouping blocks."""
+    groupings = draw(st.lists(st.sampled_from(_CONCORDANCE_GROUPINGS), unique=True, max_size=3))
+    out: dict = {}
+    if draw(st.booleans()):
+        out["null_model"] = {"method": "fixed_margin_exchangeability", "min_group_size": 2}
+    for name in groupings:
+        keys = draw(
+            st.lists(
+                st.sampled_from([*_SEX_CONCORDANCE_SLIM_KEYS, *_CONCORDANCE_EXTRA_KEYS]),
+                unique=True,
+                max_size=8,
+            ),
+        )
+        out[name] = {k: draw(_SCALARS) for k in keys}
+    return out
+
+
+@settings(deadline=None)
+@given(conc=_concordance_dicts())
+def test_split_offspring_sex_concordance_partitions_keys(conc: dict) -> None:
+    """Per grouping, slim keys go to slim and the rest to extra; null_model stays slim."""
+    slim, extra = _split_offspring_sex_concordance(conc)
+    slim_keyset = set(_SEX_CONCORDANCE_SLIM_KEYS)
+    if "null_model" in conc:
+        assert slim["null_model"] == conc["null_model"]
+        assert "null_model" not in extra
+    for name, value in conc.items():
+        if name == "null_model":
+            continue
+        slim_keys = set(slim.get(name, {}))
+        extra_keys = set(extra.get(name, {}))
         assert slim_keys & extra_keys == set()
         assert slim_keys | extra_keys == set(value)
         assert slim_keys <= slim_keyset

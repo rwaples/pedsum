@@ -7,10 +7,13 @@ dependencies:
   - scipy
   - pandas>=3,<4
   - pyyaml
-  # pedsum itself never imports numba; it is pedigree-graph's compiled
-  # dependency, listed here so conda-forge supplies it rather than pip pulling a
-  # wheel in behind the git install below. Deliberately absent from
-  # pyproject.toml, which declares only what pedsum imports directly.
+  # pedsum imports numba *optionally*, for the sex-concordance permutation
+  # sampler only (`--sex-concordance-permutations`), and falls back to a NumPy
+  # sampler when it is unimportable. It is also pedigree-graph's compiled
+  # dependency, and is listed here so conda-forge supplies it rather than pip
+  # pulling a wheel in behind the install below. Deliberately absent from
+  # pyproject.toml: a soft import must not constrain NumPy resolution for every
+  # pedsum user.
   - numba
   # - pigz  # optional: ~3× faster .tsv.gz writes; pedsum falls back to gzip if missing
   - pytest
@@ -18,4 +21,5 @@ dependencies:
   - ruff
   - pip
   - pip:
-      - pedigree-graph @ git+https://github.com/rwaples/pedigree-graph.git@v0.5.3
+      # Matches the range pyproject.toml declares; pedigree-graph is on PyPI.
+      - pedigree-graph>=0.6,<0.7

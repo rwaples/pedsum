@@ -28,6 +28,22 @@ _Avoid_: "possible pair", "all-pairs"
 The set of full siblings sharing the same mother and father — equivalently, the offspring of one **Mating Pair**. *Sibship size* is the cardinality of this set.
 _Avoid_: family, nuclear family, brood
 
+**Offspring Group**:
+A set of individuals sharing a specified parent role. Pedsum recognises exactly three: the **Sibship** (both parents shared), the **Maternal Offspring Group**, and the **Paternal Offspring Group**. Always used qualified — bare "Offspring Group" names the family of three, never one of them.
+_Avoid_: "cluster" (reserved against **Component** — see Flagged ambiguities), "family", "sib group", "brood", "litter"
+
+**Maternal Offspring Group** / **Paternal Offspring Group**:
+All offspring of one mother through *any* father, resp. all offspring of one father through *any* mother. A **Sibship** is a subset of both the Maternal Offspring Group of its mother and the Paternal Offspring Group of its father; all three coincide only when neither parent remated. Maternal half-sibs (`MHS`) share a Maternal Offspring Group but not a Sibship.
+_Avoid_: "dam group" / "sire group", "maternal family", "matriline" / "patriline" (those are lines of descent across depths, not one parent's offspring)
+
+**Offspring Sex Concordance**:
+The opt-in output section (`demography.offspring_sex_concordance:`, `--sex-concordance`) reporting whether resolved offspring sex is more or less concordant *within* **Offspring Groups** than a pooled fixed-margin exchangeability null predicts — one analysis per grouping. Descriptive evidence under a stated null, not a claim about mechanism, and specifically not a genetic claim. Distinct from `popgen.effective_size.ne_sex_ratio:` (an Ne estimator driven by the *population-wide* breeding sex ratio) and from `size_structure.n_male` / `n_female` (population-level sex counts): those describe the marginal sex ratio; this describes how sex is distributed *across groups* with that margin held fixed. The headline analysis admits only offspring whose sex came from the input (`sex_source == "input"`); admitting imputed sex is reported separately as a sensitivity, because pedsum imputes sex only for individuals used as a parent.
+_Avoid_: "sex clustering", "sex-ratio bias", "sex-biased families", "litter sex ratio"
+
+**Pair Concordance**:
+For an **Individual Pair** whose two members belong to the same **Offspring Group**, the property of sharing the same resolved sex. The statistic behind **Offspring Sex Concordance** is the count of concordant within-group Individual Pairs, reported as a proportion of all within-group Individual Pairs (`observed_pair_concordance`), against its expectation under the null (`expected_pair_concordance`), with `excess_concordance` their difference.
+_Avoid_: bare "concordance" without naming the unit; "agreement", "sex match rate"
+
 **Descendant Path**:
 A directed parent-to-child path from a focal individual to one of its descendants. Counted by `n_descendant_paths`. An inbred descendant is reachable by multiple paths and contributes multiply.
 _Avoid_: bare "descendant count" in this sense
@@ -138,6 +154,8 @@ _Avoid_: "cleaned pedigree", "filtered pedigree", "fixed pedigree" (the latter i
 - A **Mating Pair** produces zero or more **Relationship Pairs** among its offspring (`FS`, and through descendants, `1C`, `Av`, etc.).
 - Every **Mating Pair** and every **Relationship Pair** is also an **Individual Pair**, but not vice versa.
 - A **Sibship** is the offspring set of exactly one **Mating Pair**; the mapping Mating Pair ↔ Sibship is one-to-one.
+- A **Sibship** is a subset of both the **Maternal Offspring Group** of its mother and the **Paternal Offspring Group** of its father. The three partitions coincide iff neither parent has another mate; otherwise the maternal and paternal groups are strictly coarser.
+- **Offspring Sex Concordance** is computed over **Individual Pairs** *within* an **Offspring Group** — not over **Relationship Pairs**. Two offspring of one Mating Pair are an `FS` Relationship Pair, but the concordance statistic counts them as an Individual Pair and ignores the relationship code.
 - A **Check** produces zero or more **Findings**; its **Check Status** is `FAIL` iff it produced at least one. A Check may depend on other Checks: if a prerequisite did not `PASS`, the dependent Check `SKIP`s.
 
 ## Example dialogue
@@ -167,6 +185,7 @@ _Avoid_: "cleaned pedigree", "filtered pedigree", "fixed pedigree" (the latter i
 - "lineage" historically named a section bag of per-individual properties, but in pop-gen "lineage" means a single ancestral line. Resolved: the section is split into **Reproduction** (offspring, mates, reproductive/terminal) and **Genealogy** (`descendant_paths` and `distinct_ancestors`). "Lineage" is not a pedsum term.
 - "mates" appeared four times across three sections under three names — the same per-individual quantity sliced inconsistently. Resolved: canonical term is **Mate Count**; lives once under `reproduction:` (`mate_count`, `mate_count_male`, `mate_count_female`) as summary-stats distributions over **all** individuals (resp. all males, all females), zero-included. The per-individual mate-count fields are removed from `mating_pairs:` (per-Mating-Pair statistics only) and from `sibship_size:` (per-sibship only).
 - "founder" was historically unqualified across five concepts (structural Founder; Founders with descendants; Founders surviving to depth *d*; variance-weighted equivalent count; founder lines per individual). Resolved: only the structural **Founder** uses the bare term; everything else is expressed via Founders + their descendants. `active_founders` is "Founders with ≥1 descendant at this depth"; per-individual count of distinct Founder Ancestors is the column `n_founder_ancestors`, aggregated as `founder_summary.by_depth[*].founder_ancestors`; `effective_founders` always carries a `_by_<weight>` qualifier. "Founder Line" is not a pedsum term.
+- "cluster" was proposed as the name for the offspring-sex analysis ("offspring sex clustering"). Rejected: **Component** already reserves the word (`_Avoid_: "cluster"`), and the README uses "clusters" loosely for pair-dense half-sib structure — a third sense would recreate exactly the one-word-three-meanings pattern this section exists to prevent. Resolved: the analysis is **Offspring Sex Concordance**, the groups it works over are **Offspring Groups**, and "cluster" stays reserved. "Family" was likewise unavailable as the grouping term — see the `family_size:` bullet above.
 - "inbred" sometimes informally means "F above some threshold." Resolved: in pedsum, **Inbred** means `F` greater than pedsum's zero-tolerance threshold (`1e-9`); users who want a biologically meaningful threshold use the `inbreeding.hist` bins.
 - "degree" can mean meiotic-path degree (pedsum's usage) or "degree of relatedness" / "degree of kinship" (a kinship-coefficient interpretation). Resolved: pedsum **Degree** always means *meiotic distance*; the kinship coefficient is reported separately.
 - validation vocabulary was informal — "error" / "issue" / "warning" for a violation, "test" / "rule" for an integrity test, "hard error" / "fatal" for a fail that stops output. Resolved: a single integrity test is a **Check**; one recorded violation is a **Finding**; a Check's outcome is its **Check Status** (`PASS` / `FAIL` / `SKIP`); a Check whose failure stops the fixed-pedigree write is a **Blocking Check** (`BLOCKED`).

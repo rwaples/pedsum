@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Offspring Sex Concordance
+
+### Features
+
+- **`summarize --sex-concordance`** adds `demography.offspring_sex_concordance`: whether resolved offspring sex is more or less concordant *within* **Offspring Groups** than a pooled fixed-margin exchangeability null predicts, for three groupings — **Sibship** (`(mother, father)`), **Maternal Offspring Group** (`mother`), and **Paternal Offspring Group** (`father`). The statistic is the count of concordant within-group **Individual Pairs**, `C = Σ_g [C(M_g,2) + C(F_g,2)]`, conditioned on the eligible group sizes and the global male/female totals. Exact conditional `E[C]` and `Var(C)` are computed as rationals (`fractions.Fraction`) over exact integer `P`/`S`/`D` counts, so the zero-variance degeneracy test is a real equality rather than a float64 near-miss — in float64 a single-group pedigree at N = 10M returns a large *negative* variance. Aggregate only: no per-parent, per-Mating-Pair or per-Sibship record is emitted. Off by default; a bare `summarize` is byte-for-byte unchanged.
+- **Provenance is the headline eligibility axis, not a reported count.** The headline admits `sex_source == "input"` only; `all_resolved` repeats the analysis admitting imputed sex as a sensitivity, and a pedigree with no input sex is refused (`skip_reason: no_input_sex`) with an explanatory message. Pedsum imputes sex only for individuals used as a parent, so admitting imputed sex makes eligibility conditional on having reproduced. A *uniform* sex bias in reproduction is absorbed by fixed-margin conditioning, but **group-level** heterogeneity in selection is not, and it inflates the test badly — while producing *identical* `sex_source` counts to the harmless case. Counts alone cannot separate them, which is why the split is structural.
+- **`--sex-concordance-permutations N`** (implies `--sex-concordance`) and **`--sex-concordance-seed INT`** calibrate the headline p-values against `N` fixed-margin permutations under the same two-sided deviation from `E[C]`, reporting `(b+1)/(B+1)`. The sampler uses numba when it is importable and NumPy's `multivariate_hypergeometric` otherwise; `backend` is recorded in the output, so reproducibility is guaranteed given *(seed, backend)*, not seed alone. **numba is a soft import and is deliberately absent from `pyproject.toml`.**
+- **The analytical p-value is labelled asymptotic and screening-only.** It holds its size at conventional levels at every level of group dominance, but in the far tail it runs up to ~18× too liberal — entirely in the positive (over-concordant) tail. `max_group_pair_share` is emitted as the diagnostic that predicts the effect, and pedsum warns when an analytical p below 0.01 is about to be reported without permutations. Dominant groups are warned about, not refused.
+- Raw and Holm-adjusted p-values are reported across whichever groupings are computable. Holm is valid under arbitrary dependence but conservative here: Sibship pairs are a subset of both the maternal and paternal pair sets. Descriptive `by_group_size` rows are never tested.
+- Under `--safe-attempt`, a grouping with fewer than five eligible groups keeps its eligibility metadata but has concordance, direction, inference and distributions nulled; counts of one through four are nulled; `by_group_size` rows receive small-cell redaction; permutation count, seed and backend may remain.
+
+### Docs
+
+- `CONTEXT.md` gains **Offspring Group**, **Maternal Offspring Group**, **Paternal Offspring Group**, **Offspring Sex Concordance**, and **Pair Concordance**, plus a Flagged-ambiguities entry recording why the feature is *not* called "clustering" ("cluster" is already reserved against **Component**, and the README uses it loosely for pair-dense half-sib structure).
+- README documents the method, formulas, eligibility rules, inference caveats, CLI examples, output fields, and the literature — Wang et al.'s beta-binomial overdispersion, Zietsch et al.'s zero heritability of offspring sex ratio, Long & Zhang's stopping-rule alternative, and the Lindsey & Altham / James overdispersion framework.
+
+### Internal
+
+- New `pedsum/sex_concordance.py` keeps the statistics, group projection, Holm adjustment and both samplers out of `sections.py` and `_run_summarize`.
+- `environment.yml`'s numba comment is corrected (pedsum now imports numba optionally) and its stale `pedigree-graph @ git+...@v0.5.3` pin is replaced with the PyPI `>=0.6,<0.7` range `pyproject.toml` already declares.
+
 ## 0.12.1 — 2026-06-26 — exact kinship for relative pairs
 
 ### Features

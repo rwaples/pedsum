@@ -156,6 +156,16 @@ Flags:
   above ~500K rows (stallion-heavy livestock, large half-sib clusters).
   Off by default; the 23 pair counts and the standard summary are
   produced without it.
+- `--sex-concordance` — opt into **Offspring Sex Concordance** (see
+  below). Off by default. Adds
+  `demography.offspring_sex_concordance` to both YAML files.
+- `--sex-concordance-permutations N` — calibrate the sex-concordance
+  p-values against `N` fixed-margin permutations (default `0`,
+  analytical only). Implies `--sex-concordance`. **Any claim at
+  p < 0.01 needs this** — see below.
+- `--sex-concordance-seed INT` — seed for the permutation sampler
+  (default `0`). No effect without
+  `--sex-concordance-permutations`.
 - `--tsv` — additionally write the long-form `summary.pedigree.tsv`
   and `summary.individual.tsv`. Off by default; collaborators
   typically need only the YAML outputs.
@@ -183,6 +193,175 @@ Flags:
   opposite (asserted M used only as mother → F; asserted F used only
   as father → M). The missing→F/M imputation is unaffected. Reverts
   to hard-blocking on sex/role contradictions.
+
+### Offspring Sex Concordance (`--sex-concordance`)
+
+Asks whether resolved offspring sex is more or less concordant *within*
+**Offspring Groups** than a pooled fixed-margin exchangeability null
+predicts. Three groupings are analysed independently:
+
+| Grouping | Group key | Requires |
+|---|---|---|
+| `sibship` | `(mother, father)` | both parents known |
+| `maternal_offspring_group` | `mother` | mother known |
+| `paternal_offspring_group` | `father` | father known |
+
+```bash
+# analytical screen
+python pedigree_summary.py summarize --in PED.tsv --out DIR --sex-concordance
+
+# with permutation calibration (implies --sex-concordance)
+python pedigree_summary.py summarize --in PED.tsv --out DIR \
+    --sex-concordance-permutations 1000 --sex-concordance-seed 7
+```
+
+**Statistic.** For each eligible group `g` with `M_g` males and `F_g`
+females, the number of concordant within-group **Individual Pairs** is
+summed:
+
+```
+C = Σ_g [ choose(M_g, 2) + choose(F_g, 2) ]
+```
+
+Conditioning holds the eligible group sizes and the global male/female
+totals fixed and treats sex labels as exchangeable. The reported
+`conditioning_male_fraction` is the *margin being conditioned on*, not
+an estimated parameter. With `P = Σ_g choose(n_g, 2)`,
+`S = Σ_g 3·choose(n_g, 3)` (indicator pairs sharing one offspring)
+and `D = choose(P, 2) − S` (disjoint indicator pairs), the exact
+conditional moments are
+
+```
+q2  = ([M]₂ + [F]₂) / [N]₂
+q3  = ([M]₃ + [F]₃) / [N]₃
+q22 = ([M]₄ + [F]₄ + 2[M]₂[F]₂) / [N]₄
+E[C]   = P·q2
+Var(C) = P·q2·(1−q2) + 2·S·(q3−q2²) + 2·D·(q22−q2²)
+```
+
+with `[x]_r` a falling factorial and `N = M + F`. These are computed as
+exact rationals, so the zero-variance degeneracy test is a real
+equality rather than a float64 near-miss.
+
+**Eligibility, and why provenance is the headline axis.** Pedsum
+resolves missing sex only for individuals used as a *parent*
+(`validate.py`). Admitting imputed sex therefore makes eligibility
+conditional on having reproduced. Fixed-margin conditioning absorbs a
+*uniform* sex bias in reproduction, so that alone is harmless — but
+**group-level** heterogeneity in selection (retaining a dam's daughters
+and culling her sons, decided per group) is not absorbed, and it
+inflates the test badly. Crucially, the harmless and harmful cases have
+*identical* `sex_source` counts, so reporting provenance counts is not
+enough to tell them apart. Consequently:
+
+- the **headline** analysis admits `sex_source == "input"` only;
+- an `all_resolved` block repeats the analysis admitting
+  `imputed_from_missing` and `imputed_from_role` as a **sensitivity**;
+- a pedigree with no input sex at all is refused
+  (`skip_reason: no_input_sex`) rather than reported.
+
+A group informs concordance only from two eligible offspring up;
+eligible members are retained even when their siblings are not
+(`n_groups_incomplete` records how often that happened).
+
+**Inference.** `z = (C − E[C]) / √Var(C)` with a two-sided normal
+p-value. The moments are exact and conditional; the **p-value is
+asymptotic and screening-only**. Measured under the null it holds its
+size at conventional levels for every level of group dominance, but in
+the far tail it runs up to ~18× too liberal — and the excess sits
+*entirely* in the positive (over-concordant) tail, i.e. exactly the
+direction a user wants to find. `max_group_pair_share`
+(`choose(n_max, 2) / P`) predicts the effect: ~0.003 is fine, 0.10 gives
+~4.6×, 0.97+ gives 16–18×. **Any claim at p < 0.01 requires
+permutations**; pedsum warns when you are about to make one without.
+
+Permutations use the same fixed-margin null and the same two-sided
+deviation from `E[C]`, report `(b+1)/(B+1)` (never zero), and run on
+the headline analysis only. They are drawn with numba when it is
+importable and NumPy otherwise — `backend` is recorded in the output,
+so reproducibility is guaranteed given *(seed, backend)*, not seed
+alone. 1,000 permutations is a reasonable starting point; cost scales
+linearly in permutations × groups. Measured on a 10M-row pedigree with
+2M groups: ~80 ms per draw with numba and ~224 ms with the NumPy
+fallback, i.e. ~4 min resp. ~11 min for 1,000 permutations across all
+three groupings. A guideline, not a runtime promise — scale it to your
+own pedigree. Memory is `O(groups)`: the same run's peak RSS rose by
+8 MB over the analysis-free baseline.
+
+Everything except the sampler is effectively free: on that 10M-row
+pedigree the grouping phase costs ~0.1 s and the analytical phase
+(headline *and* sensitivity) ~0.3 s per grouping, against a 58 s
+baseline run.
+
+**Multiplicity.** Raw and Holm-adjusted p-values are reported across
+whichever of the three groupings are computable. Holm is valid under
+arbitrary dependence but conservative here: Sibship pairs are a subset
+of both the maternal and paternal pair sets, so these are not three
+independent hypotheses. Holm applies across groupings only — the
+`by_group_size` rows are descriptive and are not tested.
+
+**Interpretation limits.** Pedsum has no twin/multiple-birth
+annotation and no birth order, pools offspring across the whole
+multigenerational pedigree, generally cannot tell whether a
+reproductive history is complete, and does not adjust for depth-,
+cohort- or secular variation in sex probability. Multiple births,
+sex-dependent stopping rules, missingness, ascertainment, and temporal
+or depth structure can all produce or obscure concordance.
+
+Between-family overdispersion in offspring sex is real and documented —
+Wang et al. fit a beta-binomial rather than a binomial, associated with
+older maternal age at first birth and the maternal variants *NSUN6* and
+*TSHZ1*. It is **not** genetic: Zietsch et al. estimate the
+heritability of offspring sex ratio at zero across 4.7 million births
+(upper 95% CI 0.002). Sex-dependent stopping is a competing explanation
+producing the same signature (Long & Zhang's coupon-collection
+behaviour). The classical analysis framework is overdispersion
+modelling (Lindsey & Altham; James). So a positive finding here is
+plausible rather than automatically artefactual — but the *genetic*
+reading is specifically ruled out, which raises rather than lowers the
+stakes on the input-only headline. Excess pair concordance is a
+moment-based test for exactly the beta-binomial overdispersion Wang et
+al. fit; fitting that model is deferred, not merely omitted.
+
+- Lindsey & Altham, "Analysis of the Human Sex Ratio by Using
+  Overdispersion Models," *J. R. Stat. Soc. C* **47**(1), 149–157
+  (1998). [doi:10.1111/1467-9876.00103](https://doi.org/10.1111/1467-9876.00103)
+- James, "The variation of the probability of a son within and across
+  couples," *Human Reproduction* **15**(5), 1184–1188 (2000).
+  [doi:10.1093/humrep/15.5.1184](https://doi.org/10.1093/humrep/15.5.1184)
+- Zietsch, Walum, Lichtenstein, Verweij & Kuja-Halkola, "No genetic
+  contribution to variation in human offspring sex ratio: a total
+  population study of 4.7 million births," *Proc. R. Soc. B*
+  **287**(1921) (2020).
+  [doi:10.1098/rspb.2019.2849](https://doi.org/10.1098/rspb.2019.2849)
+- Long & Zhang, "The Coupon Collection Behavior in Human
+  Reproduction," *Current Biology* **30**(19), 3856–3861.e1 (2020).
+  [doi:10.1016/j.cub.2020.07.040](https://doi.org/10.1016/j.cub.2020.07.040)
+- Wang, Rosner, Huang, Rich-Edwards, Laden, Hart, Penney & Chavarro,
+  "Is sex at birth a biological coin toss? Insights from a
+  longitudinal and GWAS analysis," *Science Advances* **11**(29),
+  eadu7402 (2025).
+  [doi:10.1126/sciadv.adu7402](https://doi.org/10.1126/sciadv.adu7402)
+
+**Output fields.** `summary.yaml` carries the headline verdict per
+grouping — `computed`, `skip_reason`, `n_groups_eligible`,
+`n_offspring_eligible`, `excess_concordance`, `direction`, `p_holm`,
+`p_source`, `max_group_pair_share`, and
+`all_resolved_excess_concordance` — plus a shared `null_model` block.
+`summary.extra.yaml` carries everything else: the full eligibility and
+provenance counts, `conditioning_male_fraction`,
+`n_within_group_pairs`, observed/expected concordance, `z`, raw and
+Holm-adjusted analytical p-values, the permutation block
+(`requested`, `completed`, `seed`, `backend`, `p_raw`, `p_holm`), the
+whole `all_resolved` sensitivity, the unweighted
+`male_proportion_distribution`, and descriptive `by_group_size` rows.
+No per-parent, per-Mating-Pair or per-Sibship record is ever emitted.
+
+Under `--safe-attempt`, a grouping resting on fewer than five eligible
+groups keeps its eligibility metadata but has concordance, direction,
+inference and distributions nulled; counts of one through four are
+nulled; `by_group_size` rows get small-cell redaction; permutation
+count, seed and backend may remain.
 
 ### Emit EPIMIGHT input
 
@@ -426,6 +605,7 @@ id	sex	mother	father
 | `structure.components` | component-size distribution and singleton stats |
 | `demography.sibship_size` | per-Sibship size distribution (n_sibships, mean/median, size_dist) |
 | `demography.mating_pairs` | Mating Pair count, children-per-pair, effective pair count |
+| `demography.offspring_sex_concordance` | within-group sex concordance against a fixed-margin null, per Sibship / Maternal / Paternal Offspring Group (only with `--sex-concordance`) |
 | `individuals.reproduction` | per-individual offspring/mate counts and Reproductive/Terminal classification (`offspring_count`, `offspring_count_hist`, `mate_count`, sex-stratified variants, `frac_with_full_sib`) |
 | `individuals.genealogy` | per-individual `descendant_paths` summary; `distinct_ancestors` summary when `--inbreeding` is set |
 | `founders.founder_contribution` | Founders with descendants + `descendant_paths_per_founder` distribution + `effective_founders_by_descendant_paths` |

@@ -53,6 +53,7 @@ from pedsum.sections import (
     compute_sibship_sizes,
     compute_size_structure,
 )
+from pedsum.sex_concordance import compute_offspring_sex_concordance
 from pedsum.validate import (
     DROP_FRACTION_WARN,
     DROPPABLE_CHECKS,
@@ -156,6 +157,17 @@ def _positive_int(v: str) -> int:
         raise argparse.ArgumentTypeError(f"expected integer, got {v!r}") from exc
     if iv < 1:
         raise argparse.ArgumentTypeError(f"expected integer >= 1, got {iv}")
+    return iv
+
+
+def _nonnegative_int(v: str) -> int:
+    """Argparse type guard for ints >= 0."""
+    try:
+        iv = int(v)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"expected integer, got {v!r}") from exc
+    if iv < 0:
+        raise argparse.ArgumentTypeError(f"expected integer >= 0, got {iv}")
     return iv
 
 
@@ -292,6 +304,41 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default), pedsum uses count_pairs_streaming for the 23 pair "
         "counts in O(N) memory; the burden summary is left as a stub. "
         "See the README for the streaming-vs-matrix precision contract.",
+    )
+    p_sum.add_argument(
+        "--sex-concordance",
+        action="store_true",
+        help="compute Offspring Sex Concordance: whether resolved offspring "
+        "sex is more or less concordant within Sibships / Maternal Offspring "
+        "Groups / Paternal Offspring Groups than a pooled fixed-margin "
+        "exchangeability null predicts. Off by default. The headline uses "
+        "input sex only (imputed sex is conditional on having reproduced, "
+        "which breaks calibration); all-resolved sex is reported alongside as "
+        "a sensitivity. Adds `demography.offspring_sex_concordance` to the "
+        "summary YAML.",
+    )
+    p_sum.add_argument(
+        "--sex-concordance-permutations",
+        type=_nonnegative_int,
+        default=0,
+        metavar="N",
+        help="calibrate the sex-concordance p-values against N fixed-margin "
+        "permutations of the headline analysis (default: %(default)s — "
+        "analytical only). Implies `--sex-concordance`. The analytical "
+        "p-value is asymptotic and screening-only: any claim at p < 0.01 "
+        "needs permutations. 1,000 is a reasonable starting point; cost "
+        "scales linearly in N and in the number of eligible groups (~80ms "
+        "per draw at 2M groups with numba, ~224ms with the NumPy fallback).",
+    )
+    p_sum.add_argument(
+        "--sex-concordance-seed",
+        type=int,
+        default=None,
+        metavar="INT",
+        help="seed for the sex-concordance permutation sampler (default: 0). "
+        "No effect without `--sex-concordance-permutations`. Results are "
+        "reproducible given (seed, backend) — the backend is recorded in the "
+        "output because numba is a soft import.",
     )
     p_sum.add_argument(
         "--tsv",
@@ -512,6 +559,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.subcommand is None:
         parser.print_help(sys.stderr)
         sys.exit(0)
+    # Asking for permutations is asking for the analysis. There is no
+    # --no-sex-concordance; absence of the flag is the off state.
+    if getattr(args, "sex_concordance_permutations", 0) > 0:
+        args.sex_concordance = True
     return args
 
 
@@ -662,6 +713,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         logger.warning(
             "--ne-coancestry / --ne-threads have no effect under --no-effective-size",
         )
+    if args.sex_concordance_seed is not None and args.sex_concordance_permutations == 0:
+        logger.warning(
+            "--sex-concordance-seed has no effect without --sex-concordance-permutations",
+        )
 
     # Build the PedigreeGraph once and reuse for every primitive that
     # needs it (relationship pairs, F, lineage counts, effective size).
@@ -681,6 +736,17 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     with _timed("mating-pair summary"):
         mating_pairs = compute_mating_pair_summary(df)
+
+    # Opt-in: no grouping, no moments, no sampler unless --sex-concordance was
+    # typed. Runs on the validated final sex, so it must follow load_and_validate.
+    sex_concordance: dict | None = None
+    if args.sex_concordance:
+        sex_concordance = compute_offspring_sex_concordance(
+            df,
+            permutations=args.sex_concordance_permutations,
+            seed=args.sex_concordance_seed or 0,
+            timer=_timed,
+        )
 
     n_indiv = len(df)
     if args.per_individual_pairs:
@@ -779,6 +845,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         mating_pairs,
         relationship_summary,
         aggregates,
+        sex_concordance,
     )
     if effective_size is not None:
         tsv_payload["effective_size_scalars"] = {name: result["ne"] for name, result in effective_size.items()}

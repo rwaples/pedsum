@@ -65,6 +65,7 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
         (
             SectionSpec("sibship_size"),
             SectionSpec("mating_pairs"),
+            SectionSpec("offspring_sex_concordance"),  # per-grouping special handling
         ),
     ),
     CategorySpec(
@@ -102,6 +103,25 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
             SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n")),
         ),
     ),
+)
+
+# Per-grouping slim keys for offspring_sex_concordance: the headline verdict
+# plus the two numbers that qualify it (how much data, how dominated), plus one
+# scalar from the all-resolved sensitivity so the provenance comparison is
+# visible without opening the extra file. Full provenance counts, ``z``, raw
+# p-values, permutation metadata, the sensitivity block, the male-proportion
+# distribution and ``by_group_size`` all route to extra.
+_SEX_CONCORDANCE_SLIM_KEYS: tuple[str, ...] = (
+    "computed",
+    "skip_reason",
+    "n_groups_eligible",
+    "n_offspring_eligible",
+    "excess_concordance",
+    "direction",
+    "p_holm",
+    "p_source",
+    "max_group_pair_share",
+    "all_resolved_excess_concordance",
 )
 
 # Per-stratum slim keys for sex_summary (the scalar integers only).
@@ -245,6 +265,29 @@ def _split_sex_summary(sex_dict: dict) -> tuple[dict, dict]:
     return slim, extra
 
 
+def _split_offspring_sex_concordance(conc_dict: dict) -> tuple[dict, dict]:
+    """Per-grouping split for ``demography.offspring_sex_concordance``.
+
+    Each grouping (``sibship``, ``maternal_offspring_group``,
+    ``paternal_offspring_group``) keeps ``_SEX_CONCORDANCE_SLIM_KEYS`` in slim
+    and sends the rest to extra. The ``null_model`` block is small and
+    describes what the numbers mean, so it stays whole in slim.
+    """
+    slim: dict = {}
+    extra: dict = {}
+    for name, value in conc_dict.items():
+        if name == "null_model" or not isinstance(value, dict):
+            slim[name] = value
+            continue
+        g_slim = {k: value[k] for k in _SEX_CONCORDANCE_SLIM_KEYS if k in value}
+        g_extra = {k: v for k, v in value.items() if k not in _SEX_CONCORDANCE_SLIM_KEYS}
+        if g_slim:
+            slim[name] = g_slim
+        if g_extra:
+            extra[name] = g_extra
+    return slim, extra
+
+
 def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
     """Split a single section value into (slim, extra) per its SectionSpec."""
     if not isinstance(value, (dict, list)):
@@ -273,6 +316,9 @@ def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
         return s, (e if e else None)
     if spec.name == "sex_summary":
         s, e = _split_sex_summary(value)
+        return s, (e if e else None)
+    if spec.name == "offspring_sex_concordance":
+        s, e = _split_offspring_sex_concordance(value)
         return s, (e if e else None)
     if spec.slim_keys is None:
         return value, None

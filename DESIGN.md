@@ -19,6 +19,7 @@ from those above it):
 | `pedsum/validate.py` | `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) + sex imputation |
 | `pedsum/pairs.py` | relationship-pair enumeration + `PedigreeGraph` construction |
 | `pedsum/sections.py` | per-section summary computations |
+| `pedsum/sex_concordance.py` | Offspring Sex Concordance: group projection, exact conditional moments, Holm, permutation samplers |
 | `pedsum/schema.py` | categorised YAML schema + slim/extra split machinery |
 | `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers |
 | `pedsum/cli.py` | argparse + `summarize` / `validate` runners + `main` |

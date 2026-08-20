@@ -92,6 +92,7 @@ def _build_pedigree_data(
     mating_pairs: dict | None,
     relationship_summary: dict | None,
     aggregates: dict | None = None,
+    sex_concordance: dict | None = None,
 ) -> tuple[dict, dict]:
     """Build the pedigree-level report payloads.
 
@@ -138,6 +139,9 @@ def _build_pedigree_data(
         "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
         "sibship_size": sibship_section,
         "mating_pairs": mating_pairs,
+        # Opt-in (`--sex-concordance`); None keeps the section out of every
+        # output entirely, which is what holds the slim YAML line budget.
+        "offspring_sex_concordance": sex_concordance,
         "relationship_summary": relationship_summary,
         "reproduction": (aggregates or {}).get("reproduction", {}),
         "genealogy": (aggregates or {}).get("genealogy", {}),
@@ -230,6 +234,77 @@ def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_k
         _null_below(row, small_keys, min_cell)
 
 
+# Offspring Sex Concordance: every key that carries inference or a derived rate
+# over the eligible set. Suppressed wholesale when the grouping rests on fewer
+# than ``min_cell`` eligible groups; eligibility metadata is retained (and
+# small-cell-nulled) so the reader still sees why nothing was reported.
+_CONCORDANCE_INFERENCE_KEYS: tuple[str, ...] = (
+    "conditioning_male_fraction",
+    "n_within_group_pairs",
+    "max_group_pair_share",
+    "observed_pair_concordance",
+    "expected_pair_concordance",
+    "excess_concordance",
+    "direction",
+    "z",
+    "p_analytical",
+    "p_analytical_holm",
+    "p_holm",
+    "p_source",
+    "all_resolved_excess_concordance",
+)
+
+_CONCORDANCE_COUNT_KEYS: tuple[str, ...] = (
+    "n_groups_total",
+    "n_groups_eligible",
+    "n_groups_incomplete",
+    "n_groups_too_small",
+    "n_offspring_total",
+    "n_offspring_eligible",
+    "n_offspring_sex_excluded",
+    "n_offspring_in_small_groups",
+)
+
+
+def _redact_concordance_block(block: dict, min_cell: int) -> None:
+    """Small-cell redaction for one Offspring Sex Concordance grouping.
+
+    Recurses once into the ``all_resolved`` sensitivity block, which carries
+    the same eligibility/statistic keys and none of the outer wrappers.
+    Permutation count, seed, and backend survive — they describe the procedure,
+    not the pedigree.
+    """
+    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
+        for key in _CONCORDANCE_INFERENCE_KEYS:
+            if key in block:
+                block[key] = None
+        if "male_proportion_distribution" in block:
+            block["male_proportion_distribution"] = None
+        if "by_group_size" in block:
+            block["by_group_size"] = []
+        perms = block.get("permutations")
+        if isinstance(perms, dict):
+            perms["p_raw"] = None
+            perms["p_holm"] = None
+
+    for row in block.get("by_group_size") or []:
+        if int(row.get("n_groups", 0)) < min_cell:
+            for key in list(row):
+                if key not in ("group_size", "n_groups"):
+                    row[key] = None
+        else:
+            _null_below(row, ("n_offspring",), min_cell)
+
+    _null_below(block, _CONCORDANCE_COUNT_KEYS, min_cell)
+    by_source = block.get("eligible_by_sex_source")
+    if isinstance(by_source, dict):
+        _null_below(by_source, list(by_source), min_cell)
+
+    nested = block.get("all_resolved")
+    if isinstance(nested, dict):
+        _redact_concordance_block(nested, min_cell)
+
+
 def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
@@ -264,6 +339,12 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
                 if k != "n_pairs":
                     mating[k] = None
         _null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
+
+    concordance = ped_data.get("offspring_sex_concordance")
+    if isinstance(concordance, dict):
+        for name, block in concordance.items():
+            if name != "null_model" and isinstance(block, dict):
+                _redact_concordance_block(block, min_cell)
 
     rel_summary = ped_data.get("relationship_summary") or {}
     _null_below(rel_summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
