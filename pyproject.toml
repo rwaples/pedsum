@@ -17,7 +17,7 @@ dependencies = [
     "pyyaml>=6,<7",
     # Not published to PyPI — supplied by environment.yml (git tag) or an
     # editable checkout, same arrangement the fitACE sisters use for simace.
-    "pedigree-graph>=0.6,<0.7",
+    "pedigree-graph>=0.7,<0.8",
 ]
 
 [project.optional-dependencies]
