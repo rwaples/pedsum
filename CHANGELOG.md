@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-08-20 — offspring sex concordance; polars internals
 
 ### Features
 
