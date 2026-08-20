@@ -43,7 +43,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 # Span kept narrow so even the deepest generation stays inside the default
 # birth-year sanity range ([1800, current calendar year + 1]); the benchmark
@@ -58,7 +58,7 @@ def generate_pedigree(
     seed: int,
     avg_sibship: float = 2.5,
     extra_cols: int = 0,
-) -> tuple[pd.DataFrame, int]:
+) -> tuple[pl.DataFrame, int]:
     """Build a deterministic synthetic pedigree DataFrame.
 
     Returns ``(df, max_depth)`` where ``df`` has columns ``id, sex, mother,
@@ -129,7 +129,7 @@ def generate_pedigree(
     father_arr = np.concatenate(fathers)
     gen_arr = np.concatenate(gen_index)
 
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "id": id_arr,
             "sex": np.where(sex_arr == 0, "F", "M"),
@@ -138,10 +138,10 @@ def generate_pedigree(
             "birth_year": _BASE_YEAR + gen_arr * _GENERATION_INTERVAL,
         }
     )
-    for k in range(extra_cols):
-        # Dummy wide payload: object/string column to grow df_raw, deterministic
-        # but with enough cardinality to behave like real free-text annotation.
-        df[f"pad_{k}"] = "v" + ((id_arr + k) % 1000).astype(str)
+    if extra_cols:
+        # Dummy wide payload: string columns to grow df_raw, deterministic but
+        # with enough cardinality to behave like real free-text annotation.
+        df = df.with_columns(pl.Series(f"pad_{k}", "v" + ((id_arr + k) % 1000).astype(str)) for k in range(extra_cols))
 
     return df, int(max_depth)
 
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         extra_cols=args.extra_cols,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(args.out, sep="\t", index=False)
+    df.write_csv(args.out, separator="\t")
     meta = {
         "rows": len(df),
         "generations": int(args.generations),

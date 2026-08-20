@@ -7,7 +7,7 @@ from argparse import ArgumentTypeError
 from types import SimpleNamespace
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 from pedsum.base import PedigreeError
@@ -30,7 +30,7 @@ from pedsum.parse import (
     _read_pedigree_table,
     _sniff_delimiter,
 )
-from pedsum.pedigree_ops import _compute_depth_unordered, _full_sib_groups, _id_list
+from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _full_sib_groups, _id_list
 from pedsum.report import (
     _apply_safe_attempt,
     _build_individual_data,
@@ -83,18 +83,18 @@ class TestParseEdgeCases:
 
     def test_decode_sex_explicit_default_plink_and_bad_encoding(self) -> None:
         """Explicit sex encodings and invalid encoding names are handled distinctly."""
-        default = _decode_sex(pd.Series(["0", "1", ""]), encoding="default")
-        plink = _decode_sex(pd.Series(["2", "1", "0"]), encoding="plink")
+        default = _decode_sex(pl.Series(["0", "1", ""], dtype=pl.String), encoding="default")
+        plink = _decode_sex(pl.Series(["2", "1", "0"], dtype=pl.String), encoding="plink")
         np.testing.assert_array_equal(default, np.array([0, 1, -1], dtype=np.int8))
         np.testing.assert_array_equal(plink, np.array([0, 1, -1], dtype=np.int8))
         with pytest.raises(PedigreeError, match="unknown sex encoding"):
-            _decode_sex(pd.Series(["F"]), encoding="mystery")
+            _decode_sex(pl.Series(["F"], dtype=pl.String), encoding="mystery")
 
     def test_maybe_warn_csv_allows_normal_input_and_rejects_csv_shape(self) -> None:
         """The friendly CSV warning distinguishes split tables from one-column CSV-looking input."""
-        _maybe_warn_csv(pd.DataFrame({"id": [1], "sex": ["F"]}))
+        _maybe_warn_csv(pl.DataFrame({"id": [1], "sex": ["F"]}))
         with pytest.raises(PedigreeError, match="appears to be CSV"):
-            _maybe_warn_csv(pd.DataFrame({"id,sex,mother,father": ["1,F,-1,-1"]}))
+            _maybe_warn_csv(pl.DataFrame({"id,sex,mother,father": ["1,F,-1,-1"]}))
 
     def test_sniff_delimiter_handles_gzip_empty_whitespace_and_fallback(self, tmp_path) -> None:
         """Delimiter sniffing covers compressed, empty, whitespace, and tab-fallback inputs."""
@@ -123,16 +123,16 @@ class TestParseEdgeCases:
         table = tmp_path / "ped.psv"
         table.write_text("id|sex|mother|father\n1|F|-1|-1\n")
         df = _read_pedigree_table(table, sep="pipe", dtype=str)
-        assert df.to_dict("records") == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
+        assert df.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
         comma = tmp_path / "ped.csv"
         comma.write_text("id,sex,mother,father\n1,F,-1,-1\n")
         auto = _read_pedigree_table(comma, dtype=str)
-        assert auto.to_dict("records") == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
+        assert auto.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
     def test_parent_int_col_zero_as_missing(self) -> None:
         """PLINK-style zero parent IDs are normalised to -1 when requested."""
-        arr = _as_parent_int_col(pd.Series(["0", "2", "NA"]), "mother", zero_as_missing=True)
+        arr = _as_parent_int_col(pl.Series(["0", "2", "NA"], dtype=pl.String), "mother", zero_as_missing=True)
         np.testing.assert_array_equal(arr, np.array([-1, 2, -1], dtype=np.int64))
 
 
@@ -147,7 +147,7 @@ class TestCheckEdgeCases:
 
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
         """Missing-parent detection distinguishes no refs, all-present refs, and the zero-token hint."""
-        id_index = pd.Index([1, 2, 3])
+        id_index = IdIndex([1, 2, 3])
         assert _check_parent_refs_present(np.array([-1, -1]), "mother", id_index) == []
         assert _check_parent_refs_present(np.array([1, -1, 2]), "mother", id_index) == []
         findings = _check_parent_refs_present(np.array([0, 99, 99]), "father", id_index)
@@ -165,7 +165,7 @@ class TestCheckEdgeCases:
         mothers = np.array([-1, -1, 2], dtype=np.int64)
         fathers = np.array([-1, -1, 1], dtype=np.int64)
         sex = np.array([1, 1, 0], dtype=np.int8)  # id=2 is male but used as mother.
-        findings = _check_sex_role_consistency(mothers, fathers, sex, pd.Index(ids))
+        findings = _check_sex_role_consistency(mothers, fathers, sex, IdIndex(ids))
         assert len(findings) == 1
         assert findings[0].id == 2
         assert "used as mother" in findings[0].detail
@@ -182,11 +182,11 @@ class TestCheckEdgeCases:
         """Birth-year topology skips no-edge pedigrees and flags child-before-parent years."""
         ids = np.array([1, 2], dtype=np.int64)
         no_edges = _check_birth_year_topology(
-            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), pd.Index(ids)
+            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids)
         )
         assert no_edges == []
         bad = _check_birth_year_topology(
-            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), pd.Index(ids)
+            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids)
         )
         assert len(bad) == 1
         assert bad[0].check == "birth_year_topology"
@@ -202,16 +202,17 @@ class TestPedigreeOpsAndPairsEdgeCases:
 
     def test_full_sib_groups_empty_and_present_parent_pairs(self) -> None:
         """Full-sib grouping handles no-full-parent and full-parent sibling groups."""
-        df = pd.DataFrame({"mother": [-1, 1], "father": [-1, -1]})
+        df = pl.DataFrame({"mother": [-1, 1], "father": [-1, -1]})
         counts, groups, both_present = _full_sib_groups(df)
         np.testing.assert_array_equal(counts, np.array([0, 0], dtype=np.int64))
-        assert groups.empty
+        assert groups.size == 0
         assert not both_present.any()
 
-        sibs = pd.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
+        sibs = pl.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
         counts, groups, both_present = _full_sib_groups(sibs)
         np.testing.assert_array_equal(counts, np.array([0, 0, 1, 1], dtype=np.int64))
-        assert int(groups.loc[(1, 2)]) == 2
+        # One (mother=1, father=2) mating pair with two children.
+        assert groups.tolist() == [2]
         assert both_present.tolist() == [False, False, True, True]
 
     def test_compute_depth_unordered_detects_cycles(self) -> None:
@@ -223,7 +224,7 @@ class TestPedigreeOpsAndPairsEdgeCases:
 
     def test_count_pairs_matrix_builds_graph_when_not_supplied(self) -> None:
         """The matrix pair counter builds a PedigreeGraph when the caller does not pass one."""
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [10, 20, 30],
                 "sex": [1, 0, 1],
@@ -237,7 +238,7 @@ class TestPedigreeOpsAndPairsEdgeCases:
 
     def test_count_pairs_matrix_reuses_supplied_graph(self) -> None:
         """The matrix pair counter accepts a prebuilt PedigreeGraph."""
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [10, 20, 30],
                 "sex": [1, 0, 1],
@@ -384,7 +385,7 @@ class TestReportEdgeCases:
         assert ped["inbreeding"] is None
         assert extras == {}
 
-        idf = pd.DataFrame({"id": [1], "n_offspring": [0]})
+        idf = pl.DataFrame({"id": [1], "n_offspring": [0]})
         ind = _build_individual_data(idf, tmp_path / "p.tsv", "cmd", include_inbreeding=False)
         assert "F" not in ind["distributions"]
         assert "n_offspring" in ind["distributions"]
@@ -477,15 +478,15 @@ class TestReportEdgeCases:
         """Dropped manifests emit distinct id/check/round rows only once."""
         path = tmp_path / "dropped.tsv"
         _write_dropped_manifest([(1, "self_loops", 1), (1, "self_loops", 1), (2, "negative_ids", 2)], path)
-        df = pd.read_csv(path, sep="\t")
-        assert df.to_dict("records") == [
+        df = pl.read_csv(path, separator="\t")
+        assert df.to_dicts() == [
             {"id": 1, "check": "self_loops", "round": 1},
             {"id": 2, "check": "negative_ids", "round": 2},
         ]
 
     def test_write_validate_tsv_prepends_added_founders(self, tmp_path) -> None:
         """Validate TSV writing prepends synthesized founder rows when present."""
-        df_raw = pd.DataFrame({"id": [3], "sex": ["M"], "mother": [1], "father": [2]})
+        df_raw = pl.DataFrame({"id": [3], "sex": ["M"], "mother": [1], "father": [2]})
         out = tmp_path / "validate.tsv.gz"
         _write_validate_tsv_gz(
             df_raw,
@@ -497,15 +498,15 @@ class TestReportEdgeCases:
             out,
         )
         with gzip.open(out, "rt") as fh:
-            fixed = pd.read_csv(fh, sep="\t", dtype=str)
-        assert fixed["id"].tolist() == ["1", "2", "3"]
-        assert fixed["mother"].tolist() == ["-1", "-1", "1"]
+            fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
+        assert fixed["id"].to_list() == ["1", "2", "3"]
+        assert fixed["mother"].to_list() == ["-1", "-1", "1"]
 
     def test_write_annotated_tsv_detects_true_row_mismatch(self, tmp_path) -> None:
         """Annotated TSV writing raises when the input rows cannot realign to the individual table."""
         in_path = tmp_path / "p.tsv"
-        pd.DataFrame({"id": [1], "sex": ["F"], "mother": [-1], "father": [-1]}).to_csv(in_path, sep="\t", index=False)
-        idf = pd.DataFrame({"id": [2], "sex": [0], "mother": [-1], "father": [-1]})
+        pl.DataFrame({"id": [1], "sex": ["F"], "mother": [-1], "father": [-1]}).write_csv(in_path, separator="\t")
+        idf = pl.DataFrame({"id": [2], "sex": [0], "mother": [-1], "father": [-1]})
         args = SimpleNamespace(id_col="id", sex_col="sex", mother_col="mother", father_col="father", sep="tab")
         with pytest.raises(PedigreeError, match="row order mismatch"):
             _write_annotated_tsv(in_path, args, idf, tmp_path / "annotated.tsv.gz")
@@ -520,18 +521,18 @@ class TestSectionEdgeCases:
 
     def test_size_structure_without_children_csr(self) -> None:
         """Size-structure computation has a no-graph path for component labels."""
-        df = pd.DataFrame({"mother": [-1, -1], "father": [-1, -1], "sex": [1, 0], "ped_depth": [0, 0]})
+        df = pl.DataFrame({"mother": [-1, -1], "father": [-1, -1], "sex": [1, 0], "ped_depth": [0, 0]})
         summary, labels = compute_size_structure(df, None)
         assert summary["n_components"] == 2
         np.testing.assert_array_equal(labels, np.array([0, 1], dtype=np.int32))
 
     def test_mating_and_sibship_empty_and_nonempty_outputs(self) -> None:
         """Mating-pair and sibship sections cover no-child and child-present outputs."""
-        df = pd.DataFrame({"mother": [-1, -1], "father": [-1, -1]})
+        df = pl.DataFrame({"mother": [-1, -1], "father": [-1, -1]})
         assert compute_mating_pair_summary(df) is None
         assert compute_sibship_sizes(df) == {"empty": True}
 
-        with_children = pd.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
+        with_children = pl.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
         mating = compute_mating_pair_summary(with_children)
         sibs = compute_sibship_sizes(with_children)
         assert mating is not None
@@ -541,12 +542,20 @@ class TestSectionEdgeCases:
 
     def test_founder_summary_empty_and_bounded_skip(self) -> None:
         """Founder summary handles empty inputs and max-cell skips."""
-        empty = pd.DataFrame(columns=["id", "mother", "father", "ped_depth", "is_founder"])
+        empty = pl.DataFrame(
+            schema={
+                "id": pl.Int64,
+                "mother": pl.Int64,
+                "father": pl.Int64,
+                "ped_depth": pl.Int32,
+                "is_founder": pl.Boolean,
+            }
+        )
         summary, counts = compute_founder_summary(empty)
         assert summary == {"computed": True, "by_depth": [], "bottleneck": None}
         assert counts.size == 0
 
-        idf = pd.DataFrame(
+        idf = pl.DataFrame(
             {
                 "id": [1, 2, 3],
                 "mother": [-1, -1, 1],
@@ -567,10 +576,10 @@ class TestSectionEdgeCases:
 
     def test_aggregate_sections_empty_and_no_inbreeding(self) -> None:
         """Aggregate sections cover empty inputs and the no-inbreeding branch."""
-        empty = pd.DataFrame()
+        empty = pl.DataFrame()
         assert compute_aggregate_sections(empty, {"computed": True}, include_inbreeding=False)["depth_summary"] == []
 
-        idf = pd.DataFrame(
+        idf = pl.DataFrame(
             {
                 "id": [1, 2],
                 "sex": [1, 1],
@@ -594,7 +603,7 @@ class TestSectionEdgeCases:
 
     def test_build_individual_df_parent_derived_counts(self) -> None:
         """Individual table construction covers parent-present, grandparent, and mate-count branches."""
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {
                 "id": [1, 2, 3, 4, 5, 6, 7],
                 "sex": [1, 0, 1, 0, 1, 0, 1],
@@ -605,26 +614,26 @@ class TestSectionEdgeCases:
         )
         idf = build_individual_df(
             df,
-            pd.Index(df["id"].to_numpy()),
+            IdIndex(df["id"].to_numpy()),
             F=np.zeros(len(df)),
             n_distinct_ancestors=np.arange(len(df)),
             n_descendant_paths=np.arange(len(df)),
             component_labels=np.zeros(len(df), dtype=np.int32),
             sex_source=np.array(["input"] * len(df), dtype=object),
         )
-        by_id = idf.set_index("id")
-        assert by_id.loc[2, "n_mates"] == 2
-        assert by_id.loc[6, "n_full_sibs"] == 1
-        assert by_id.loc[6, "n_grandparents"] == 4
-        assert by_id.loc[4, "n_mat_half_sibs"] == 1
+        by_id = {row["id"]: row for row in idf.iter_rows(named=True)}
+        assert by_id[2]["n_mates"] == 2
+        assert by_id[6]["n_full_sibs"] == 1
+        assert by_id[6]["n_grandparents"] == 4
+        assert by_id[4]["n_mat_half_sibs"] == 1
 
     def test_relationship_summary_skip_empty_unknown_and_self_pairs(self) -> None:
         """Relationship summaries distinguish skipped, empty, no-valid-pair, and related-pair inputs."""
-        df = pd.DataFrame({"ped_depth": [0, 0, 1]})
+        df = pl.DataFrame({"ped_depth": [0, 0, 1]})
         skipped = compute_relationship_summary(df, None)
         assert skipped["computed"] is False
 
-        empty = compute_relationship_summary(pd.DataFrame({"ped_depth": []}), {})
+        empty = compute_relationship_summary(pl.DataFrame(schema={"ped_depth": pl.Int32}), {})
         assert empty["n_individual_pairs"] == 0
 
         no_valid = compute_relationship_summary(

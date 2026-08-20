@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 from hypothesis import given
 from hypothesis import strategies as st
 
+from pedsum.pedigree_ops import IdIndex
 from pedsum.report import _build_added_founders
 
 FounderReferences = tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -55,7 +55,7 @@ def test_added_founder_ids_are_missing_parent_references(
     if no_sex_check:
         expected |= conflicts
 
-    founders = _build_added_founders(mothers, fathers, pd.Index(ids), no_sex_check=no_sex_check)
+    founders = _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=no_sex_check)
     added_ids = [row["id"] for row in founders]
 
     assert added_ids == sorted(expected)
@@ -68,7 +68,7 @@ def test_added_founder_sex_follows_unambiguous_parent_role(generated: FounderRef
     """Mother-only missing IDs become F and father-only missing IDs become M."""
     ids, mothers, fathers = generated
     moms_only, dads_only, conflicts = _missing_role_sets(ids, mothers, fathers)
-    founders = _build_added_founders(mothers, fathers, pd.Index(ids), no_sex_check=True)
+    founders = _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=True)
     by_id = {row["id"]: row for row in founders}
 
     for mid in moms_only:
@@ -86,8 +86,8 @@ def test_role_conflict_founders_require_no_sex_check(generated: FounderReference
     ids, mothers, fathers = generated
     _, _, conflicts = _missing_role_sets(ids, mothers, fathers)
 
-    strict_ids = {row["id"] for row in _build_added_founders(mothers, fathers, pd.Index(ids), no_sex_check=False)}
-    permissive_ids = {row["id"] for row in _build_added_founders(mothers, fathers, pd.Index(ids), no_sex_check=True)}
+    strict_ids = {row["id"] for row in _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=False)}
+    permissive_ids = {row["id"] for row in _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=True)}
 
     assert strict_ids.isdisjoint(conflicts)
     assert conflicts <= permissive_ids

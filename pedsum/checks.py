@@ -11,7 +11,7 @@ from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import _build_children_csr, _parent_rows
 
 if TYPE_CHECKING:
-    import pandas as pd
+    from pedsum.pedigree_ops import IdIndex
 
 
 @dataclass
@@ -82,7 +82,7 @@ def _check_parent_token_range(arr: np.ndarray, role: str) -> list[Finding]:
     ]
 
 
-def _check_parent_refs_present(arr: np.ndarray, role: str, id_index: pd.Index) -> list[Finding]:
+def _check_parent_refs_present(arr: np.ndarray, role: str, id_index: IdIndex) -> list[Finding]:
     """Detect parent IDs that don't have their own row; one Finding per missing ID."""
     present = arr != -1
     if not present.any():
@@ -154,7 +154,7 @@ def _check_self_loops(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray)
 def _check_parent_refs_sex_conflict(
     mothers: np.ndarray,
     fathers: np.ndarray,
-    id_index: pd.Index,
+    id_index: IdIndex,
 ) -> list[Finding]:
     """Detect missing parent IDs referenced as both mother AND father; one Finding per ID."""
     moms = np.unique(mothers[mothers != -1])
@@ -206,7 +206,7 @@ def _check_sex_role_consistency(
     mothers: np.ndarray,
     fathers: np.ndarray,
     sex: np.ndarray,
-    id_index: pd.Index,
+    id_index: IdIndex,
     *,
     skip_mask: np.ndarray | None = None,
 ) -> list[Finding]:
@@ -318,7 +318,7 @@ def _summarize_findings(findings: list[Finding]) -> str:
     return f"{check}: {n} finding(s) — {sample_str}{extra}"
 
 
-def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, id_index: pd.Index) -> list[Finding]:
+def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, id_index: IdIndex) -> list[Finding]:
     """Detect IDs in a cycle via Kahn's; one Finding per node that couldn't be resolved."""
     n = len(ids)
     m_row, mask_m = _parent_rows(mothers, id_index)
@@ -375,7 +375,7 @@ def _check_birth_year_topology(
     mothers: np.ndarray,
     fathers: np.ndarray,
     birth_year: np.ndarray,
-    id_index: pd.Index,
+    id_index: IdIndex,
 ) -> list[Finding]:
     """Detect parent-child edges with ``child.birth_year < parent.birth_year``.
 

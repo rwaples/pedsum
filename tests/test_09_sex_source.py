@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import gzip
 
-import pandas as pd
+import polars as pl
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
@@ -56,10 +56,10 @@ def test_annotated_tsv_has_sex_source_column(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(out_dir / "annotated.tsv.gz", "rt") as fh:
-        ann = pd.read_csv(fh, sep="\t")
+    with gzip.open(out_dir / "annotated.tsv.gz", "rb") as fh:
+        ann = pl.read_csv(fh.read(), separator="\t")
     assert "sex_source" in ann.columns
-    by_id = ann.set_index("id")["sex_source"].to_dict()
+    by_id = dict(zip(ann["id"].to_list(), ann["sex_source"].to_list(), strict=True))
     assert by_id[1] == "input"
     assert by_id[5] == "imputed_from_missing"
     assert by_id[6] == "imputed_from_role"
@@ -81,16 +81,16 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(out_dir / "validate.tsv.gz", "rt") as fh:
-        fixed = pd.read_csv(fh, sep="\t", dtype=str)
+    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
+        fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     assert "sex_source" in fixed.columns
-    by_id = fixed.set_index(fixed["id"].astype(int))["sex_source"].to_dict()
+    by_id = dict(zip(fixed["id"].cast(pl.Int64).to_list(), fixed["sex_source"].to_list(), strict=True))
     assert by_id[1] == "input"
     assert by_id[5] == "imputed_from_missing"
     assert by_id[6] == "imputed_from_role"
     assert by_id[8] == "unresolved"
     # Row 6 in the fixed file has its sex normalised to F.
-    row6 = fixed.loc[fixed["id"].astype(int) == 6].iloc[0]
+    row6 = fixed.filter(pl.col("id").cast(pl.Int64) == 6).row(0, named=True)
     assert row6["sex"] == "F"
 
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Offspring Sex Concordance
+## Unreleased
 
 ### Features
 
@@ -20,6 +20,14 @@
 
 - New `pedsum/sex_concordance.py` keeps the statistics, group projection, Holm adjustment and both samplers out of `sections.py` and `_run_summarize`.
 - `environment.yml`'s numba comment is corrected (pedsum now imports numba optionally) and its stale `pedigree-graph @ git+...@v0.5.3` pin is replaced with the PyPI `>=0.6,<0.7` range `pyproject.toml` already declares.
+- **pedsum's internals are now polars, not pandas.** Every module that held a DataFrame (`parse`, `validate`, `sections`, `report`, `pairs`, `epimight`, `cli`, `pedigree_ops`) was converted: `pd.read_csv` → `pl.read_csv`, boolean-mask `getitem` → `.filter`, `.assign` → `.with_columns`, `groupby(...).size()` → vectorised NumPy grouping, and the pandas `Index.get_indexer` id→row idiom → a small `pedsum.pedigree_ops.IdIndex` (argsort + `searchsorted`) helper. The statistical / Ne code was already NumPy-based and is untouched — arrays are simply extracted from polars columns instead of pandas ones. No numeric semantics, thresholds, or seeds changed.
+- **The CLI contract is unchanged.** Every command, flag, output filename, delimiter, header, column order, and missing-value rendering is identical. Verified end-to-end on `example_pedigree.tsv` across `summarize` (streaming and `--per-individual-pairs` engines, with `--tsv --ne-coancestry --birth-year-col`), `validate` (clean and auto-fixing), and `epimight-input --pairs --exact-kinship --parquet`: `summary.pedigree.tsv`, `summary.individual.tsv`, `summary.yaml`, `summary.extra.yaml`, `annotated.tsv.gz`, `validate.log`, `validate.tsv.gz`, `pipeline_input.tsv`, and `relative_pairs.tsv` are byte-identical to the pandas outputs, and both parquet tables are schema- and value-identical.
+- **`--parquet` no longer needs `pyarrow`** — polars writes parquet natively. The flag, filenames, and column dtypes are unchanged; only the stale "requires pyarrow" note in the `--parquet` help text and README was dropped.
+
+### Dependencies
+
+- **`pandas` removed as a direct dependency; `polars>=1.43.2,<2` added** (`pyproject.toml` and `environment.yml`). pandas is not in the test extra either — the test suite is pandas-free. This follows the family-wide polars migration (simACE ADR 0015).
+- pedsum builds its `PedigreeGraph` from arrays and is unaffected by the accompanying pedigree-graph change, which gives its constructors (`PedigreeGraph(...)`, `from_dataframe`, `from_subsample`) a structural `FrameLike` protocol accepting polars frames, pandas frames, and `dict[str, np.ndarray]` alike.
 
 ## 0.12.1 — 2026-06-26 — exact kinship for relative pairs
 

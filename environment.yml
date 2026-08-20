@@ -5,7 +5,7 @@ dependencies:
   - python>=3.13
   - numpy
   - scipy
-  - pandas>=3,<4
+  - polars>=1.43.2,<2
   - pyyaml
   # pedsum imports numba *optionally*, for the sex-concordance permutation
   # sampler only (`--sex-concordance-permutations`), and falls back to a NumPy

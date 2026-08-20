@@ -22,7 +22,7 @@ import sys
 from fractions import Fraction
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 import yaml
 from conftest import EXAMPLE, write_ped
@@ -45,10 +45,10 @@ _GROUPINGS = ("sibship", "maternal_offspring_group", "paternal_offspring_group")
 # ---------------------------------------------------------------------------
 
 
-def _frame(mothers, fathers, sexes, sources=None) -> pd.DataFrame:
+def _frame(mothers, fathers, sexes, sources=None) -> pl.DataFrame:
     """Minimal validated-frame stand-in: the four columns the analysis reads."""
     n = len(mothers)
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "mother": np.asarray(mothers, dtype=np.int64),
             "father": np.asarray(fathers, dtype=np.int64),

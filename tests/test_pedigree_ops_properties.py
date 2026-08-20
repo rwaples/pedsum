@@ -9,13 +9,13 @@ pedigrees with ids ``0..n-1`` emitted in topological order.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from pedsum.base import PedigreeError
-from pedsum.pedigree_ops import _compute_depth_unordered, _full_sib_groups, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _full_sib_groups, _parent_rows
 
 
 @st.composite
@@ -79,7 +79,7 @@ def test_depth_detects_cycle() -> None:
 def test_full_sib_counts_conserved(ped: tuple) -> None:
     """fs_count is non-negative, zero when a parent is missing, and sums to n(n-1) per mating pair."""
     ids, mothers, fathers = ped
-    df = pd.DataFrame({"id": ids, "mother": mothers, "father": fathers})
+    df = pl.DataFrame({"id": ids, "mother": mothers, "father": fathers})
     fs_count, _, _ = _full_sib_groups(df)
 
     assert (fs_count >= 0).all()
@@ -87,11 +87,14 @@ def test_full_sib_counts_conserved(ped: tuple) -> None:
     assert (fs_count[missing_parent] == 0).all()
     assert (~missing_parent)[fs_count > 0].all()  # fs_count > 0 implies both parents present
 
-    both_present = df[(df["mother"] != -1) & (df["father"] != -1)]
-    for _, group in both_present.groupby(["mother", "father"]):
-        rows = group.index.to_numpy()
-        size = len(rows)
-        assert fs_count[rows].sum() == size * (size - 1)
+    both_present_rows = np.where(~missing_parent)[0]
+    pair_keys = np.column_stack([mothers[both_present_rows], fathers[both_present_rows]])
+    if both_present_rows.size:
+        _, inv = np.unique(pair_keys, axis=0, return_inverse=True)
+        for group in range(int(inv.max()) + 1):
+            rows = both_present_rows[inv == group]
+            size = len(rows)
+            assert fs_count[rows].sum() == size * (size - 1)
 
 
 @settings(deadline=None)
@@ -99,7 +102,7 @@ def test_full_sib_counts_conserved(ped: tuple) -> None:
 def test_parent_rows_mask_and_index(ped: tuple) -> None:
     """The present-mask matches ``!= -1``; resolved rows are in range and map back to the parent id."""
     ids, mothers, fathers = ped
-    id_index = pd.Index(ids)
+    id_index = IdIndex(ids)
     n = len(ids)
     for parents in (mothers, fathers):
         rows, mask = _parent_rows(parents, id_index)

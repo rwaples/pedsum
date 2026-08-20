@@ -55,7 +55,7 @@ from pedsum.base import SEX_MALE, logger
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
-    import pandas as pd
+    import polars as pl
 
 # Grouping name → the parent column(s) that both define the group key and must
 # be known for an offspring to belong to it. Order is the emit order.
@@ -744,7 +744,7 @@ def _null_timer(label: str) -> AbstractContextManager[None]:
 
 
 def compute_offspring_sex_concordance(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     permutations: int = 0,
     seed: int = 0,

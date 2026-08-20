@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import gzip
 
-import pandas as pd
+import polars as pl
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
@@ -34,9 +34,9 @@ def test_validate_reorders_unordered_tsv(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "reordering" in r.stderr.lower()
     with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
-        fixed = pd.read_csv(fh, sep="\t", dtype=str)
+        fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
     # The two founders must appear before the child in row order.
-    ids_in_order = fixed["id"].astype(int).tolist()
+    ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(1) < ids_in_order.index(3)
     assert ids_in_order.index(2) < ids_in_order.index(3)
 
@@ -95,14 +95,14 @@ def test_validate_fixed_tsv_sex_source_rides_with_reorder(tmp_path):
     assert r.returncode == 0, r.stderr
     fixed = load_validate_tsv_gz(out_dir)
     assert "sex_source" in fixed.columns
-    by_id = fixed.set_index(fixed["id"].astype(int))
-    assert by_id.loc[5, "sex"] == "F"
-    assert by_id.loc[5, "sex_source"] == "imputed_from_missing"
+    by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
+    assert by_id[5]["sex"] == "F"
+    assert by_id[5]["sex_source"] == "imputed_from_missing"
     # The other rows keep their asserted sex.
-    assert by_id.loc[1, "sex"] == "M"
-    assert by_id.loc[1, "sex_source"] == "input"
+    assert by_id[1]["sex"] == "M"
+    assert by_id[1]["sex_source"] == "input"
     # Reorder happened: founders precede the child.
-    ids_in_order = fixed["id"].astype(int).tolist()
+    ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(1) < ids_in_order.index(3)
     assert ids_in_order.index(5) < ids_in_order.index(3)
 
@@ -126,8 +126,8 @@ def test_validate_fixed_tsv_overridden_sex_rides_with_reorder(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir)])
     assert r.returncode == 0, r.stderr
     fixed = load_validate_tsv_gz(out_dir)
-    by_id = fixed.set_index(fixed["id"].astype(int))
-    assert by_id.loc[5, "sex"] == "F"
-    assert by_id.loc[5, "sex_source"] == "imputed_from_role"
-    ids_in_order = fixed["id"].astype(int).tolist()
+    by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
+    assert by_id[5]["sex"] == "F"
+    assert by_id[5]["sex_source"] == "imputed_from_role"
+    ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(5) < ids_in_order.index(3)

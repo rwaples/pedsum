@@ -407,7 +407,7 @@ Flags:
   first cousins (`0.125` not `0.0625`). Runs the kinship recurrence over every
   pair, so cost scales with pair count × pedigree depth. No-op without `--pairs`.
 - `--parquet` — additionally write the parquet form of each emitted table
-  (requires `pyarrow`).
+  (written natively by polars).
 - `--rels CODES` — comma-separated relationship codes to emit, in order
   (default: all eight).
 - `--disorder NAME` — label for the single emitted `disorder` block (default
@@ -511,10 +511,10 @@ python pedigree_summary.py summarize \
 
 CSV: pass directly — `--sep auto` reads commas (or `--sep comma` to
 be explicit). For Excel, or CSVs with quoted commas inside fields,
-re-export through pandas:
+re-export through polars:
 
 ```bash
-python -c "import pandas as pd; pd.read_excel('input.xlsx').to_csv('input.tsv', sep='\t', index=False)"
+python -c "import polars as pl; pl.read_excel('input.xlsx').write_csv('input.tsv', separator='\t')"
 ```
 
 ### String IDs (`"P001"`, `"FAM01-003"`, …)
@@ -523,15 +523,18 @@ The relationship enumerator requires integer IDs. Map them once and
 keep a lookup table:
 
 ```python
-import pandas as pd
+import polars as pl
 
-df = pd.read_csv("clinical.tsv", sep="\t", dtype=str)
-all_ids = pd.unique(df[["id", "mother", "father"]].values.ravel())
-lut = {sid: i for i, sid in enumerate(sorted(all_ids[all_ids != "-1"]))}
+df = pl.read_csv("clinical.tsv", separator="\t", infer_schema=False)
+all_ids = set()
 for col in ("id", "mother", "father"):
-    df[col] = df[col].map(lambda x: lut.get(x, -1)).astype(int)
-df.to_csv("clinical_int.tsv", sep="\t", index=False)
-pd.Series(lut).to_csv("id_lookup.tsv", sep="\t")
+    all_ids |= set(df[col].to_list())
+lut = {sid: i for i, sid in enumerate(sorted(all_ids - {"-1"}))}
+df = df.with_columns(
+    pl.col(col).replace_strict(lut, default=-1, return_dtype=pl.Int64) for col in ("id", "mother", "father")
+)
+df.write_csv("clinical_int.tsv", separator="\t")
+pl.DataFrame({"id": list(lut), "row": list(lut.values())}).write_csv("id_lookup.tsv", separator="\t")
 ```
 
 ## Large pedigrees

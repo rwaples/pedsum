@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import _build_children_csr, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _build_children_csr, _parent_rows
 from pedsum.sections import _offspring_dist, compute_sibship_sizes, compute_size_structure
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 @st.composite
-def acyclic_pedigree_frames(draw: st.DrawFn, *, max_size: int = 30) -> pd.DataFrame:
+def acyclic_pedigree_frames(draw: st.DrawFn, *, max_size: int = 30) -> pl.DataFrame:
     """Generate valid acyclic pedigree frames with parents preceding children."""
     n = draw(st.integers(min_value=0, max_value=max_size))
     mothers: list[int] = []
@@ -35,7 +35,7 @@ def acyclic_pedigree_frames(draw: st.DrawFn, *, max_size: int = 30) -> pd.DataFr
         parent_depths = [depths[p] for p in (mother, father) if p != -1]
         depths.append((max(parent_depths) + 1) if parent_depths else 0)
     sex = draw(st.lists(st.sampled_from([SEX_UNKNOWN, SEX_FEMALE, SEX_MALE]), min_size=n, max_size=n))
-    return pd.DataFrame(
+    return pl.DataFrame(
         {
             "id": np.arange(n, dtype=np.int64),
             "sex": np.array(sex, dtype=np.int8),
@@ -46,16 +46,16 @@ def acyclic_pedigree_frames(draw: st.DrawFn, *, max_size: int = 30) -> pd.DataFr
     )
 
 
-def _children_csr(df: pd.DataFrame) -> sp.csr_matrix | None:
+def _children_csr(df: pl.DataFrame) -> sp.csr_matrix | None:
     """Build the children CSR for ``df`` using the production row-mapping helper."""
-    id_index = pd.Index(df["id"].to_numpy())
+    id_index = IdIndex(df["id"].to_numpy())
     m_row, mask_m = _parent_rows(df["mother"].to_numpy(), id_index)
     f_row, mask_f = _parent_rows(df["father"].to_numpy(), id_index)
     return _build_children_csr(m_row, mask_m, f_row, mask_f, len(df))
 
 
 @given(acyclic_pedigree_frames())
-def test_compute_size_structure_conserves_counts(df: pd.DataFrame) -> None:
+def test_compute_size_structure_conserves_counts(df: pl.DataFrame) -> None:
     """Size-structure headline counts partition individuals and parent links."""
     summary, labels = compute_size_structure(df, _children_csr(df))
     n = len(df)
@@ -78,17 +78,17 @@ def test_compute_size_structure_conserves_counts(df: pd.DataFrame) -> None:
 
 
 @given(acyclic_pedigree_frames(), st.data())
-def test_compute_size_structure_is_row_order_invariant(df: pd.DataFrame, data: st.DataObject) -> None:
+def test_compute_size_structure_is_row_order_invariant(df: pl.DataFrame, data: st.DataObject) -> None:
     """Permuting rows leaves structural summary counts unchanged."""
     summary, _ = compute_size_structure(df, _children_csr(df))
     perm = data.draw(st.permutations(range(len(df))))
-    shuffled = df.iloc[list(perm)].reset_index(drop=True)
+    shuffled = df[list(perm)]
     shuffled_summary, _ = compute_size_structure(shuffled, _children_csr(shuffled))
     assert shuffled_summary == summary
 
 
 @given(acyclic_pedigree_frames())
-def test_build_children_csr_matches_known_parent_links(df: pd.DataFrame) -> None:
+def test_build_children_csr_matches_known_parent_links(df: pl.DataFrame) -> None:
     """The parent→child CSR contains exactly the known parent-child links."""
     csr = _children_csr(df)
     mothers = df["mother"].to_numpy()
@@ -120,15 +120,18 @@ def test_offspring_distribution_is_a_pmf(counts: list[int]) -> None:
 
 
 @given(acyclic_pedigree_frames())
-def test_sibship_size_distribution_is_a_pmf(df: pd.DataFrame) -> None:
+def test_sibship_size_distribution_is_a_pmf(df: pl.DataFrame) -> None:
     """Non-empty sibship-size histograms conserve probability mass over Mating Pairs."""
     summary = compute_sibship_sizes(df)
-    both_present = (df["mother"] != -1) & (df["father"] != -1)
+    mothers = df["mother"].to_numpy()
+    fathers = df["father"].to_numpy()
+    both_present = (mothers != -1) & (fathers != -1)
     if not both_present.any():
         assert summary == {"empty": True}
         return
 
-    children = df.loc[both_present]
+    pair_keys = np.column_stack([mothers[both_present], fathers[both_present]])
+    n_pairs = len(np.unique(pair_keys, axis=0))
     assert summary["empty"] is False
-    assert summary["n_sibships"] == children.groupby(["mother", "father"]).ngroups
+    assert summary["n_sibships"] == n_pairs
     assert sum(summary["size_dist"].values()) == pytest.approx(1.0)

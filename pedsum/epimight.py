@@ -15,7 +15,7 @@ are a pure function of the pedigree:
     born_at_year       <- birth_year if available, else base_year + generation
 
 The remaining columns need phenotype/affection/demography a pedigree does not
-contain, so they are emitted as explicit ``<NA>`` placeholders (nullable-integer
+contain, so they are emitted as explicit null placeholders (nullable-integer
 dtype — schema-correct and ready to fill):
 
     failure_status      (needs affection status)
@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -102,7 +102,7 @@ EPIMIGHT_COLUMNS: tuple[str, ...] = (
     "dead_at_year",
 )
 
-#: Columns this skeleton cannot fill from a bare pedigree (emitted as <NA>).
+#: Columns this skeleton cannot fill from a bare pedigree (emitted as nulls).
 PLACEHOLDER_COLUMNS: tuple[str, ...] = (
     "failure_status",
     "failure_time",
@@ -195,8 +195,8 @@ def count_total_relatives(
     return counts.astype(np.int32, copy=False)
 
 
-def _born_at_year(df: pd.DataFrame, generations: np.ndarray, base_year: int) -> pd.api.extensions.ExtensionArray:
-    """Birth year per row: real ``birth_year`` if present (``-1`` → ``<NA>``), else derived.
+def _born_at_year(df: pl.DataFrame, generations: np.ndarray, base_year: int) -> pl.Series:
+    """Birth year per row: real ``birth_year`` if present (``-1`` → null), else derived.
 
     ``load_and_validate`` adds a ``birth_year`` column (int32, sentinel ``-1``)
     only under ``--birth-year-col``; otherwise the EPIMIGHT convention
@@ -204,14 +204,16 @@ def _born_at_year(df: pd.DataFrame, generations: np.ndarray, base_year: int) -> 
     """
     if "birth_year" in df.columns:
         raw = df["birth_year"].to_numpy()
-        out = pd.array(raw, dtype="Int32")
-        out[raw == -1] = pd.NA
-        return out
-    return pd.array((base_year + generations).astype(np.int32), dtype="Int32")
+        return (
+            pl.DataFrame({"v": raw.astype(np.int32)})
+            .select(pl.when(pl.col("v") == -1).then(None).otherwise(pl.col("v")).cast(pl.Int32).alias("born_at_year"))
+            .to_series()
+        )
+    return pl.Series("born_at_year", (base_year + generations).astype(np.int32), dtype=pl.Int32)
 
 
 def build_epimight_skeleton(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     pg: PedigreeGraph,
     *,
     all_pairs: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
@@ -219,11 +221,11 @@ def build_epimight_skeleton(
     disorder: str = "trait1",
     base_year: int = BASE_YEAR,
     drop_founders: bool = False,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Build the EPIMIGHT long-form skeleton from a validated pedigree.
 
     Structural columns (``person_id``, ``relationship_kind``, ``relatives``,
-    ``born_at_year``) are computed; phenotype columns are ``<NA>`` placeholders.
+    ``born_at_year``) are computed; phenotype columns are null placeholders.
 
     Args:
         df: the topologically-sorted frame returned by ``load_and_validate``
@@ -249,56 +251,56 @@ def build_epimight_skeleton(
     rels = validate_relationship_codes(rels)
     n = len(df)
     generations = np.asarray(pg.generation)
-    person_id = df["id"].astype(str).to_numpy(dtype=object)
+    person_id = df["id"].cast(pl.String).rename("person_id")
     born_at_year = _born_at_year(df, generations, base_year)
 
     if all_pairs is None:
         all_pairs = pg.extract_pairs()
 
-    # Reused placeholder arrays — every block shares the same <NA> columns.
-    na_i8 = pd.array([pd.NA] * n, dtype="Int8")
-    na_i16 = pd.array([pd.NA] * n, dtype="Int16")
-    na_i32 = pd.array([pd.NA] * n, dtype="Int32")
+    # Reused placeholder columns — every block shares the same null columns.
+    na_i8 = pl.Series("failure_status", [None] * n, dtype=pl.Int8)
+    na_i16_time = pl.Series("failure_time", [None] * n, dtype=pl.Int16)
+    na_i16_dead = pl.Series("dead_at_year", [None] * n, dtype=pl.Int16)
+    na_i32 = pl.Series("relatives_diagnosed", [None] * n, dtype=pl.Int32)
 
-    blocks: list[pd.DataFrame] = []
+    blocks: list[pl.DataFrame] = []
     for code in rels:
         rel = _EPI_REGISTRY[code]
         pair_blocks = _relationship_pair_blocks(all_pairs, code, generations)
         relatives = count_total_relatives(pair_blocks, n, unidirectional=rel.directional)
         blocks.append(
-            pd.DataFrame(
+            pl.DataFrame(
                 {
                     "person_id": person_id,
-                    "disorder": disorder,
+                    "disorder": pl.Series("disorder", [disorder] * n, dtype=pl.String),
                     "failure_status": na_i8,  # placeholder: needs affection
-                    "failure_time": na_i16,  # placeholder: needs onset/censoring
-                    "relationship_kind": code,
+                    "failure_time": na_i16_time,  # placeholder: needs onset/censoring
+                    "relationship_kind": pl.Series("relationship_kind", [code] * n, dtype=pl.String),
                     "relatives": relatives,
                     "relatives_diagnosed": na_i32,  # placeholder: needs relatives' affection
                     "born_at_year": born_at_year,
-                    "dead_at_year": na_i16,  # placeholder: needs death age
-                },
-                columns=EPIMIGHT_COLUMNS,
-            )
+                    "dead_at_year": na_i16_dead,  # placeholder: needs death age
+                }
+            ).select(EPIMIGHT_COLUMNS)
         )
 
-    out = pd.concat(blocks, ignore_index=True)
+    out = pl.concat(blocks)
 
     if drop_founders:
-        keep = person_id[generations > generations.min()]
-        out = out[out["person_id"].isin(keep)]
+        keep = person_id.to_numpy()[generations > generations.min()]
+        out = out.filter(pl.col("person_id").is_in(keep.tolist()))
 
-    return out.sort_values(["relationship_kind", "disorder"], kind="stable", ignore_index=True)
+    return out.sort(["relationship_kind", "disorder"], maintain_order=True)
 
 
 def build_relative_pairs(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     pg: PedigreeGraph,
     *,
     all_pairs: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
     exact_kinship: bool = False,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Build the long list of relative pairs backing the skeleton's counts.
 
     One row per relative pair per relationship code, with columns
@@ -346,31 +348,45 @@ def build_relative_pairs(
             code_idx[code] = (idx1, idx2)
     exact = pg.compute_pair_kinship(code_idx) if (exact_kinship and code_idx) else {}
 
-    blocks: list[pd.DataFrame] = []
+    blocks: list[pl.DataFrame] = []
     for code, (idx1, idx2) in code_idx.items():
         id1, id2 = ids[idx1], ids[idx2]
         if not _EPI_REGISTRY[code].directional:
             # Symmetric: canonicalize so the smaller id comes first. compute_pair_kinship
             # is symmetric, so this column swap leaves kinship_exact aligned.
             id1, id2 = np.minimum(id1, id2), np.maximum(id1, id2)
-        data = {"id1": id1, "id2": id2, "relationship_kind": code, "kinship": _EPI_REGISTRY[code].kinship}
+        n_rows = len(id1)
+        data = {
+            "id1": id1,
+            "id2": id2,
+            "relationship_kind": pl.Series([code] * n_rows, dtype=pl.String),
+            "kinship": np.full(n_rows, _EPI_REGISTRY[code].kinship, dtype=np.float64),
+        }
         if exact_kinship:
-            data["kinship_exact"] = exact[code]
-        blocks.append(pd.DataFrame(data, columns=columns))
+            data["kinship_exact"] = np.asarray(exact[code], dtype=np.float64)
+        blocks.append(pl.DataFrame(data).select(columns))
 
     if not blocks:
-        return pd.DataFrame(columns=columns)
-    out = pd.concat(blocks, ignore_index=True)
-    return out.sort_values(["relationship_kind", "id1", "id2"], kind="stable", ignore_index=True)
+        return pl.DataFrame(
+            schema={
+                "id1": pl.Int64,
+                "id2": pl.Int64,
+                "relationship_kind": pl.String,
+                "kinship": pl.Float64,
+                **({"kinship_exact": pl.Float64} if exact_kinship else {}),
+            }
+        )
+    out = pl.concat(blocks)
+    return out.sort(["relationship_kind", "id1", "id2"], maintain_order=True)
 
 
-def relationship_diagnostics(frame: pd.DataFrame, rels: tuple[str, ...]) -> list[tuple[str, int, float]]:
+def relationship_diagnostics(frame: pl.DataFrame, rels: tuple[str, ...]) -> list[tuple[str, int, float]]:
     """Per relationship code, ``(code, n_people_with_a_relative, mean_relatives)``."""
     diags: list[tuple[str, int, float]] = []
     for code in rels:
-        block = frame[frame["relationship_kind"] == code]
-        with_rel = block["relatives"] > 0
+        relatives = frame.filter(pl.col("relationship_kind") == code)["relatives"].to_numpy()
+        with_rel = relatives > 0
         n_with = int(with_rel.sum())
-        mean_rel = float(block.loc[with_rel, "relatives"].mean()) if n_with else 0.0
+        mean_rel = float(relatives[with_rel].mean()) if n_with else 0.0
         diags.append((code, n_with, mean_rel))
     return diags

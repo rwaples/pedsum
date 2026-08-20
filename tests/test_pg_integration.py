@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 
 import pedigree_summary as ps
 
@@ -36,7 +37,7 @@ _SNAPSHOT = {
 def _build_pg_and_df():
     df, _ = ps.load_and_validate(EXAMPLE)
     pg = ps._build_pedigree_graph(df)
-    df["ped_depth"] = np.asarray(pg.generation, dtype=np.int32)
+    df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.generation, dtype=np.int32)))
     return pg, df
 
 
@@ -76,4 +77,4 @@ def test_sex_preserved_through_compaction():
     )
     # Spot-check the male/female totals match (a silent zeros default
     # would make pg.sex.sum() == 0).
-    assert int(pg.sex.sum()) == int((df["sex"] == ps.SEX_MALE).sum())
+    assert int(pg.sex.sum()) == int((df["sex"].to_numpy() == ps.SEX_MALE).sum())

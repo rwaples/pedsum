@@ -38,12 +38,12 @@ def test_annotated_tsv_realigns_to_topological_order(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     ann = load_annotated_tsv_gz(out_dir)
-    ids = ann["id"].tolist()
+    ids = ann["id"].to_list()
     # Every parent id must appear at a strictly smaller index than the child.
     assert ids.index(1) < ids.index(3)
     assert ids.index(2) < ids.index(3)
     # Extra column rides along by id, not by original row position.
-    by_id = dict(zip(ann["id"].tolist(), ann["tag"].tolist(), strict=True))
+    by_id = dict(zip(ann["id"].to_list(), ann["tag"].to_list(), strict=True))
     assert by_id == {1: "dad", 2: "mom", 3: "child"}
 
 
@@ -75,11 +75,11 @@ def test_annotated_tsv_renames_colliding_input_column(tmp_path):
     assert "n_descendant_paths" in ann.columns
     assert "n_descendant_paths_input" in ann.columns
     by_id = dict(
-        zip(ann["id"].tolist(), ann["n_descendant_paths_input"].tolist(), strict=True),
+        zip(ann["id"].to_list(), ann["n_descendant_paths_input"].to_list(), strict=True),
     )
     assert by_id == {1: "alpha", 2: "beta", 3: "gamma"}
     # Derived column carries actual descendant-path counts (founders have 1, child has 0).
-    derived = dict(zip(ann["id"].tolist(), ann["n_descendant_paths"].tolist(), strict=True))
+    derived = dict(zip(ann["id"].to_list(), ann["n_descendant_paths"].to_list(), strict=True))
     assert derived[3] == 0  # child has no descendants
     assert derived[1] >= 1  # both founders have at least one descendant
     assert derived[2] >= 1
@@ -120,9 +120,9 @@ def test_annotated_tsv_drops_reserved_sex_source_collision(tmp_path):
     assert "sex_source" in ann.columns  # freshly derived provenance
     assert "sex_source_input" not in ann.columns  # stale copy dropped, not parked
     # Derived values are pedsum's own vocabulary, not the stale input tokens.
-    derived = set(ann["sex_source"].tolist())
+    derived = set(ann["sex_source"].to_list())
     assert derived <= {"input", "imputed_from_missing", "imputed_from_role", "unresolved"}
-    assert "stale_a" not in ann["sex_source"].tolist()
+    assert "stale_a" not in ann["sex_source"].to_list()
     # Reported at INFO ("regenerated"), not as a collision WARNING.
     assert "regenerated" in r.stderr
     assert "collide" not in r.stderr
@@ -155,6 +155,6 @@ def test_annotated_tsv_renames_component_id_collision(tmp_path):
     assert "component_id" in ann.columns
     assert "component_id_input" in ann.columns
     by_id = dict(
-        zip(ann["id"].tolist(), ann["component_id_input"].tolist(), strict=True),
+        zip(ann["id"].to_list(), ann["component_id_input"].to_list(), strict=True),
     )
     assert by_id == {1: "x", 2: "y", 3: "z"}

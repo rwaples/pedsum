@@ -23,7 +23,7 @@ def test_validate_writes_added_mother_founder(tmp_path):
     assert r.returncode == 1, r.stderr
     assert "mother IDs present in pedigree" in r.stderr
     fixed = load_validate_tsv_gz(out_dir)
-    by_id = {int(row["id"]): row for _, row in fixed.iterrows()}
+    by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert 100 in by_id
     added = by_id[100]
     assert added["sex"] == "F"
@@ -45,7 +45,7 @@ def test_validate_writes_added_father_founder(tmp_path):
     assert r.returncode == 1, r.stderr
     assert "father IDs present in pedigree" in r.stderr
     fixed = load_validate_tsv_gz(out_dir)
-    by_id = {int(row["id"]): row for _, row in fixed.iterrows()}
+    by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert 100 in by_id
     assert by_id[100]["sex"] == "M"
 
@@ -82,6 +82,6 @@ def test_validate_writes_added_conflicting_founder_with_no_sex_check(tmp_path):
     # The conflict check renders as SKIP (bypassed via --no-sex-check).
     assert "bypassed via --no-sex-check" in r.stderr
     fixed = load_validate_tsv_gz(out_dir)
-    by_id = {int(row["id"]): row for _, row in fixed.iterrows()}
+    by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert 100 in by_id
     assert by_id[100]["sex"] == "F"
