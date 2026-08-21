@@ -591,7 +591,9 @@ def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
                 raise PedigreeError(f"pigz exited with status {proc.returncode}")
         return
     with gzip.open(out_path, "wb", compresslevel=1) as fh:
-        df.write_csv(fh, separator="\t")  # ty: ignore[invalid-argument-type]
+        # GzipFile satisfies the IO[bytes] target at runtime; polars' overloads
+        # spell it more narrowly than ty can match.
+        df.write_csv(fh, separator="\t")  # ty: ignore[no-matching-overload]
 
 
 def _write_annotated_tsv(
