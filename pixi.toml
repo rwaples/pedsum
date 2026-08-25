@@ -1,0 +1,25 @@
+# pedsum development environment (simACE family ADR 0018): a self-contained
+# locked env installing this repo editable with its test + typecheck extras.
+# Everything pedsum needs is already described by pyproject.toml, ruff.toml and
+# ty.toml, so this manifest restates no pins of its own.
+#
+# This is the maintainer environment. environment.yml remains the documented
+# install path for outside users; it is a conda recipe, and unlike this manifest
+# it is not locked or exercised by CI.
+#
+# pedigree-graph resolves from PyPI (released wheel), matching what an outside
+# user gets. For ad-hoc editable work against the sibling checkout, add locally
+# (do NOT commit):
+#   pedigree-graph = { path = "../pedigree-graph", editable = true }
+[workspace]
+name = "pedsum"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+requires-pixi = ">=0.76,<0.77"
+
+[dependencies]
+python = "3.13.*"
+pip = "*"
+
+[pypi-dependencies]
+pedsum = { path = ".", editable = true, extras = ["test", "typecheck"] }

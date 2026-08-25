@@ -41,6 +41,14 @@ version = { attr = "pedsum.base.VERSION" }
 [tool.setuptools.packages.find]
 include = ["pedsum*"]
 
+# pedsum's suite is self-contained; this section exists mainly so pytest treats
+# this file as its configfile and anchors rootdir here. Without it, pytest walks
+# up past the repo root and adopts whatever pyproject.toml it finds above --
+# inside the simACE umbrella checkout that is simACE's, whose testpaths and
+# norecursedirs are none of pedsum's business.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 # Lint and type-check config deliberately stay in the standalone ruff.toml and
 # ty.toml. ty.toml in particular carries an `extra-paths` entry pointing at the
 # sibling pedigree-graph checkout; both files take precedence over pyproject

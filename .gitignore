@@ -56,3 +56,6 @@ desktop.ini
 *.annotated.tsv.gz
 *.validate.log
 *.validate.tsv.gz
+
+# pixi env (ADR 0018 dev manifest)
+.pixi/
