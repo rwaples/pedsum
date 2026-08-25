@@ -22,7 +22,7 @@ Python ≥ 3.13 required.
 git clone https://github.com/rwaples/pedsum.git
 cd pedsum
 # Install dependencies in a conda environment
-conda env install -f environment.yml
+conda env create -f environment.yml
 # activate conda environment
 conda activate pedsum
 ```
