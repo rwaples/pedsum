@@ -55,7 +55,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/9b/37/c0fbf9bebfbc0cbce7c8756ca74dfdf111ba919e57c7f8b16b318cfbac7b/polars_runtime_32-1.44.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a1/1c/c05609739cc41116d36e30cb2b41fb00f126bb52e1b0bac907051ad8a35d/numba-0.67.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/e9/35/fe313fcb0f218d2c0a258d82ff23276e6f0f7410aa6535f093e59bd2f211/pedigree_graph-0.7.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/fb/8c/fbc94e3cb91baf604cbe1218f44e6be8d9c7fa6c4b72e70711096c7eeaff/pedigree_graph-0.7.1-py3-none-any.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -410,7 +410,7 @@ packages:
   - scipy>=1.14,<2
   - polars>=1.43.2,<2
   - pyyaml>=6,<7
-  - pedigree-graph>=0.7,<0.8
+  - pedigree-graph>=0.7.1,<0.8
   - pytest>=9,<10 ; extra == 'test'
   - hypothesis>=6,<7 ; extra == 'test'
   - ruff>=0.16,<0.17 ; extra == 'test'
@@ -632,10 +632,10 @@ packages:
   version: 2.3.0
   sha256: f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/e9/35/fe313fcb0f218d2c0a258d82ff23276e6f0f7410aa6535f093e59bd2f211/pedigree_graph-0.7.0-py3-none-any.whl
+- pypi: https://files.pythonhosted.org/packages/fb/8c/fbc94e3cb91baf604cbe1218f44e6be8d9c7fa6c4b72e70711096c7eeaff/pedigree_graph-0.7.1-py3-none-any.whl
   name: pedigree-graph
-  version: 0.7.0
-  sha256: a7db207ce1bd6445a21bb390308dac88e1d549078314f73470430e9a4652870a
+  version: 0.7.1
+  sha256: 445ffc5b1ea67f6082f88e8645cd58720c793c93812b7c0d0b2c6a079f9176dd
   requires_dist:
   - numpy>=2.2,<3
   - scipy>=1.14,<2
