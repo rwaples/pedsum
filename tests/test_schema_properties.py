@@ -38,6 +38,11 @@ _ES_ARRAY_KEYS = [
     "v_mm",
     "v_ff",
     "cov_m",
+    # Observed-label index arrays (pedigree-graph 0.8), in pedsum's depth names.
+    "depths",
+    "parent_depths",
+    "transition_from",
+    "transition_to",
 ]
 _ES_SCALAR_KEYS = ["ne", "se", "ci_low", "ci_high", "cohort_window", "method", "n"]
 _ES_NAMES = ["ne_inbreeding", "ne_variance_family_size", "ne_hill_overlapping"]
@@ -122,6 +127,14 @@ def test_split_effective_size_ne_coancestry_none_stub() -> None:
     es = {"ne_coancestry": {"ne": None, "ne_per_gen": [1, 2], "se": 0.1}}
     slim, extra = _split_effective_size(es)
     assert slim["ne_coancestry"] == {"ne": None}
+    assert "ne_coancestry" not in extra
+
+
+def test_split_effective_size_stub_keeps_the_refusal_reason() -> None:
+    """An unavailable ``ne_coancestry`` keeps ``reason`` alongside the null ``ne``."""
+    es = {"ne_coancestry": {"ne": None, "reason": "not_requested", "code": None, "fields": {}}}
+    slim, extra = _split_effective_size(es)
+    assert slim["ne_coancestry"] == {"ne": None, "reason": "not_requested"}
     assert "ne_coancestry" not in extra
 
 

@@ -60,6 +60,26 @@ _INBRED = [
     {"id": 6, "sex": "M", "mother": 3, "father": 4},
 ]
 
+# Skipped-generation avuncular pedigree. Full sibs 3 and 4 sit at depth 1, but 3
+# mates into a three-deep lineage (7 -> 9 -> 11), so her daughter 12 lands at
+# depth 4. Uncle 4 and niece 12 are therefore three depths apart, not one, and
+# nothing about which of them is junior can be read off adjacency: the answer
+# comes from the block's roles.
+_SKIPPED_GENERATION = [
+    {"id": 1, "sex": "F", "mother": -1, "father": -1},
+    {"id": 2, "sex": "M", "mother": -1, "father": -1},
+    {"id": 3, "sex": "F", "mother": 1, "father": 2},
+    {"id": 4, "sex": "M", "mother": 1, "father": 2},
+    {"id": 5, "sex": "F", "mother": -1, "father": -1},
+    {"id": 6, "sex": "M", "mother": -1, "father": -1},
+    {"id": 7, "sex": "M", "mother": 5, "father": 6},
+    {"id": 8, "sex": "F", "mother": -1, "father": -1},
+    {"id": 9, "sex": "M", "mother": 8, "father": 7},
+    {"id": 10, "sex": "F", "mother": -1, "father": -1},
+    {"id": 11, "sex": "M", "mother": 10, "father": 9},
+    {"id": 12, "sex": "F", "mother": 3, "father": 11},
+]
+
 
 def _load_graph(rows, tmp_path):
     """Write ``rows`` to a TSV, run pedsum's validator, and build the PedigreeGraph."""
@@ -304,6 +324,37 @@ def test_emitted_outputs_consistent_per_person(tmp_path):
             assert from_pairs.get(person, 0) == relatives, (rel, person)
 
 
+def test_directional_orientation_comes_from_block_roles(tmp_path):
+    """The junior member is whoever the block calls junior, not whoever is deeper.
+
+    pedsum used to re-orient avuncular pairs by comparing depth. pedigree-graph
+    0.8 orients an asymmetric block by role, so the heuristic is gone. This pins
+    the roles pedsum now relies on for its three directional kinds.
+    """
+    df, pg = _load_graph(_SKIPPED_GENERATION, tmp_path)
+    pairs = pg.relationship_pairs(max_degree=3)
+    assert (pairs["Av"].first_role, pairs["Av"].second_role) == ("niece_nephew", "aunt_uncle")
+    assert (pairs["GP"].first_role, pairs["GP"].second_role) == ("descendant", "ancestor")
+    assert (pairs["MO"].first_role, pairs["MO"].second_role) == ("offspring", "mother")
+    assert (pairs["FO"].first_role, pairs["FO"].second_role) == ("offspring", "father")
+
+    # The one avuncular pair spans three depths, so "one generation apart" is
+    # not a property this pedigree has.
+    ids = df["id"].to_numpy()
+    row_of = {int(i): r for r, i in enumerate(ids)}
+    assert int(pg.depth[row_of[12]]) - int(pg.depth[row_of[4]]) == 3
+
+
+def test_skipped_generation_avuncular_charges_the_niece(tmp_path):
+    """On the skipped-generation pedigree the niece carries the avuncular relation."""
+    pairs = _pairs_from_rows(_SKIPPED_GENERATION, tmp_path, rels=("Av",))
+    assert _pair_set(pairs, "Av") == {(12, 4)}
+
+    frame = _skeleton_from_rows(_SKIPPED_GENERATION, tmp_path, rels=("Av",))
+    assert _relatives(frame, "12", "Av") == 1
+    assert _relatives(frame, "4", "Av") == 0
+
+
 # --- exact (pedigree) kinship ------------------------------------------------
 
 
@@ -313,6 +364,8 @@ def test_exact_kinship_is_inbreeding_aware(tmp_path):
     assert "kinship_exact" in pairs.columns
     assert (pairs["kinship"] == 0.25).all()  # nominal is constant per kind
 
+    # pedigree-graph computes the recurrence in float32 and pedsum widens the
+    # column to float64; both values are exact in float32, so they compare equal.
     inbred = pairs.filter((pl.col("id1") == 5) & (pl.col("id2") == 6)).row(0, named=True)
     assert inbred["kinship_exact"] == 0.375  # inbred full sibs (parents are sibs)
     outbred = pairs.filter((pl.col("id1") == 3) & (pl.col("id2") == 4)).row(0, named=True)

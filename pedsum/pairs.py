@@ -5,40 +5,48 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from pedigree_graph import REL_REGISTRY, PedigreeGraph
+from pedigree_graph import RELATIONSHIPS, PedigreeGraph
 
 from pedsum.pedigree_ops import IdIndex
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import polars as pl
 
 
-def _augment_pair_counts(named: dict[str, int]) -> dict:
+def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     """Add ``PO`` (= MO + FO) and ``by_degree`` aggregates to a named-codes dict.
 
     Shared by the matrix pair-list enumerator and the streaming-scalar
     counter so the YAML output schema is identical regardless of source.
+
+    A ``None`` count means the code was not computed (pedigree-graph
+    reports an unrequested code as ``None``, never as ``0``). Such a code
+    contributes nothing to ``by_degree``, and ``PO`` is ``None`` whenever
+    either of ``MO`` / ``FO`` was not computed rather than silently
+    reporting a half sum.
     """
-    out = {code: int(count) for code, count in named.items()}
-    out["PO"] = int(named.get("MO", 0) + named.get("FO", 0))
+    out: dict = {code: (None if count is None else int(count)) for code, count in named.items()}
+
     by_degree = dict.fromkeys(range(6), 0)
-    for code, count in named.items():
-        by_degree[REL_REGISTRY[code].degree] += int(count)
-    out["by_degree"] = by_degree  # ty: ignore[invalid-assignment]
+    for code, count in out.items():
+        if count is not None:
+            by_degree[RELATIONSHIPS[code].degree] += count
+
+    mo = out.get("MO", 0)
+    fo = out.get("FO", 0)
+    out["PO"] = None if (mo is None or fo is None) else mo + fo
+    out["by_degree"] = by_degree
     return out
 
 
 def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = None) -> dict:
     """Sparse matrix enumerator that retains pair lists for richer summaries.
 
-    Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``;
-    when ``pg`` is None this wrapper compacts IDs to ``0..n-1`` first
-    because ``PedigreeGraph`` allocates an ``id_to_row`` table sized to
-    ``max(id)+1``.
-
-    Assumes every non-``-1`` parent ID appears in ``df['id']``; this is
-    enforced by ``load_and_validate``'s ``parent_refs_present_*`` checks
-    and lets the internal ID-compaction remap skip missing-ID handling.
+    Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``.
+    Every pair is assigned its single closest relationship category, so the
+    23 counts partition the related pairs instead of overlapping.
 
     When ``pg`` is supplied the wrapper reuses it instead of building a
     fresh compacted PedigreeGraph; saves one compaction pass when the
@@ -47,8 +55,8 @@ def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = 
     """
     if pg is None:
         pg = _build_pedigree_graph(df)
-    pair_lists = pg.extract_pairs(max_degree=5)
-    named = {code: len(a) for code, (a, _) in pair_lists.items()}
+    pair_lists = pg.relationship_pairs(max_degree=5)
+    named = {code: len(block) for code, block in pair_lists.items()}
     out = _augment_pair_counts(named)
     out["_pair_lists"] = pair_lists
     return out
@@ -66,18 +74,20 @@ def _build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     threaded through as well so the Hill overlapping-generation estimator
     can build its cohort window.
 
-    Generation is derived inside ``from_arrays`` from the (already-remapped)
-    parent arrays via a fixed-point sweep — same semantics as pedsum's
-    historical Kahn pass.  ``twin`` defaults to ``-1`` because pedsum's
-    input format does not carry twin annotations.
+    ``twin_ids`` is left unset because pedsum's input format does not
+    carry twin annotations.
 
-    The compaction is necessary because ``PedigreeGraph`` allocates an
-    ``id_to_row`` table sized to ``max(id) + 1``; passing original IDs
-    on a sparse pedigree would inflate memory by orders of magnitude.
+    pedigree-graph indexes its own ids densely and accepts rows in any
+    order, so the compaction is no longer needed for memory or topology.
+    It is retained because pedsum treats a compacted id and the graph row
+    it names as the same number: ``pg`` returns *row* indices from
+    ``relationship_pairs`` and the lineage kernels, and pedsum indexes
+    ``df`` with them directly.
 
     Assumes the input has already passed ``load_and_validate``, which
-    sorts rows into topological order; ``PedigreeGraph`` requires
-    parents to precede children in row order.
+    sorts rows into topological order and guarantees every non-``-1``
+    parent ID appears in ``df['id']``; that lets the remap below skip
+    missing-ID handling.
     """
     ids = df["id"].to_numpy()
     n = len(ids)
@@ -90,8 +100,8 @@ def _build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     birth_year = df["birth_year"].to_numpy().astype(np.int32) if "birth_year" in df.columns else None
     return PedigreeGraph.from_arrays(
         ids=new_ids,
-        mothers=_remap(df["mother"].to_numpy()),
-        fathers=_remap(df["father"].to_numpy()),
+        mother_ids=_remap(df["mother"].to_numpy()),
+        father_ids=_remap(df["father"].to_numpy()),
         sex=df["sex"].to_numpy().astype(np.int8),
         birth_year=birth_year,
     )

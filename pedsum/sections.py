@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, TypedDict
 import numpy as np
 import polars as pl
 import scipy.sparse.csgraph as csgraph
-from pedigree_graph import REL_REGISTRY
+from pedigree_graph import RELATIONSHIPS
 
 if TYPE_CHECKING:
     import scipy.sparse as sp
@@ -511,11 +511,12 @@ def compute_relationship_summary(
 
     keys_parts = []
     degree_parts = []
-    for code, (a_raw, b_raw) in pair_lists.items():
-        if code not in REL_REGISTRY:
+    for code, block in pair_lists.items():
+        if code not in RELATIONSHIPS:
             continue
-        a = np.asarray(a_raw, dtype=np.int64)
-        b = np.asarray(b_raw, dtype=np.int64)
+        first_rows, second_rows = block
+        a = np.asarray(first_rows, dtype=np.int64)
+        b = np.asarray(second_rows, dtype=np.int64)
         if len(a) == 0:
             continue
         lo = np.minimum(a, b)
@@ -525,7 +526,7 @@ def compute_relationship_summary(
             continue
         keys_parts.append(lo[keep] * n + hi[keep])
         degree_parts.append(
-            np.full(int(keep.sum()), REL_REGISTRY[code].degree, dtype=np.int8),
+            np.full(int(keep.sum()), RELATIONSHIPS[code].degree, dtype=np.int8),
         )
 
     if not keys_parts:
@@ -619,52 +620,59 @@ def compute_effective_size(
     pg: PedigreeGraph,
     *,
     ne_coancestry: bool = False,
-    n_threads: int = 1,
 ) -> dict:
     """Run the eight pedigree-based Ne estimators via ``pedigree_graph``.
 
-    Thin wrapper around ``pedigree_graph.compute_all_ne``: builds the
-    founder-contribution structures once, dispatches every estimator,
-    and serialises each result dataclass to a YAML-ready dict via its
-    own ``.to_dict()`` method.
+    Thin wrapper around ``pedigree_graph.effective_size.estimate_effective_sizes``:
+    builds the founder-contribution structures once, dispatches every
+    selected estimator, and serialises each record to a YAML-ready dict
+    via its own ``.to_dict()`` method.
 
     When ``ne_coancestry`` is False (the default), the coancestry-rate
-    Ne_C estimator is skipped — its kinship DP can dominate memory on
-    very large pedigrees.  The ``ne_coancestry`` slot in the returned
-    dict will then carry ``ne=None`` and NaN per-gen arrays.
-    """
-    from pedigree_graph import compute_all_ne
+    Ne_C estimator is left out of the estimator selection — its kinship
+    DP can dominate memory on very large pedigrees.  Its slot then holds
+    an ``UnavailableEffectiveSize`` record, serialised as ``{ne: None,
+    reason: "not_requested", ...}``; the same shape carries a genuine
+    refusal (for example ``missing_metadata``) so the reason is never
+    lost.
 
-    raw = compute_all_ne(
-        pg,
-        skip_ne_coancestry=not ne_coancestry,
-        n_threads=n_threads,
-    )
-    return {name: _normalise_effective_size_keys(result.to_dict()) for name, result in raw.items()}
+    All eight keys are always present, requested or not.
+    """
+    from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS, estimate_effective_sizes
+
+    estimators = tuple(name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if ne_coancestry or name != "ne_coancestry")
+    raw = estimate_effective_sizes(pg, estimators)
+    return {name: _normalise_effective_size_keys(raw[name].to_dict()) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
+
+
+#: Upstream label / counter fields renamed on the way out. pedigree-graph
+#: indexes its Ne records by *observed* label and calls that label a
+#: generation; pedsum's CONTEXT.md reserves "generation" for a temporal
+#: birth cohort and calls the topological label a **Depth**, which is what
+#: ``PedigreeGraph.depth`` actually supplies here. ``transition_from`` /
+#: ``transition_to`` keep their upstream names — they are pairs of the same
+#: depth labels — and ``cohort_years`` keeps its name because it really is a
+#: calendar year. Delete this map when pedigree-graph adopts depth terms.
+_EFFECTIVE_SIZE_KEY_RENAMES: dict[str, str] = {
+    "generations": "depths",
+    "parent_generations": "parent_depths",
+    "final_generation": "final_depth",
+    "n_generations_used": "n_depths_used",
+}
 
 
 def _normalise_effective_size_keys(d: dict) -> dict:
-    """Rename upstream ``n_generations_used`` → ``n_depths_used`` on the way out.
-
-    pedigree-graph emits ``n_generations_used`` in ``ne_inbreeding`` and
-    ``ne_caballero_toro``; pedsum's CONTEXT.md treats "generation" as a
-    temporal/birth-cohort term, distinct from topological **Depth**.
-    This shim renames the key in pedsum's output without touching the
-    upstream package. Delete this helper when pedigree-graph itself
-    adopts the depth-based name.
-    """
-    if "n_generations_used" in d:
-        d = {("n_depths_used" if k == "n_generations_used" else k): v for k, v in d.items()}
-    return d
+    """Rename upstream generation-labelled keys to pedsum's depth terminology."""
+    return {_EFFECTIVE_SIZE_KEY_RENAMES.get(k, k): v for k, v in d.items()}
 
 
 def _build_inbreeding_summary(F: np.ndarray) -> dict:
     """Aggregate a per-individual F vector into the YAML-shaped summary.
 
-    F itself is computed by ``pedigree_graph.PedigreeGraph.compute_inbreeding()``
+    F itself is computed by ``pedigree_graph.PedigreeGraph.inbreeding()``
     (Meuwissen-Luo); pedsum no longer owns an F implementation.  This
     helper produces only the histogram / aggregate fields previously
-    returned by the deleted ``compute_inbreeding`` function, and drops
+    returned by pedsum's own since-deleted F implementation, and drops
     the ``memo_size`` diagnostic (which described the deleted algorithm
     and has no analogue in the upstream implementation).
     """
@@ -704,6 +712,11 @@ def build_individual_df(
 
     ``n_founder_ancestors`` is added by the caller after
     :func:`compute_founder_summary` runs against this table.
+
+    ``n_descendant_paths`` is stored as ``Int64``: a path count over a deep
+    or inbred pedigree grows multiplicatively and does not fit ``Int32``.
+    ``n_distinct_ancestors`` is a distinct-individual count bounded by the
+    row count, so it stays at the ``Int32`` pedigree-graph returns.
     """
     n = len(df)
     ids_arr = df["id"].to_numpy()
@@ -815,6 +828,6 @@ def build_individual_df(
             "n_uncles_aunts": n_ua,
             "n_first_cousins": n_fc,
             "n_distinct_ancestors": n_distinct_ancestors,
-            "n_descendant_paths": n_descendant_paths.astype(np.int32),
+            "n_descendant_paths": n_descendant_paths.astype(np.int64),
         }
     )

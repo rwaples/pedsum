@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pedigree_graph import REL_REGISTRY
+from pedigree_graph import RELATIONSHIPS
 
 from pedsum.sections import compute_relationship_summary
 
@@ -15,7 +15,7 @@ PairLists = dict[str, tuple[np.ndarray, np.ndarray]]
 RelationshipInput = tuple[pl.DataFrame, PairLists]
 
 _CODE_BY_DEGREE = {
-    degree: next(code for code, rel in REL_REGISTRY.items() if rel.degree == degree) for degree in range(1, 6)
+    degree: next(code for code, rel in RELATIONSHIPS.items() if rel.degree == degree) for degree in range(1, 6)
 }
 
 
@@ -55,7 +55,7 @@ def _closest_pair_degrees(pair_lists: PairLists) -> dict[tuple[int, int], int]:
     """Return the minimum observed relationship degree for each unordered non-self pair."""
     closest: dict[tuple[int, int], int] = {}
     for code, (left, right) in pair_lists.items():
-        degree = REL_REGISTRY[code].degree
+        degree = RELATIONSHIPS[code].degree
         for left_row, right_row in zip(left, right, strict=True):
             a = int(left_row)
             b = int(right_row)
@@ -119,3 +119,32 @@ def test_relationship_summary_depth_rows_conserve_pairs(generated: RelationshipI
         assert row["n_related_pairs"] + row["n_unrelated_pairs"] == row["n_individual_pairs"]
         expected_density = row["n_related_pairs"] / row["n_individual_pairs"] if row["n_individual_pairs"] else 0.0
         assert row["related_pair_density"] == pytest.approx(expected_density)
+
+
+def test_relationship_summary_accepts_a_real_relationship_pairs() -> None:
+    """``compute_relationship_summary`` reads a live ``RelationshipPairs`` result.
+
+    The synthetic cases above feed plain ``{code: (first, second)}`` dicts. This
+    one feeds what the matrix engine actually hands over, so the two-array
+    unpack that serves both shapes stays covered. pedigree-graph 0.8 assigns
+    each pair one closest category, so the 23 block lengths sum to exactly the
+    number of related pairs.
+    """
+    from conftest import EXAMPLE
+
+    from pedsum.pairs import _build_pedigree_graph
+    from pedsum.validate import load_and_validate
+
+    df, _ = load_and_validate(EXAMPLE)
+    pg = _build_pedigree_graph(df)
+    df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
+    pair_lists = pg.relationship_pairs(max_degree=5)
+
+    summary = compute_relationship_summary(df, pair_lists)
+
+    n = len(df)
+    assert summary["computed"] is True
+    assert summary["n_individual_pairs"] == n * (n - 1) // 2
+    assert summary["n_related_pairs"] == sum(len(block) for block in pair_lists.values())
+    assert sum(summary["related_pairs_by_closest_degree"].values()) == summary["n_related_pairs"]
+    assert sum(summary["closest_relationship_per_individual"].values()) == n

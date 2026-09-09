@@ -43,7 +43,7 @@ def _individual_df() -> pl.DataFrame:
             "n_first_cousins": [0, 0, 0],
             "n_founder_ancestors": np.array([1, 1, 2], dtype=np.int32),
             "n_distinct_ancestors": np.array([0, 0, 2], dtype=np.int32),
-            "n_descendant_paths": np.array([1, 1, 0], dtype=np.int32),
+            "n_descendant_paths": np.array([1, 1, 0], dtype=np.int64),
         }
     )
 

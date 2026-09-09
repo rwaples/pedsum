@@ -16,6 +16,7 @@ import polars as pl
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
 from pedsum.epimight import (
     BASE_YEAR,
+    EPIMIGHT_MAX_DEGREE,
     EPIMIGHT_RELATIONSHIP_ORDER,
     PLACEHOLDER_COLUMNS,
     build_epimight_skeleton,
@@ -149,17 +150,6 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _positive_int(v: str) -> int:
-    """Argparse type guard for ints >= 1."""
-    try:
-        iv = int(v)
-    except (TypeError, ValueError) as exc:
-        raise argparse.ArgumentTypeError(f"expected integer, got {v!r}") from exc
-    if iv < 1:
-        raise argparse.ArgumentTypeError(f"expected integer >= 1, got {iv}")
-    return iv
-
-
 def _nonnegative_int(v: str) -> int:
     """Argparse type guard for ints >= 0."""
     try:
@@ -275,25 +265,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=True,
         help="compute seven pedigree-based effective population size "
         "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_CT) via "
-        "pedigree-graph.compute_all_ne (default: on; pass "
+        "pedigree-graph's estimate_effective_sizes (default: on; pass "
         "--no-effective-size to skip). The eighth estimator (Ne_C, coancestry "
         "rate) is opt-in via `--ne-coancestry` because its kinship DP can "
-        "blow up RAM on very large pedigrees.",
+        "blow up RAM on very large pedigrees. All eight keys are always "
+        "emitted; an estimator that was not selected, or that refused for "
+        "want of metadata, reports a null `ne` and a `reason`.",
     )
     p_sum.add_argument(
         "--ne-coancestry",
         action="store_true",
-        help="include the coancestry-rate Ne_C estimator alongside the other "
-        "seven. Off by default because the kinship DP can blow up RAM on very "
-        "large pedigrees (>~500K rows). No-op without `--effective-size`.",
-    )
-    p_sum.add_argument(
-        "--ne-threads",
-        type=_positive_int,
-        default=1,
-        metavar="N",
-        help="number of worker threads for independent Ne estimator dispatch "
-        "(default: %(default)s; serial). No-op without `--effective-size`.",
+        help="add `ne_coancestry` to the estimator selection passed to "
+        "pedigree-graph, alongside the other seven. Off by default because "
+        "the kinship DP can blow up RAM on very large pedigrees (>~500K "
+        "rows); unselected, Ne_C reports a null `ne` with reason "
+        "`not_requested`. No-op without `--effective-size`.",
     )
     p_sum.add_argument(
         "--per-individual-pairs",
@@ -301,7 +287,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="opt into per-individual relationship-burden summary. "
         "Requires the matrix engine to materialise full pair lists "
         "(OOMs on pair-dense pedigrees with N > ~500K). When unset "
-        "(default), pedsum uses count_pairs_streaming for the 23 pair "
+        "(default), pedsum uses estimate_relationship_counts for the 23 pair "
         "counts in O(N) memory; the burden summary is left as a stub. "
         "See the README for the streaming-vs-matrix precision contract.",
     )
@@ -543,7 +529,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="add a kinship_exact column to relative_pairs with the exact pedigree "
         "kinship (inbreeding-, MZ-, and multi-path-aware), which can exceed the "
         "nominal value. Runs the kinship recurrence over every pair; cost scales "
-        "with pair count × pedigree depth. No-op without --pairs.",
+        "with pair count × pedigree depth. pedigree-graph computes the recurrence "
+        "in float32, so the emitted float64 column carries float32-origin values. "
+        "No-op without --pairs.",
     )
     p_epi.add_argument(
         "--parquet",
@@ -707,11 +695,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     # Flag-combination validation (must happen before any heavy work).
     # --effective-size is on by default; the warning fires only when the user
-    # explicitly passed --no-effective-size alongside --ne-coancestry or a
-    # non-default --ne-threads.
-    if not args.effective_size and (args.ne_coancestry or args.ne_threads != 1):
+    # explicitly passed --no-effective-size alongside --ne-coancestry.
+    if not args.effective_size and args.ne_coancestry:
         logger.warning(
-            "--ne-coancestry / --ne-threads have no effect under --no-effective-size",
+            "--ne-coancestry has no effect under --no-effective-size",
         )
     if args.sex_concordance_seed is not None and args.sex_concordance_permutations == 0:
         logger.warning(
@@ -720,11 +707,13 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     # Build the PedigreeGraph once and reuse for every primitive that
     # needs it (relationship pairs, F, lineage counts, effective size).
-    # ``ped_depth`` MUST be populated from ``pg.generation`` before any
-    # summary function runs — six callers read it.
+    # ``ped_depth`` MUST be populated from ``pg.depth`` before any summary
+    # function runs — six callers read it. ``pg.depth`` is the topological
+    # depth; pedigree-graph 0.8 keeps ``generation_labels`` for a supplied
+    # generation column and applies no fallback, so depth is what pedsum wants.
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
-        df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.generation, dtype=np.int32)))
+        df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
 
     id_index = IdIndex(df["id"].to_numpy())
 
@@ -763,16 +752,24 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # touches only the scalar counts and by_degree). Leaves pairs["_engine"].
         pairs.pop("_pair_lists", None)
     else:
-        with _timed("relationship pair counts (count_pairs_streaming)"):
-            streamed_counts = pg.count_pairs_streaming(max_degree=5, scope="full")
-        # count_pairs_streaming builds the transient adjacency powers (_A … _A5)
-        # and now releases them on exit, mirroring extract_pairs (pedigree-graph#4),
-        # so they no longer stay resident through the inbreeding / Ne /
-        # individual-table / write phases where the streaming run peaks.  We used
-        # to reach into the private pg._release_pair_matrices() here; the upstream
-        # symmetry fix made that unnecessary.
-        pairs = _augment_pair_counts(streamed_counts)
+        with _timed("relationship pair counts (estimate_relationship_counts)"):
+            estimated = pg.estimate_relationship_counts(max_degree=5)
+        # estimate_relationship_counts builds the transient adjacency powers
+        # (_A … _A5) and releases them on exit, mirroring relationship_pairs, so
+        # they no longer stay resident through the inbreeding / Ne /
+        # individual-table / write phases where the streaming run peaks.
+        pairs = _augment_pair_counts(estimated)
         pairs["_engine"] = "streaming_scalar"
+        # A clamped code is one whose scalar residual underflowed to a negative
+        # number and was floored at 0 — unreliable, not a true absence. The
+        # library already raises a RuntimeWarning; record the codes in the
+        # output so a downstream reader of the YAML sees them too.
+        pairs["clamped"] = sorted(estimated.clamped)
+        if estimated.clamped:
+            logger.warning(
+                "scalar pair counts clamped to 0 for %s; re-run with --per-individual-pairs for exact counts",
+                ", ".join(sorted(estimated.clamped)),
+            )
         relationship_summary = {
             "computed": False,
             "skip_reason": (
@@ -790,8 +787,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
                 f"{n_indiv:,}",
             )
         with _timed("inbreeding (F + n_ancestors)"):
-            F_vec = pg.compute_inbreeding()
-            n_anc = pg.compute_n_ancestors()
+            F_vec = pg.inbreeding()
+            n_anc = pg.distinct_ancestor_counts()
             inb_summary: dict | None = _build_inbreeding_summary(F_vec)
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
@@ -800,17 +797,13 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         n_anc = np.zeros(n_indiv, dtype=np.int32)
 
     with _timed("descendants"):
-        n_desc = pg.compute_n_descendants()
+        n_desc = pg.descendant_path_counts()
 
     effective_size: dict | None = None
     if args.effective_size:
         n_estimators = 8 if args.ne_coancestry else 7
         with _timed(f"effective size ({n_estimators} estimators)"):
-            effective_size = compute_effective_size(
-                pg,
-                ne_coancestry=args.ne_coancestry,
-                n_threads=args.ne_threads,
-            )
+            effective_size = compute_effective_size(pg, ne_coancestry=args.ne_coancestry)
 
     out_dir = args.out_dir
 
@@ -848,7 +841,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         sex_concordance,
     )
     if effective_size is not None:
-        tsv_payload["effective_size_scalars"] = {name: result["ne"] for name, result in effective_size.items()}
+        # An unavailable estimator's payload carries no ``ne`` at all, so the
+        # scalar projection reads it as null and still emits all eight rows.
+        tsv_payload["effective_size_scalars"] = {name: result.get("ne") for name, result in effective_size.items()}
         yaml_extras["effective_size"] = effective_size
 
     ind_data = _build_individual_data(
@@ -1123,7 +1118,7 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
 
     # Extract once; both the skeleton and the optional pairs list read it.
     with _timed("extract pairs"):
-        all_pairs = pg.extract_pairs()
+        all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
 
     with _timed("epimight skeleton"):
         frame = build_epimight_skeleton(

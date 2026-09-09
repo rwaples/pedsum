@@ -1,5 +1,74 @@
 # Changelog
 
+## Unreleased — pedigree-graph 0.8
+
+Pedsum now requires `pedigree-graph>=0.8,<0.9`. The 0.7.1 API is gone
+upstream, so this is a hard floor rather than a preference. Six of the
+changes below alter output a user reads.
+
+### Changed
+
+- **Every pair is counted under its single closest relationship.**
+  `relationship_pairs` and `estimate_relationship_counts` both assign a pair
+  one category, so the 23 counts partition the related pairs instead of
+  overlapping. Under `--per-individual-pairs` on the bundled
+  `example_pedigree.tsv` this moves four codes: `1C1R` 1117 → 856, `1C2R`
+  774 → 608, `HGAv` 517 → 490, `HGGAv` 303 → 256, and with them
+  `by_degree.4` 2621 → 2333 and `by_degree.5` 2401 → 2188. The other 19
+  codes, `PO`, and every count in the default streaming mode are unchanged
+  on that pedigree.
+- **`MHS` / `PHS` and `by_degree["2"]` are fold-aware in the default
+  streaming mode.** `estimate_relationship_counts` subtracts the
+  parent-offspring overlap, so on a pedigree with parent-offspring incest a
+  pair that is both a parent-offspring pair and a half sib is now counted
+  only as parent-offspring. On a fixture where a father also fathers a child
+  on his daughter, `PHS` reports 2 where 0.7.1 reported 3, and the streaming
+  and matrix engines agree.
+- **The exact-code set narrowed to six, and unreliable codes are named.**
+  `estimate_relationship_counts` computes `MZ`, `MO`, `FO`, `FS`, `MHS` and
+  `PHS` in closed form; the other 17 are scalar residuals. A residual that
+  underflows is floored at 0, and the affected codes are now listed in
+  `relatedness.relationship_pairs.clamped` (empty on `example_pedigree.tsv`)
+  as well as in a `RuntimeWarning` and a pedsum log line, so an unreliable 0
+  is distinguishable from a true absence.
+- **`n_descendant_paths` is `Int64`.** A descendant-path count multiplies
+  along inbreeding loops and is not bounded by the row count, so `Int32` was
+  the wrong width. `n_distinct_ancestors` stays `Int32`.
+- **Effective-size output is indexed by observed depth labels.** Each Ne
+  record carries the depths it actually saw (`depths`, `parent_depths`,
+  `transition_from`, `transition_to`) rather than a dense `0 .. max` range;
+  the arrays live in `summary.extra.yaml`. Rates between consecutive depths
+  are now transition-aligned, one entry shorter than the depth list: on the
+  example, `ne_inbreeding.ne_per_gen` goes from `[null, null, null, 30.7692,
+  14.4625]` to `[null, null, 30.7692, 14.4625]`, and `ne_coancestry` and
+  `ne_caballero_toro` shift the same way. `ne_variance_family_size` is
+  indexed by parent depth instead, so its `ne_per_transition`, `v_*` and
+  `cov_*` arrays gain a trailing `null` (four entries to five).
+  `ne_long_term_contributions` gains `final_depth`.
+- **An estimator that produced no value says why.** All eight keys are
+  always emitted. Without `--ne-coancestry`, `ne_coancestry` is now
+  `{ne: null, reason: not_requested}` instead of a bare `{ne: null}`, and a
+  genuine refusal carries its own reason in the same slot. The eight
+  `effective_size_scalars` TSV rows are unchanged in number.
+- **`kinship_exact` carries float32-origin values.** pedigree-graph pins the
+  kinship recurrence to float32; `epimight-input --pairs --exact-kinship`
+  still emits a float64 column, but the values in it come from float32. On
+  `example_pedigree.tsv` both emitted EPIMIGHT tables are byte-identical to
+  0.7.1, `kinship_exact` included.
+- Avuncular, grandparent and parent-offspring pairs take their orientation
+  from the pedigree-graph block roles. The depth heuristic pedsum used to
+  apply to avuncular pairs is gone; it restated what the library now
+  guarantees, and it would be re-deriving orientation from a quantity that
+  is not what the relationship means.
+
+### Removed
+
+- **`--ne-threads`.** pedigree-graph 0.8 dispatches the estimators serially
+  and has no per-call thread argument; its thread count is a process-global
+  set once, on first use. The flag would have been a no-op or a
+  startup-order trap, so it is gone rather than silently ignored. `pedsum
+  summarize --ne-threads N` now fails at argument parsing.
+
 ## 0.13.0 — 2026-08-20 — offspring sex concordance; polars internals
 
 ### Features

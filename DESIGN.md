@@ -40,7 +40,8 @@ See [CHANGELOG.md](CHANGELOG.md). Notable:
   now lives in the registry (`ValidationContext.no_sex_check`) so the tolerance
   composes inside `_run_checks` rather than as a cli post-filter.
 - `--allow-unknown-sex` → `--allow-missing-sex` (0.8)
-- `ped_depth` sourced from `PedigreeGraph.generation` (0.4)
+- `ped_depth` sourced from `PedigreeGraph.depth` (0.4; the attribute was
+  named `generation` before pedigree-graph 0.8)
 
 ## Engine selection & semantics
 
@@ -48,15 +49,23 @@ Pedsum uses two pair-counting paths, picked by `--per-individual-pairs`
 (no engine auto-tiering — per ADR 0001, the matrix/BFS dispatch was
 removed). Both delegate to `pedigree-graph`:
 
-- Default: `PedigreeGraph.count_pairs_streaming` (`_engine` reported as
-  `streaming_scalar`). O(N) memory; aggregate counts only.
-- `--per-individual-pairs`: `_count_pairs_matrix_with_lists` (`_engine`
-  reported as `matrix`). Materialises full pair lists so the
-  per-individual relationship-burden summary can be computed.
-- Streaming counts are bit-identical to matrix on the 10 simple codes
-  (`MO`, `FO`, `FS`, `MHS`, `PHS`, `MZ`, `GP`, `GGP`, `GGGP`, `G3GP`);
-  ~1% scalar approximation on the 13 cousin/collateral codes when
-  the pedigree has inbreeding, twins, or shallow depth. The YAML
+- Default: `PedigreeGraph.estimate_relationship_counts` (`_engine` reported
+  as `streaming_scalar`). O(N) memory; aggregate counts only.
+- `--per-individual-pairs`: `_count_pairs_matrix_with_lists`, over
+  `PedigreeGraph.relationship_pairs` (`_engine` reported as `matrix`).
+  Materialises full pair lists so the per-individual relationship-burden
+  summary can be computed.
+- Both paths assign each pair its single closest relationship category, so
+  the 23 counts partition the related pairs. A pair that is both
+  parent-offspring and half sib (parent-offspring incest) counts only as
+  parent-offspring.
+- Streaming counts are exact on the six codes
+  `estimate_relationship_counts` computes in closed form (`MZ`, `MO`, `FO`,
+  `FS`, `MHS`, `PHS`); the other 17 are scalar residuals and approximate
+  when the pedigree has inbreeding, twins, or shallow depth. A residual that
+  underflows is floored at 0 and its code is named in the `clamped` list of
+  the `relationship_pairs` section (and in a `RuntimeWarning`), so an
+  unreliable 0 is distinguishable from a true absence. The YAML
   `pairs_engine` field records which path produced each summary.
 - The experimental BFS enumerator (matrix counts *paths* / multiplicity;
   BFS counts *distinct shared ancestors*, disagreeing on `1C1R`, `H1C1R`,
@@ -79,9 +88,11 @@ removed). Both delegate to `pedigree-graph`:
 ## Upstream integration
 
 Both pair-counting engines delegate to `pedigree-graph`; bug fixes
-propagate on `pip install -U`. Sparse/non-contiguous IDs are
-compacted internally to dense `0..n-1` so the underlying machinery
-never allocates `max(id)+1`-sized arrays.
+propagate on `pip install -U`. Sparse/non-contiguous IDs are still
+compacted internally to dense `0..n-1`, though since pedigree-graph 0.8
+that is for pedsum's own convenience — a compacted id and the graph row
+it names are the same number — rather than a memory necessity: the
+library indexes its own ids densely and accepts rows in any order.
 
 ## Stance: opt-outs vs auto-tiering
 

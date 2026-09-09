@@ -21,7 +21,7 @@ Model (a representative, *non*-pathological pedigree):
   pathological case the plan warns against), as long as the couple pool is
   large.
 
-``pg.generation`` for this structure equals the generation index, so the
+``pg.depth`` for this structure equals the generation index, so the
 observed max depth is ``--generations - 1``; pick ``--generations >= 6`` to
 exercise the degree-5 adjacency power ``_A5``.
 

@@ -827,10 +827,10 @@ def load_and_validate(
     generations / components / descendants / inbreeding passes. Raises
     ``PedigreeError`` on the first failing Check.
 
-    Rows are topologically sorted (parents before children) so downstream
-    ``PedigreeGraph`` construction holds its parents-precede-children invariant.
-    ``ped_depth`` is populated by the caller from ``pg.generation`` before any
-    summary function runs.
+    Rows are topologically sorted (parents before children). pedigree-graph
+    accepts rows in any order, so the sort is pedsum's own output contract, not
+    a construction precondition. ``ped_depth`` is populated by the caller from
+    ``pg.depth`` before any summary function runs.
     """
     t0 = time.perf_counter()
     ctx = _build_context(

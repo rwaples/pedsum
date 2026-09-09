@@ -45,11 +45,11 @@ For an **Individual Pair** whose two members belong to the same **Offspring Grou
 _Avoid_: bare "concordance" without naming the unit; "agreement", "sex match rate"
 
 **Descendant Path**:
-A directed parent-to-child path from a focal individual to one of its descendants. Counted by `n_descendant_paths`. An inbred descendant is reachable by multiple paths and contributes multiply.
+A directed parent-to-child path from a focal individual to one of its descendants. Counted by `n_descendant_paths` (`Int64`: a path count multiplies along inbreeding loops and is not bounded by the row count). An inbred descendant is reachable by multiple paths and contributes multiply.
 _Avoid_: bare "descendant count" in this sense
 
 **Distinct Ancestor**:
-A unique individual that appears anywhere in the focal individual's ancestry. Counted by `n_distinct_ancestors` (computed by `pedigree-graph` via sparse transitive closure). An ancestor reached through multiple paths is counted once.
+A unique individual that appears anywhere in the focal individual's ancestry. Counted by `n_distinct_ancestors` (`Int32`, computed by `pedigree-graph` via sparse transitive closure; a distinct count is bounded by the row count). An ancestor reached through multiple paths is counted once.
 _Avoid_: bare "ancestor count"; "ancestor path" (pedsum does not compute path-counted ancestors today)
 
 **Distinct Descendant** *(reserved)*:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-from argparse import ArgumentTypeError
 from types import SimpleNamespace
 
 import numpy as np
@@ -20,7 +19,6 @@ from pedsum.checks import (
     _check_sex_role_consistency,
     _summarize_findings,
 )
-from pedsum.cli import _positive_int
 from pedsum.pairs import _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import (
     _as_parent_int_col,
@@ -64,13 +62,6 @@ from pedsum.sections import (
     compute_sibship_sizes,
     compute_size_structure,
 )
-
-
-def test_positive_int_rejects_zero_and_accepts_positive() -> None:
-    """The CLI positive-int type accepts positives and rejects non-positive ints."""
-    assert _positive_int("3") == 3
-    with pytest.raises(ArgumentTypeError, match=">= 1"):
-        _positive_int("0")
 
 
 class TestParseEdgeCases:

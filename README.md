@@ -147,8 +147,8 @@ Flags:
   `--ne-coancestry`..
 - `--ne-coancestry` — additionally compute `Ne_C`. Off by default —
   its kinship DP can blow up RAM on pedigrees larger than ~500K rows.
-- `--ne-threads N` — number of threads for independent Ne estimator
-  dispatch (default `1`, serial). Validated `>= 1` by argparse.
+  Unselected, `Ne_C` still occupies its slot in the output with a null
+  `ne` and `reason: not_requested`.
 - `--per-individual-pairs` — opt into the per-individual
   relationship-burden summary (`relationship_summary.relatives_total`,
   `.relatives_by_degree`, closest-degree distribution). Requires

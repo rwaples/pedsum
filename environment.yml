@@ -22,4 +22,4 @@ dependencies:
   - pip
   - pip:
       # Matches the range pyproject.toml declares; pedigree-graph is on PyPI.
-      - pedigree-graph>=0.7,<0.8
+      - pedigree-graph>=0.8,<0.9

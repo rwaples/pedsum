@@ -22,7 +22,7 @@ class CategorySpec:
     sections: tuple[SectionSpec, ...]
 
 
-# 23 named relationship codes from REL_REGISTRY plus PO and engine.
+# 23 named relationship codes from RELATIONSHIPS plus PO and engine.
 _PAIRS_SLIM_KEYS: tuple[str, ...] = (
     "MZ",
     "MO",
@@ -48,6 +48,9 @@ _PAIRS_SLIM_KEYS: tuple[str, ...] = (
     "1C2R",
     "2C",
     "PO",
+    # Emitted by the streaming engine only: the codes whose scalar residual
+    # underflowed and was floored at 0, so their counts are unreliable.
+    "clamped",
     "engine",
 )
 
@@ -204,6 +207,15 @@ _EFFECTIVE_SIZE_ARRAY_NAMES: frozenset[str] = frozenset(
         "v_ff",
         "cov_m",
         "cov_f",
+        # Observed-label index arrays. pedigree-graph 0.8 indexes each Ne
+        # record by the labels it actually saw rather than a dense range, and
+        # emits them alongside the per-label values; the names here are
+        # post-``_normalise_effective_size_keys`` (depth terminology). They are
+        # as long as the arrays they index, so slim must not carry them.
+        "depths",
+        "parent_depths",
+        "transition_from",
+        "transition_to",
     }
 )
 
@@ -222,8 +234,11 @@ def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
     stay in slim; per-generation / per-cohort / per-transition arrays
     plus ``age_table`` go to extra. Routing is name-based, so
     placeholder ``None`` values for unpopulated arrays still land in
-    extra. ``ne_coancestry`` with ``ne is None`` gets a slim-only
-    ``{ne: null}`` stub and no extra entry.
+    extra. ``ne_coancestry`` with ``ne is None`` gets a slim-only stub and
+    no extra entry: ``{ne: null}``, plus ``reason`` when the payload
+    carries one (pedigree-graph 0.8 says *why* an estimator is absent —
+    ``not_requested`` for the default opt-out, or a genuine refusal such
+    as ``missing_metadata``).
     """
     slim: dict = {}
     extra: dict = {}
@@ -232,7 +247,10 @@ def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
             slim[est_name] = est_value
             continue
         if est_name == "ne_coancestry" and est_value.get("ne") is None:
-            slim[est_name] = {"ne": None}
+            stub: dict = {"ne": None}
+            if "reason" in est_value:
+                stub["reason"] = est_value["reason"]
+            slim[est_name] = stub
             continue
         est_slim: dict = {}
         est_extra: dict = {}

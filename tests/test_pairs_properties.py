@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from hypothesis import given
 from hypothesis import strategies as st
-from pedigree_graph import REL_REGISTRY
+from pedigree_graph import RELATIONSHIPS
 
 from pedsum.pairs import _augment_pair_counts
 
 # Raw registry codes only: these include MO/FO but NOT the derived PO/engine,
-# which _augment_pair_counts adds itself (and which are absent from REL_REGISTRY,
-# so feeding them in would KeyError on REL_REGISTRY[code].degree).
-_CODES = sorted(REL_REGISTRY.keys())
+# which _augment_pair_counts adds itself (and which are absent from RELATIONSHIPS,
+# so feeding them in would KeyError on RELATIONSHIPS[code].degree).
+_CODES = sorted(RELATIONSHIPS.keys())
 
 
 @given(named=st.dictionaries(st.sampled_from(_CODES), st.integers(min_value=0, max_value=1_000_000)))
@@ -34,8 +34,24 @@ def test_augment_pair_counts_conserves(named: dict) -> None:
     assert set(by_degree.keys()) == set(range(6))
     assert sum(by_degree.values()) == sum(int(v) for v in named.values())
     for degree in range(6):
-        expected = sum(int(named[c]) for c in named if REL_REGISTRY[c].degree == degree)
+        expected = sum(int(named[c]) for c in named if RELATIONSHIPS[c].degree == degree)
         assert by_degree[degree] == expected
 
     # The function must not mutate its input dict.
     assert named == original
+
+
+def test_augment_pair_counts_treats_none_as_not_computed() -> None:
+    """A ``None`` count contributes to no aggregate and does not become 0.
+
+    pedigree-graph 0.8 reports an unrequested code as ``None``. Rolling it into
+    ``by_degree`` as a zero would restate "not computed" as "none exist", and a
+    ``PO`` built from half of ``MO`` / ``FO`` would be a plain wrong number.
+    """
+    out = _augment_pair_counts({"MO": 7, "FO": None, "FS": 3, "1C": None})
+
+    assert out["FO"] is None
+    assert out["1C"] is None
+    assert out["PO"] is None
+    assert out["by_degree"][RELATIONSHIPS["MO"].degree] == 7 + 3
+    assert sum(out["by_degree"].values()) == 10

@@ -5,8 +5,9 @@ from __future__ import annotations
 import gzip
 import shutil
 import subprocess
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 import polars as pl
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
+
+#: One value in the ``relationship_pairs`` section: a count (``None`` when the
+#: code was not computed), the ``by_degree`` rollup, or the ``clamped`` codes.
+PairEntry = Union[int, None, "Mapping[int, int]", list[str]]
 
 _NUMERIC_COLS = (
     "F",
@@ -152,15 +157,29 @@ def _build_pedigree_data(
         "sex_summary": (aggregates or {}).get("sex_summary", {}),
         "depth_summary": (aggregates or {}).get("depth_summary", []),
         "pairs_engine": str(pairs.get("_engine", "matrix")),
-        "relationship_pairs": {
-            k: ({str(deg): int(c) for deg, c in v.items()} if k == "by_degree" else int(v))
-            for k, v in pairs.items()
-            if not k.startswith("_")
-        },
+        "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
         "inbreeding": inb_section,
     }
     yaml_extras: dict = {}
     return tsv_payload, yaml_extras
+
+
+def _serialise_pair_entry(value: PairEntry) -> object:
+    """Coerce one ``relationship_pairs`` entry to its output form.
+
+    Three shapes share the section, and each one's type says how to render it:
+    the ``by_degree`` rollup is a mapping keyed by degree, ``clamped`` is the
+    list of codes whose scalar residual underflowed, and everything else is a
+    count. A count is ``None`` when pedigree-graph was not asked for that code,
+    which stays ``None`` rather than becoming a misleading 0.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return {str(degree): int(count) for degree, count in value.items()}
+    if isinstance(value, list):
+        return [str(code) for code in value]
+    return int(value)
 
 
 def _build_individual_data(
