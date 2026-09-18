@@ -1,10 +1,10 @@
 """Tests for the two pair-counting modes in ``summarize``.
 
-The default mode uses ``pg.estimate_relationship_counts`` (scalar, O(N)
-memory; exact for the six codes it computes in closed form, approximate
-for the other 17). ``--per-individual-pairs`` opts into the matrix
-engine to populate the per-individual relationship-burden summary, at
-the cost of OOM risk on pair-dense pedigrees.
+The default mode uses ``pg.relationship_counts`` (the Rust row-streaming
+engine: exact for all 23 codes in O(N) memory). ``--per-individual-pairs``
+opts into the matrix engine to populate the per-individual
+relationship-burden summary, at the cost of OOM risk on pair-dense
+pedigrees. Both modes report the same 23 counts.
 
 Both engines assign each pair its single closest relationship category,
 so a pedigree with parent-offspring incest reports the parent-offspring
@@ -17,7 +17,7 @@ import numpy as np
 from conftest import EXAMPLE, write_ped
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
-from pedigree_graph import PedigreeGraph
+from pedigree_graph import RELATIONSHIPS, PedigreeGraph
 
 # Parent-offspring incest: id2 (a founder) also fathers a child on his own
 # daughter id5, so the (id5, id7) pair is simultaneously mother-offspring and
@@ -35,20 +35,21 @@ _INCEST_PEDIGREE = [
     {"id": 8, "sex": "M", "mother": 5, "father": 4},
 ]
 
-#: The codes ``estimate_relationship_counts`` computes in closed form. Every
-#: other code is a scalar residual and may disagree with the matrix engine.
-_EXACT_CODES = frozenset({"MZ", "MO", "FO", "FS", "MHS", "PHS"})
+#: Every registry code, in registry order: the default engine is exact on all
+#: of them, so the two modes must agree code for code.
+_ALL_CODES = tuple(RELATIONSHIPS)
 
-# ----- default (streaming scalar) mode --------------------------------
+# ----- default (Rust row-streaming) mode ------------------------------
 
 
 def test_default_uses_streaming_engine(tmp_path):
-    """Default summarize routes through the streaming scalar pair-count engine."""
+    """Default summarize routes through the Rust row-streaming count engine."""
     out_dir = tmp_path / "out"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    assert ped["relatedness"]["relationship_pairs"]["engine"] == "streaming_scalar"
+    assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming"
+    assert "clamped" not in ped["relatedness"]["relationship_pairs"]
 
 
 def test_default_populates_pair_counts(tmp_path):
@@ -84,7 +85,7 @@ def test_default_works_with_inbreeding_and_effective_size(tmp_path):
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    assert ped["relatedness"]["relationship_pairs"]["engine"] == "streaming_scalar"
+    assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming"
     assert ped["relatedness"]["inbreeding"] is not None
     assert len(ped["popgen"]["effective_size"]) == 8
 
@@ -132,8 +133,8 @@ def test_per_individual_pairs_populates_relationship_summary(tmp_path):
     assert "n_related_pairs" in rs
 
 
-def test_per_individual_pairs_counts_close_to_streaming(tmp_path):
-    """On the example pedigree, the two modes give identical counts for the 10 exact codes."""
+def test_per_individual_pairs_counts_equal_streaming(tmp_path):
+    """On the example pedigree, the two modes report identical counts for all 23 codes and PO."""
     out_s = tmp_path / "stream"
     out_b = tmp_path / "burden"
     assert _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_s)]).returncode == 0
@@ -152,22 +153,23 @@ def test_per_individual_pairs_counts_close_to_streaming(tmp_path):
     )
     s = _load_yaml(out_s)["pedigree"]["relatedness"]["relationship_pairs"]
     b = _load_yaml(out_b)["pedigree"]["relatedness"]["relationship_pairs"]
-    # The six exact codes match bit-identically.
-    for code in sorted(_EXACT_CODES):
+    for code in (*_ALL_CODES, "PO"):
         assert s[code] == b[code], f"{code}: streaming={s[code]} burden={b[code]}"
 
 
 # ----- the exact-code contract and the closest-category fold ----------
 
 
-def test_estimate_exact_code_set_is_the_six_pedsum_relies_on():
-    """``estimate_relationship_counts`` names exactly the codes this suite compares."""
+def test_relationship_counts_are_exact_on_every_code():
+    """``relationship_counts(max_degree=5)`` reports every registry code as exact."""
     pg = PedigreeGraph.from_arrays(
         ids=np.arange(4),
         mother_ids=np.array([-1, -1, 0, 0]),
         father_ids=np.array([-1, -1, 1, 1]),
     )
-    assert set(pg.estimate_relationship_counts(max_degree=5).exact) == set(_EXACT_CODES)
+    counts = pg.relationship_counts(max_degree=5)
+    assert set(counts.exact) == set(_ALL_CODES)
+    assert set(counts.requested) == set(_ALL_CODES)
 
 
 def test_incest_fold_agrees_between_engines(tmp_path):
@@ -179,7 +181,7 @@ def test_incest_fold_agrees_between_engines(tmp_path):
     assert _run(["summarize", "--in", str(ped), "--out", str(out_b), "--per-individual-pairs"]).returncode == 0
     s = _load_yaml(out_s)["pedigree"]["relatedness"]["relationship_pairs"]
     b = _load_yaml(out_b)["pedigree"]["relatedness"]["relationship_pairs"]
-    for code in sorted(_EXACT_CODES):
+    for code in _ALL_CODES:
         assert s[code] == b[code], f"{code}: streaming={s[code]} burden={b[code]}"
     # id5 is both the mother and the paternal half sib of id7; the pair is
     # counted once, as parent-offspring. Three unfolded PHS pairs, two folded.
@@ -196,11 +198,11 @@ def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
     df, _ = load_and_validate(ped)
     pg = _build_pedigree_graph(df)
     counts = _count_pairs_matrix_with_lists(df, pg=pg)
-    estimated = pg.estimate_relationship_counts(max_degree=5)
-    for code in sorted(_EXACT_CODES):
+    streamed = pg.relationship_counts(max_degree=5)
+    for code in _ALL_CODES:
         n_pairs = len(counts["_pair_lists"][code])
         assert counts[code] == n_pairs
-        assert estimated[code] == n_pairs, f"{code}: estimate={estimated[code]} pairs={n_pairs}"
+        assert streamed[code] == n_pairs, f"{code}: streamed={streamed[code]} pairs={n_pairs}"
 
     # The overlapping pair appears under MO, and under no half-sib code.
     ids = df["id"].to_numpy()
@@ -214,14 +216,3 @@ def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
     }
     assert (5, 7) not in phs_pairs
     assert phs_pairs == {(5, 6), (6, 7)}
-
-
-def test_clamped_codes_are_reported(tmp_path):
-    """Codes whose scalar residual underflowed are named in the YAML, not silently 0."""
-    ped = write_ped(tmp_path / "incest.tsv", _INCEST_PEDIGREE)
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(ped), "--out", str(out_dir)])
-    assert res.returncode == 0, res.stderr
-    pairs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_pairs"]
-    assert pairs["clamped"] == ["H1C", "H1C1R"]
-    assert "clamped to 0" in res.stderr

@@ -154,8 +154,8 @@ Flags:
   `.relatives_by_degree`, closest-degree distribution). Requires
   materialising full pair lists, which OOMs on pair-dense pedigrees
   above ~500K rows (stallion-heavy livestock, large half-sib clusters).
-  Off by default; the 23 pair counts and the standard summary are
-  produced without it.
+  Off by default; the 23 pair counts are exact either way and the
+  standard summary is produced without it.
 - `--sex-concordance` — opt into **Offspring Sex Concordance** (see
   below). Off by default. Adds
   `demography.offspring_sex_concordance` to both YAML files.

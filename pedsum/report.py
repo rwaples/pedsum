@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from pedsum.checks import CheckResult, Finding
 
 #: One value in the ``relationship_pairs`` section: a count (``None`` when the
-#: code was not computed), the ``by_degree`` rollup, or the ``clamped`` codes.
-PairEntry = Union[int, None, "Mapping[int, int]", list[str]]
+#: code was not computed) or the ``by_degree`` rollup.
+PairEntry = Union[int, None, "Mapping[int, int]"]
 
 _NUMERIC_COLS = (
     "F",
@@ -167,18 +167,15 @@ def _build_pedigree_data(
 def _serialise_pair_entry(value: PairEntry) -> object:
     """Coerce one ``relationship_pairs`` entry to its output form.
 
-    Three shapes share the section, and each one's type says how to render it:
-    the ``by_degree`` rollup is a mapping keyed by degree, ``clamped`` is the
-    list of codes whose scalar residual underflowed, and everything else is a
-    count. A count is ``None`` when pedigree-graph was not asked for that code,
-    which stays ``None`` rather than becoming a misleading 0.
+    Two shapes share the section, and each one's type says how to render it:
+    the ``by_degree`` rollup is a mapping keyed by degree, and everything else
+    is a count. A count is ``None`` when pedigree-graph was not asked for that
+    code, which stays ``None`` rather than becoming a misleading 0.
     """
     if value is None:
         return None
     if isinstance(value, Mapping):
         return {str(degree): int(count) for degree, count in value.items()}
-    if isinstance(value, list):
-        return [str(code) for code in value]
     return int(value)
 
 

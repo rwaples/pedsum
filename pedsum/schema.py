@@ -48,9 +48,6 @@ _PAIRS_SLIM_KEYS: tuple[str, ...] = (
     "1C2R",
     "2C",
     "PO",
-    # Emitted by the streaming engine only: the codes whose scalar residual
-    # underflowed and was floored at 0, so their counts are unreliable.
-    "clamped",
     "engine",
 )
 

@@ -287,9 +287,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="opt into per-individual relationship-burden summary. "
         "Requires the matrix engine to materialise full pair lists "
         "(OOMs on pair-dense pedigrees with N > ~500K). When unset "
-        "(default), pedsum uses estimate_relationship_counts for the 23 pair "
-        "counts in O(N) memory; the burden summary is left as a stub. "
-        "See the README for the streaming-vs-matrix precision contract.",
+        "(default), pedsum counts the 23 pair categories exactly with "
+        "relationship_counts in O(N) memory; the burden summary is left as "
+        "a stub. Both paths report the same counts.",
     )
     p_sum.add_argument(
         "--sex-concordance",
@@ -752,24 +752,13 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # touches only the scalar counts and by_degree). Leaves pairs["_engine"].
         pairs.pop("_pair_lists", None)
     else:
-        with _timed("relationship pair counts (estimate_relationship_counts)"):
-            estimated = pg.estimate_relationship_counts(max_degree=5)
-        # estimate_relationship_counts builds the transient adjacency powers
-        # (_A … _A5) and releases them on exit, mirroring relationship_pairs, so
-        # they no longer stay resident through the inbreeding / Ne /
-        # individual-table / write phases where the streaming run peaks.
-        pairs = _augment_pair_counts(estimated)
-        pairs["_engine"] = "streaming_scalar"
-        # A clamped code is one whose scalar residual underflowed to a negative
-        # number and was floored at 0 — unreliable, not a true absence. The
-        # library already raises a RuntimeWarning; record the codes in the
-        # output so a downstream reader of the YAML sees them too.
-        pairs["clamped"] = sorted(estimated.clamped)
-        if estimated.clamped:
-            logger.warning(
-                "scalar pair counts clamped to 0 for %s; re-run with --per-individual-pairs for exact counts",
-                ", ".join(sorted(estimated.clamped)),
-            )
+        with _timed("relationship pair counts (relationship_counts)"):
+            counts = pg.relationship_counts(max_degree=5)
+        # The Rust row-streaming engine counts every pair under its closest
+        # category without materialising pair lists, so the 23 counts are
+        # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
+        pairs = _augment_pair_counts(counts)
+        pairs["_engine"] = "rust_streaming"
         relationship_summary = {
             "computed": False,
             "skip_reason": (

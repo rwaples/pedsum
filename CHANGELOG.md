@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — pedigree-graph 0.9
+
+### Changed
+
+- **The default `summarize` reports exact counts for all 23 pair codes.**
+  The default path now calls `PedigreeGraph.relationship_counts(max_degree=5)`,
+  the Rust row-streaming engine that classifies every pair under its closest
+  category in O(N) memory, instead of the retired `estimate_relationship_counts`
+  scalar estimator (pedsum #2). `relationship_pairs.engine` reads
+  `rust_streaming` instead of `streaming_scalar`, and the `clamped` list and its
+  log line are gone because an exact count has nothing to clamp. The six
+  closed-form codes (`MZ`, `MO`, `FO`, `FS`, `MHS`, `PHS`) and `PO` are
+  unchanged; the twelve residual codes that were approximate now agree with
+  `--per-individual-pairs`. On `example_pedigree.tsv`: `Av` 265 → 259, `HAv`
+  477 → 465, `GAv` 314 → 288, `1C` 265 → 291, `HGAv` 612 → 490, `GGAv`
+  214 → 186, `H1C` 337 → 430, `1C1R` 1055 → 856, `HGGAv` 444 → 256, `H1C1R`
+  1158 → 697, `1C2R` 618 → 608, `2C` 1315 → 627. `--per-individual-pairs`
+  still materialises pair lists for the burden summary but no longer changes
+  which counts are reported.
+
 ## Unreleased — pedigree-graph 0.8
 
 Pedsum now requires `pedigree-graph>=0.8,<0.9`. The 0.7.1 API is gone
