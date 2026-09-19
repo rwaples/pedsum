@@ -19,6 +19,32 @@
   1158 → 697, `1C2R` 618 → 608, `2C` 1315 → 627. `--per-individual-pairs`
   still materialises pair lists for the burden summary but no longer changes
   which counts are reported.
+- **`--per-individual-pairs` reports `engine: rust_streaming_pairs`.** It used
+  to report `matrix`, naming a SciPy extractor that pedigree-graph 0.9.0
+  deletes. Both paths now run the one row-streaming engine and differ only in
+  whether the pair lists are materialised, which is what the new label says.
+  The path also asks for `execution="memory"`, pedigree-graph 0.9.0's
+  lowest-peak assembly, since holding the lists is what makes it heavy. The
+  flag help, README and DESIGN notes drop the retired matrix-engine story.
+
+- **`popgen.effective_size` renames `ne_caballero_toro` to
+  `ne_group_coancestry`.** pedigree-graph 0.9.0 replaces the statistic
+  (its issue #15 and ADR 0012): the departing estimator regressed a
+  descendant self-coancestry average against a hardcoded baseline that
+  Caballero & Toro 2002 does not contain. The replacement is their 2000
+  eq. 3 group coancestry. The row keeps its slot and its position in the
+  eight; only the name and the value change.
+- **`ne_long_term_contributions.ne` is always reported.** Under 0.8 it was
+  null on pedigrees whose contributions had not reached an asymptote, and
+  the example pedigree was one of them; 0.9.0 reports the estimate there.
+
+### Added
+
+- **`--threads N` on `summarize`, `validate` and `epimight-input`.** Sets the
+  pedigree-graph thread budget for the process, which defaults to 1. Counts
+  and pair lists are identical under any value; only wall time changes. The
+  exact counting path is parallel, so the default single thread is the
+  slowest setting.
 
 ## Unreleased — pedigree-graph 0.8
 
