@@ -23,3 +23,16 @@ pip = "*"
 
 [pypi-dependencies]
 pedsum = { path = ".", editable = true, extras = ["test", "typecheck"] }
+
+# `pixi run test` is the parallel suite. Bare `pixi run pytest` stays serial
+# and unpinned for verbose output, debugging, and focused runs. The worker
+# count and pins were chosen with benchmarks/bench_pytest_workers.sh on the
+# 12-core development host, three sweeps of the 324-test suite against the
+# pedigree-graph 0.9 tree. Median wall times were 190.74s serial, 37.71s at
+# n6t1, 35.87s at n8t1, and 48.67s at n6 unpinned. Aggregate process-tree peak
+# RSS was 2.24 GiB at n6t1 and 2.89 GiB at n8t1. Eight workers bought another
+# 4.9% for 0.65 GiB, within the host's 30 GiB budget.
+[tasks.test]
+description = "Full pytest suite on 8 xdist workers, one numba/BLAS/polars thread each"
+cmd = "pytest -n 8 --dist worksteal"
+env = { NUMBA_NUM_THREADS = "1", OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1", POLARS_MAX_THREADS = "1" }

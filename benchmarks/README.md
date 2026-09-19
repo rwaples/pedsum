@@ -15,7 +15,22 @@ merged before its before/after peak-RSS delta is recorded in
   `pedsum.cli._run_summarize` (reusing `_parse_args`) while a background thread
   samples `/proc/self/statm`, attributing per-phase peaks via
   `pedsum.cli._current_profile_phase()`.
+- `bench_pytest_workers.sh` — repeatable pytest-xdist worker/thread sweep. It
+  compares the serial suite with pinned and unpinned parallel cells and samples
+  aggregate RSS across the whole pytest process tree.
 - `memory_results.md` — the recorded baseline / before-after table.
+
+Run the pytest sweep from the repo root:
+
+```bash
+bash benchmarks/bench_pytest_workers.sh
+```
+
+Set `SWEEPS`, `CELLS`, or pass pytest arguments to narrow a diagnostic run:
+
+```bash
+SWEEPS=1 CELLS="n8t1" bash benchmarks/bench_pytest_workers.sh tests/test_pairs_properties.py
+```
 
 ## Regenerating the benchmark inputs
 
