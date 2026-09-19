@@ -89,7 +89,7 @@ A scalar variance-weighted equivalent count, defined as `(Σ wᵢ)² / Σ wᵢ²
 _Avoid_: "founder equivalent number" (unqualified)
 
 **Effective Population Size (Ne)**:
-The size of an idealised Wright-Fisher population that would exhibit the same value of a chosen genetic-drift parameter (rate of inbreeding accumulation, variance in allele frequency, coalescent rate, …) as the observed pedigree. Multiple operational definitions exist; **they are not interchangeable**. Pedsum reports eight named estimators under `popgen.effective_size:`, each carrying its model in its name (`ne_inbreeding`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_caballero_toro`, `ne_coancestry`). Bare `ne` is forbidden — every reference carries the estimator qualifier. Definitions, assumptions, and references for each estimator live in `DESIGN.md` (and README), not here.
+The size of an idealised Wright-Fisher population that would exhibit the same value of a chosen genetic-drift parameter (rate of inbreeding accumulation, variance in allele frequency, coalescent rate, …) as the observed pedigree. Multiple operational definitions exist; **they are not interchangeable**. Pedsum reports eight named estimators under `popgen.effective_size:`, each carrying its model in its name (`ne_inbreeding`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_group_coancestry`, `ne_coancestry`). Bare `ne` is forbidden — every reference carries the estimator qualifier. Definitions, assumptions, and references for each estimator live in `DESIGN.md` (and README), not here.
 _Avoid_: bare "Ne", "the effective size"
 
 **Component**:

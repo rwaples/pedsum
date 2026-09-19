@@ -141,7 +141,7 @@ def test_observed_depth_labels_index_the_arrays(tmp_path):
     assert res.returncode == 0, res.stderr
 
     extra_es = _load_extra(out_dir)["pedigree"]["popgen"]["effective_size"]
-    for name in ("ne_inbreeding", "ne_coancestry", "ne_caballero_toro"):
+    for name in ("ne_inbreeding", "ne_coancestry", "ne_group_coancestry"):
         record = extra_es[name]
         depths = record["depths"]
         assert depths == sorted(set(depths))
@@ -162,10 +162,11 @@ def test_observed_depth_labels_index_the_arrays(tmp_path):
 def test_unavailable_estimator_still_emits_a_scalar_row(tmp_path):
     """All eight scalar rows survive when an estimator reports no value.
 
-    ``ne_coancestry`` is unselected by default and ``ne_long_term_contributions``
-    reports no ``ne`` on this pedigree (its contributions have not reached an
-    asymptote), so the projection has to read a missing ``ne`` as null rather
-    than dropping the row.
+    ``ne_coancestry`` is unselected by default, so the projection has to read
+    its missing ``ne`` as null rather than dropping the row. Under
+    pedigree-graph 0.9 ``ne_long_term_contributions`` always reports an ``ne``
+    (its own changelog, "the Ne_LTC asymptote"), so it is no longer the
+    example of an absent value.
     """
     out_dir = tmp_path / "out"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--tsv"])
@@ -173,13 +174,14 @@ def test_unavailable_estimator_still_emits_a_scalar_row(tmp_path):
 
     ped = _load_yaml(out_dir)["pedigree"]
     assert "reason" in ped["popgen"]["effective_size"]["ne_coancestry"]
-    assert ped["popgen"]["effective_size"]["ne_long_term_contributions"]["ne"] is None
+    assert ped["popgen"]["effective_size"]["ne_coancestry"]["ne"] is None
+    assert isinstance(ped["popgen"]["effective_size"]["ne_long_term_contributions"]["ne"], float)
 
     scalar_rows = [r for r in _load_tsv(out_dir)[1:] if r[0] == "effective_size_scalars"]
     assert len(scalar_rows) == 8
     named = {r[1]: r[3] for r in scalar_rows}
     assert named["ne_coancestry"] == ""
-    assert named["ne_long_term_contributions"] == ""
+    assert named["ne_long_term_contributions"] != ""
 
 
 def test_tsv_split_holds(tmp_path):
