@@ -2,9 +2,9 @@
 
 The default mode uses ``pg.relationship_counts`` (the Rust row-streaming
 engine: exact for all 23 codes in O(N) memory). ``--per-individual-pairs``
-opts into the matrix engine to populate the per-individual
-relationship-burden summary, at the cost of OOM risk on pair-dense
-pedigrees. Both modes report the same 23 counts.
+runs the same engine but materialises every pair list to populate the
+per-individual relationship-burden summary, at the cost of a peak that
+scales with the pair count. Both modes report the same 23 counts.
 
 Both engines assign each pair its single closest relationship category,
 so a pedigree with parent-offspring incest reports the parent-offspring
@@ -90,11 +90,11 @@ def test_default_works_with_inbreeding_and_effective_size(tmp_path):
     assert len(ped["popgen"]["effective_size"]) == 8
 
 
-# ----- --per-individual-pairs (matrix engine) mode --------------------
+# ----- --per-individual-pairs (materialised pair lists) mode ----------
 
 
-def test_per_individual_pairs_uses_matrix_engine(tmp_path):
-    """``--per-individual-pairs`` routes through the matrix pair-count engine."""
+def test_per_individual_pairs_uses_the_pair_list_engine(tmp_path):
+    """``--per-individual-pairs`` routes through the pair-list enumerator."""
     out_dir = tmp_path / "out"
     res = _run(
         [
@@ -108,8 +108,8 @@ def test_per_individual_pairs_uses_matrix_engine(tmp_path):
     )
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    # --per-individual-pairs uses the matrix pair-list enumerator.
-    assert ped["relatedness"]["relationship_pairs"]["engine"] == "matrix"
+    # Same engine as the default; the difference is the materialised lists.
+    assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming_pairs"
 
 
 def test_per_individual_pairs_populates_relationship_summary(tmp_path):
@@ -128,7 +128,7 @@ def test_per_individual_pairs_populates_relationship_summary(tmp_path):
     assert res.returncode == 0, res.stderr
     rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is True
-    # Per-individual burden fields appear when matrix engine ran.
+    # Per-individual burden fields appear when the pair lists were built.
     assert "relatives_by_degree" in rs
     assert "n_related_pairs" in rs
 
@@ -190,7 +190,7 @@ def test_incest_fold_agrees_between_engines(tmp_path):
 
 
 def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
-    """The folded counts equal the pair lists the matrix engine materialises."""
+    """The folded counts equal the pair lists the enumerator materialises."""
     from pedsum.pairs import _build_pedigree_graph, _count_pairs_matrix_with_lists
     from pedsum.validate import load_and_validate
 

@@ -151,11 +151,11 @@ Flags:
   `ne` and `reason: not_requested`.
 - `--per-individual-pairs` — opt into the per-individual
   relationship-burden summary (`relationship_summary.relatives_total`,
-  `.relatives_by_degree`, closest-degree distribution). Requires
-  materialising full pair lists, which OOMs on pair-dense pedigrees
-  above ~500K rows (stallion-heavy livestock, large half-sib clusters).
-  Off by default; the 23 pair counts are exact either way and the
-  standard summary is produced without it.
+  `.relatives_by_degree`, closest-degree distribution). Both paths run the
+  same pedigree-graph row-streaming engine and report the same 23 exact
+  counts; only this one materialises every pair list, so its peak memory
+  scales with the number of related pairs rather than the number of rows.
+  Off by default, and the standard summary is produced without it.
 - `--sex-concordance` — opt into **Offspring Sex Concordance** (see
   below). Off by default. Adds
   `demography.offspring_sex_concordance` to both YAML files.
@@ -616,7 +616,7 @@ id	sex	mother	father
 | `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only) |
 | `relatedness.relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
 | `relatedness.inbreeding` | distribution of F (only with `--inbreeding`) |
-| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_caballero_toro`); `ne_coancestry` is null without `--ne-coancestry` |
+| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_group_coancestry`); `ne_coancestry` is null without `--ne-coancestry` |
 | `strata.sex_summary` | per-sex sub-aggregates (n, n_founders, n_reproductive, n_terminal, …) |
 | `strata.depth_summary` | per-depth sub-aggregates (one row per depth) |
 | `individual.distributions` | mean/std/quartiles/`nz` for each per-individual numeric column |

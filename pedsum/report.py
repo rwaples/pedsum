@@ -156,7 +156,7 @@ def _build_pedigree_data(
         "components": (aggregates or {}).get("components", {}),
         "sex_summary": (aggregates or {}).get("sex_summary", {}),
         "depth_summary": (aggregates or {}).get("depth_summary", []),
-        "pairs_engine": str(pairs.get("_engine", "matrix")),
+        "pairs_engine": str(pairs.get("_engine", "unknown")),
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
         "inbreeding": inb_section,
     }

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 import polars as pl
+from pedigree_graph import configure_threads
 
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
 from pedsum.epimight import (
@@ -103,6 +104,17 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_threads_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--threads",
+        type=_positive_int,
+        default=1,
+        help="worker threads for the pedigree-graph engine (default 1). "
+        "Counts and pair lists are identical under any value; only wall "
+        "time changes. Set once per process, before the first computation.",
+    )
+
+
 def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sep",
@@ -148,6 +160,14 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         "missing->F/M imputation is unaffected. Restores 0.8's hard-block on "
         "sex/role contradictions via the sex_role_consistency check.",
     )
+
+
+def _positive_int(v: str) -> int:
+    """Argparse type guard for ints >= 1."""
+    n = _nonnegative_int(v)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"expected an integer >= 1, got {v!r}")
+    return n
 
 
 def _nonnegative_int(v: str) -> int:
@@ -285,11 +305,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--per-individual-pairs",
         action="store_true",
         help="opt into per-individual relationship-burden summary. "
-        "Requires the matrix engine to materialise full pair lists "
-        "(OOMs on pair-dense pedigrees with N > ~500K). When unset "
-        "(default), pedsum counts the 23 pair categories exactly with "
-        "relationship_counts in O(N) memory; the burden summary is left as "
-        "a stub. Both paths report the same counts.",
+        "Both paths use the same pedigree-graph row-streaming engine and "
+        "report the same 23 counts; this one additionally materialises "
+        "every pair list, so its peak memory scales with the number of "
+        "related pairs rather than with the number of rows. Unset "
+        "(default), pedsum counts in O(N) memory and leaves the burden "
+        "summary as a stub.",
     )
     p_sum.add_argument(
         "--sex-concordance",
@@ -341,6 +362,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "count or stratum below cell-size 5. Not a safe-harbor guarantee.",
     )
     _add_format_args(p_sum)
+    _add_threads_args(p_sum)
     _add_logging_args(p_sum)
 
     p_val = sub.add_parser("validate", help="run all integrity checks accumulating; report issues")
@@ -420,6 +442,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="inclusive upper bound for birth_year_range check (default: current calendar year + 1).",
     )
     _add_format_args(p_val)
+    _add_threads_args(p_val)
     _add_logging_args(p_val)
 
     p_epi = sub.add_parser(
@@ -541,6 +564,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "reads natively.",
     )
     _add_format_args(p_epi)
+    _add_threads_args(p_epi)
     _add_logging_args(p_epi)
 
     args = parser.parse_args(argv)
@@ -552,6 +576,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
     return args
+
+
+def _commit_thread_budget(args: argparse.Namespace) -> None:
+    """Hand ``--threads`` to pedigree-graph before its first computation.
+
+    The library commits one budget per process and refuses a later change,
+    so this runs before any graph is built. Its results do not depend on the
+    value; only wall time does.
+    """
+    threads = getattr(args, "threads", 1)
+    try:
+        configure_threads(threads)
+    except RuntimeError:
+        # Already committed by an earlier call in this process (the test
+        # suite drives several runs in-process); the budget stands.
+        logger.debug("pedigree-graph thread budget already committed; --threads=%s ignored", threads)
 
 
 def _init_logging(verbose: bool, quiet: bool) -> None:
@@ -669,6 +709,7 @@ def _write_validation_failure_log(args: argparse.Namespace) -> None:
 def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
+    _commit_thread_budget(args)
     try:
         # Wrapped so the read/validation peak is attributed to a phase by the
         # benchmark profiler; load_and_validate already logs its own timing.
@@ -741,7 +782,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if args.per_individual_pairs:
         with _timed("relationship pairs"):
             pairs = _count_pairs_matrix_with_lists(df, pg=pg)
-            pairs["_engine"] = "matrix"
+            pairs["_engine"] = "rust_streaming_pairs"
 
         with _timed("relationship burden summary"):
             relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
@@ -763,8 +804,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "computed": False,
             "skip_reason": (
                 "per-individual relationship burden requires full pair-list "
-                "enumeration; pass --per-individual-pairs to compute via the "
-                "matrix engine"
+                "enumeration; pass --per-individual-pairs to materialise the "
+                "pair lists"
             ),
             "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
@@ -1015,6 +1056,7 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
 
 
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
+    _commit_thread_budget(args)
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     try:
@@ -1082,6 +1124,7 @@ def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parq
 
 
 def _run_epimight_input(args: argparse.Namespace) -> int:
+    _commit_thread_budget(args)
     """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
     if _prepare_out_dir(args.out_dir) != 0:
         return 1

@@ -483,16 +483,17 @@ def compute_relationship_summary(
 ) -> dict:
     """Density and per-individual relationship-burden summaries.
 
-    Pair-list-derived metrics are exact for the matrix engine. The BFS engine
-    currently returns aggregate counts only, so these fields are unavailable
-    there instead of being approximated from non-unique relationship counts.
+    These metrics need the pair lists themselves, which only
+    ``--per-individual-pairs`` materialises. The default counting path returns
+    aggregate counts, so the fields are reported unavailable rather than
+    approximated from them.
     """
     n = len(df)
     n_possible = n * (n - 1) // 2
     if pair_lists is None:
         return {
             "computed": False,
-            "skip_reason": "relationship pair lists are only available from the matrix engine",
+            "skip_reason": "relationship pair lists are only built under --per-individual-pairs",
             "n_individual_pairs": int(n_possible),
         }
     if n == 0:

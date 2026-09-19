@@ -46,7 +46,8 @@ def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = 
 
     Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``.
     Every pair is assigned its single closest relationship category, so the
-    23 counts partition the related pairs instead of overlapping.
+    23 counts partition the related pairs instead of overlapping, and they
+    equal the ones the default counting path reports.
 
     When ``pg`` is supplied the wrapper reuses it instead of building a
     fresh compacted PedigreeGraph; saves one compaction pass when the
@@ -55,7 +56,9 @@ def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = 
     """
     if pg is None:
         pg = _build_pedigree_graph(df)
-    pair_lists = pg.relationship_pairs(max_degree=5)
+    # The lists are this path's whole reason to exist and are what makes it
+    # OOM-prone, so ask for the lowest-peak assembly rather than the fastest.
+    pair_lists = pg.relationship_pairs(max_degree=5, execution="memory")
     named = {code: len(block) for code, block in pair_lists.items()}
     out = _augment_pair_counts(named)
     out["_pair_lists"] = pair_lists

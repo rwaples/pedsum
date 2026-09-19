@@ -248,9 +248,14 @@ class TestSchemaEdgeCases:
     def test_categorise_pedigree_merges_pair_engine_and_drops_empty_sections(self) -> None:
         """Categorisation folds pair engine into relationship pairs and skips empty sections."""
         nested = _categorise_pedigree(
-            {"relationship_pairs": {"FS": 2}, "pairs_engine": "matrix", "components": {}, "sex_summary": []}
+            {
+                "relationship_pairs": {"FS": 2},
+                "pairs_engine": "rust_streaming",
+                "components": {},
+                "sex_summary": [],
+            }
         )
-        assert nested["relatedness"]["relationship_pairs"] == {"FS": 2, "engine": "matrix"}
+        assert nested["relatedness"]["relationship_pairs"] == {"FS": 2, "engine": "rust_streaming"}
         assert "structure" not in nested
         assert "strata" not in nested
 
