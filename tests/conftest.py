@@ -1,9 +1,13 @@
-"""Shared test helpers for pedsum's ``summarize`` subprocess-driven tests."""
+"""Shared test helpers for pedsum's CLI-driven tests."""
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import gzip
+import io
+import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,16 +25,33 @@ SCRIPT = REPO / "pedigree_summary.py"
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from pedsum.cli import main  # noqa: E402
+
 
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """Invoke ``pedigree_summary.py`` as a subprocess; capture stdout/stderr."""
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
-        capture_output=True,
-        text=True,
-        cwd=cwd or REPO,
-        check=False,
-    )
+    """Invoke the CLI in-process and return a ``CompletedProcess``-shaped result.
+
+    Runs ``pedsum.cli.main`` under redirected stdout/stderr with ``sys.argv``
+    and the working directory set as a ``python pedigree_summary.py ...``
+    invocation would see them.  A subprocess costs ~1.1s of interpreter and
+    import startup per call, which dominated the suite.
+    """
+    argv = [str(SCRIPT), *args]
+    out, err = io.StringIO(), io.StringIO()
+    prev_cwd, prev_argv = os.getcwd(), sys.argv
+    os.chdir(cwd or REPO)
+    sys.argv = argv
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = main(list(args))
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    finally:
+        os.chdir(prev_cwd)
+        sys.argv = prev_argv
+        logging.getLogger().handlers.clear()
+    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
 
 def write_ped(path, rows):

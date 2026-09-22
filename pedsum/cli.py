@@ -606,6 +606,7 @@ def _init_logging(verbose: bool, quiet: bool) -> None:
         datefmt="%H:%M:%S",
         level=level,
         stream=sys.stderr,
+        force=True,
     )
 
 
