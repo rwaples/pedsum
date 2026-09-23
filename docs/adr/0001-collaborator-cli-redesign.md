@@ -1,4 +1,4 @@
-# 0001 — Collaborator-friendly CLI redesign for pedsum 0.7
+# ADR 0001: Collaborator-friendly CLI redesign for pedsum 0.7
 
 Status: accepted (2026-05-19). Supersedes the internal-tidy plan that previously lived in `PLAN.md`.
 

@@ -1,4 +1,4 @@
-# 0002 — Validation as a declarative Check registry
+# ADR 0002: Validation as a declarative Check registry
 
 Status: accepted
 
@@ -19,9 +19,11 @@ Express the Checks as a single declarative registry and drive both modes from on
 runner:
 
 - **One `CHECKS` list** of `Check(name, requires, run, label, group)` entries, in
-  canonical order. `_CHECK_ORDER`, `_CHECK_LABELS`, and `_CHECK_GROUPS` are
-  *derived* from it (single source of truth; the three hand-synced tables are
-  deleted).
+  canonical order. `_CHECK_ORDER` and `_CHECK_LABELS` are *derived* from it
+  (single source of truth; the hand-synced tables are deleted). `_CHECK_GROUPS`
+  stays an explicit constant: it is a curated *display* grouping for the
+  stderr summary whose order within a group deliberately differs from
+  execution order, so it cannot be derived from `CHECKS`.
 - **One runner** parametrized by `on_fail`: `raise` (fail-fast, for `summarize`)
   or `accumulate` (for `validate`). A Check whose prerequisite did not `PASS` is
   auto-`SKIP`ped with `skip_reason = f"{first_failed_prereq} failed"`.

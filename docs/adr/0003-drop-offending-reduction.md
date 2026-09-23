@@ -1,4 +1,4 @@
-# 0003 — `validate --drop-offending` pedigree reduction
+# ADR 0003: `validate --drop-offending` pedigree reduction
 
 Status: accepted
 
