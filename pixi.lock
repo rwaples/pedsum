@@ -41,6 +41,7 @@ environments:
       - pypi: ./
       - pypi: https://files.pythonhosted.org/packages/01/39/f5b9a5d390d4edd1ad472334493ac442963ebeb4daaa74ff4bdac6ef292f/hypothesis-6.165.10-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/2f/c5/1783e87e7bdf3eaa854f96e0931a542cbaed4a933ef6a5a5f992b27c2984/pedigree_graph-0.9.1-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/38/41/b347e6a1d8740d2911b97e927c2d5791d69beed977b5a6e827e455631465/polars-1.44.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/41/48/6450ed9243315322bbc19ac57b9b70d66a20bf1d38d124c96bc4bf6af9ea/scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
@@ -57,7 +58,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/e8/25/47076a87f372d05bccbf835b49846fbb518ce4954b0da0adb36954b06a2c/pedigree_graph-0.9.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -482,6 +482,24 @@ packages:
   - setuptools ; extra == 'dev'
   - xmlschema ; extra == 'dev'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/2f/c5/1783e87e7bdf3eaa854f96e0931a542cbaed4a933ef6a5a5f992b27c2984/pedigree_graph-0.9.1-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: pedigree-graph
+  version: 0.9.1
+  sha256: 12ffea35592bb97e06cc2f8b6c1510d9a72780e41985972bcea3a24c7d48b4a5
+  requires_dist:
+  - numpy>=2.2,<3
+  - scipy>=1.14,<2
+  - numba>=0.60,<1
+  - pytest>=9,<10 ; extra == 'test'
+  - pytest-cov>=7,<8 ; extra == 'test'
+  - pytest-xdist>=3.8,<4 ; extra == 'test'
+  - ruff>=0.16,<0.17 ; extra == 'test'
+  - hypothesis>=6,<7 ; extra == 'test'
+  - pandas>=3.0,<4 ; extra == 'test'
+  - polars>=1.43.2,<2 ; extra == 'test'
+  - pyarrow>=17,<26 ; extra == 'test'
+  - ty==0.0.70 ; extra == 'typecheck'
+  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
   name: sortedcontainers
   version: 2.4.0
@@ -656,21 +674,3 @@ packages:
   version: 2.3.0
   sha256: f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/e8/25/47076a87f372d05bccbf835b49846fbb518ce4954b0da0adb36954b06a2c/pedigree_graph-0.9.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: pedigree-graph
-  version: 0.9.0
-  sha256: 5fe22fcea51ac4f50483cb411dc358dbd1ffe234f7c332b07cb471388480e946
-  requires_dist:
-  - numpy>=2.2,<3
-  - scipy>=1.14,<2
-  - numba>=0.60,<1
-  - pytest>=9,<10 ; extra == 'test'
-  - pytest-cov>=7,<8 ; extra == 'test'
-  - pytest-xdist>=3.8,<4 ; extra == 'test'
-  - ruff>=0.16,<0.17 ; extra == 'test'
-  - hypothesis>=6,<7 ; extra == 'test'
-  - pandas>=3.0,<4 ; extra == 'test'
-  - polars>=1.43.2,<2 ; extra == 'test'
-  - pyarrow>=17,<26 ; extra == 'test'
-  - ty==0.0.70 ; extra == 'typecheck'
-  requires_python: '>=3.13'
