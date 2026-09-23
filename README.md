@@ -149,12 +149,12 @@ Flags:
   its kinship DP can blow up RAM on pedigrees larger than ~500K rows.
   Unselected, `Ne_C` still occupies its slot in the output with a null
   `ne` and `reason: not_requested`.
-- `--per-individual-pairs` — opt into the per-individual
+- `--per-individual-burden` (`--per-individual-pairs` also accepted) — opt into the per-individual
   relationship-burden summary (`relationship_summary.relatives_total`,
   `.relatives_by_degree`, closest-degree distribution). Both paths run the
   same pedigree-graph row-streaming engine and report the same 23 exact
-  counts; only this one materialises every pair list, so its peak memory
-  scales with the number of related pairs rather than the number of rows.
+  counts. The burden sink accumulates per-person degree counts in O(N)
+  memory without materialising pair lists.
   Off by default, and the standard summary is produced without it.
 - `--sex-concordance` — opt into **Offspring Sex Concordance** (see
   below). Off by default. Adds

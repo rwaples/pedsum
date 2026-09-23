@@ -1,10 +1,9 @@
 """Tests for the two pair-counting modes in ``summarize``.
 
 The default mode uses ``pg.relationship_counts`` (the Rust row-streaming
-engine: exact for all 23 codes in O(N) memory). ``--per-individual-pairs``
-runs the same engine but materialises every pair list to populate the
-per-individual relationship-burden summary, at the cost of a peak that
-scales with the pair count. Both modes report the same 23 counts.
+engine: exact for all 23 codes in O(N) memory). ``--per-individual-burden``
+runs the same classifier with a native O(N) summary sink. Both modes report
+the same 23 counts.
 
 Both engines assign each pair its single closest relationship category,
 so a pedigree with parent-offspring incest reports the parent-offspring
@@ -75,7 +74,7 @@ def test_default_relationship_summary_is_stub(tmp_path):
     assert res.returncode == 0, res.stderr
     rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is False
-    assert "pass --per-individual-pairs" in rs["skip_reason"]
+    assert "--per-individual-burden" in rs["skip_reason"]
     assert rs["n_individual_pairs"] == 200 * 199 // 2
 
 
@@ -90,11 +89,11 @@ def test_default_works_with_inbreeding_and_effective_size(tmp_path):
     assert len(ped["popgen"]["effective_size"]) == 8
 
 
-# ----- --per-individual-pairs (materialised pair lists) mode ----------
+# ----- per-individual burden mode ----------
 
 
-def test_per_individual_pairs_uses_the_pair_list_engine(tmp_path):
-    """``--per-individual-pairs`` routes through the pair-list enumerator."""
+def test_per_individual_pairs_uses_the_burden_sink(tmp_path):
+    """The opt-in report uses the bounded native burden sink."""
     out_dir = tmp_path / "out"
     res = _run(
         [
@@ -108,8 +107,7 @@ def test_per_individual_pairs_uses_the_pair_list_engine(tmp_path):
     )
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    # Same engine as the default; the difference is the materialised lists.
-    assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming_pairs"
+    assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming_burden"
 
 
 def test_per_individual_pairs_populates_relationship_summary(tmp_path):
@@ -128,7 +126,7 @@ def test_per_individual_pairs_populates_relationship_summary(tmp_path):
     assert res.returncode == 0, res.stderr
     rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is True
-    # Per-individual burden fields appear when the pair lists were built.
+    # Per-individual burden fields appear without building pair lists.
     assert "relatives_by_degree" in rs
     assert "n_related_pairs" in rs
 
