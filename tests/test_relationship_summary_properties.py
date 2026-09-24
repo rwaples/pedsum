@@ -7,9 +7,9 @@ import polars as pl
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pedigree_graph import RELATIONSHIPS
+from pedigree_graph import RELATIONSHIPS, PedigreeGraph
 
-from pedsum.sections import compute_relationship_summary
+from pedsum.sections import compute_relationship_summary, compute_relationship_summary_from_burden
 
 PairLists = dict[str, tuple[np.ndarray, np.ndarray]]
 RelationshipInput = tuple[pl.DataFrame, PairLists]
@@ -141,6 +141,8 @@ def test_relationship_summary_accepts_a_real_relationship_pairs() -> None:
     pair_lists = pg.relationship_pairs(max_degree=5)
 
     summary = compute_relationship_summary(df, pair_lists)
+    native_summary = compute_relationship_summary_from_burden(df, pg.relationship_burden())
+    assert native_summary == summary
 
     n = len(df)
     assert summary["computed"] is True
@@ -148,3 +150,21 @@ def test_relationship_summary_accepts_a_real_relationship_pairs() -> None:
     assert summary["n_related_pairs"] == sum(len(block) for block in pair_lists.values())
     assert sum(summary["related_pairs_by_closest_degree"].values()) == summary["n_related_pairs"]
     assert sum(summary["closest_relationship_per_individual"].values()) == n
+
+
+def test_native_burden_matches_pair_list_report_with_mz_and_external_parent() -> None:
+    """MZ degree zero and an unresolved shared father preserve report fields."""
+    graph = PedigreeGraph.from_frame(
+        {
+            "id": np.array([10, 11, 12, 13, 14, 15]),
+            "mother": np.array([-1, -1, 10, 10, 12, 13]),
+            "father": np.array([-1, -1, 11, 11, 99, 99]),
+            "twin": np.array([-1, -1, 13, 12, -1, -1]),
+            "sex": np.array([0, 1, 0, 0, 0, 0]),
+        }
+    )
+    df = pl.DataFrame({"ped_depth": graph.depth})
+    old = compute_relationship_summary(df, graph.relationship_pairs(max_degree=5))
+    new = compute_relationship_summary_from_burden(df, graph.relationship_burden())
+    assert new == old
+    assert new["n_related_pairs"] > sum(new["related_pairs_by_closest_degree"].values())

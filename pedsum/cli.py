@@ -25,7 +25,7 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph, _count_pairs_matrix_with_lists
+from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
 from pedsum.report import (
@@ -51,7 +51,7 @@ from pedsum.sections import (
     compute_effective_size,
     compute_founder_summary,
     compute_mating_pair_summary,
-    compute_relationship_summary,
+    compute_relationship_summary_from_burden,
     compute_sibship_sizes,
     compute_size_structure,
 )
@@ -302,15 +302,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "`not_requested`. No-op without `--effective-size`.",
     )
     p_sum.add_argument(
+        "--per-individual-burden",
         "--per-individual-pairs",
+        dest="per_individual_pairs",
         action="store_true",
-        help="opt into per-individual relationship-burden summary. "
-        "Both paths use the same pedigree-graph row-streaming engine and "
-        "report the same 23 counts; this one additionally materialises "
-        "every pair list, so its peak memory scales with the number of "
-        "related pairs rather than with the number of rows. Unset "
-        "(default), pedsum counts in O(N) memory and leaves the burden "
-        "summary as a stub.",
+        help="compute the per-individual relationship-burden summary with "
+        "O(N) native arrays and no pair lists. The historical "
+        "--per-individual-pairs spelling is also accepted. Unset "
+        "(default), the burden summary is a stub.",
     )
     p_sum.add_argument(
         "--sex-concordance",
@@ -781,18 +780,11 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     n_indiv = len(df)
     if args.per_individual_pairs:
-        with _timed("relationship pairs"):
-            pairs = _count_pairs_matrix_with_lists(df, pg=pg)
-            pairs["_engine"] = "rust_streaming_pairs"
-
-        with _timed("relationship burden summary"):
-            relationship_summary = compute_relationship_summary(df, pairs.get("_pair_lists"))
-        # The materialised pair lists are consumed only by the burden summary
-        # above; on a pair-dense pedigree they dominate the post-extraction
-        # resident floor that persists through inbreeding / Ne / write. Drop
-        # them now — nothing downstream reads pairs["_pair_lists"] (report.py
-        # touches only the scalar counts and by_degree). Leaves pairs["_engine"].
-        pairs.pop("_pair_lists", None)
+        with _timed("relationship burden"):
+            burden = pg.relationship_burden()
+            pairs = _augment_pair_counts(burden.category_counts)
+            pairs["_engine"] = "rust_streaming_burden"
+            relationship_summary = compute_relationship_summary_from_burden(df, burden)
     else:
         with _timed("relationship pair counts (relationship_counts)"):
             counts = pg.relationship_counts(max_degree=5)
@@ -805,8 +797,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "computed": False,
             "skip_reason": (
                 "per-individual relationship burden requires full pair-list "
-                "enumeration; pass --per-individual-pairs to materialise the "
-                "pair lists"
+                "aggregation; pass --per-individual-burden to compute it"
             ),
             "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }

@@ -12,7 +12,7 @@ from pedigree_graph import RELATIONSHIPS
 
 if TYPE_CHECKING:
     import scipy.sparse as sp
-    from pedigree_graph import PedigreeGraph
+    from pedigree_graph import PedigreeGraph, RelationshipBurden
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import IdIndex, _full_sib_groups, _grandparent_arrays, _parent_rows
@@ -481,19 +481,13 @@ def compute_relationship_summary(
     df: pl.DataFrame,
     pair_lists: dict[str, tuple[np.ndarray, np.ndarray]] | None,
 ) -> dict:
-    """Density and per-individual relationship-burden summaries.
-
-    These metrics need the pair lists themselves, which only
-    ``--per-individual-pairs`` materialises. The default counting path returns
-    aggregate counts, so the fields are reported unavailable rather than
-    approximated from them.
-    """
+    """Reference pair-list aggregation for parity tests and synthetic inputs."""
     n = len(df)
     n_possible = n * (n - 1) // 2
     if pair_lists is None:
         return {
             "computed": False,
-            "skip_reason": "relationship pair lists are only built under --per-individual-pairs",
+            "skip_reason": "relationship burden requires --per-individual-burden",
             "n_individual_pairs": int(n_possible),
         }
     if n == 0:
@@ -613,6 +607,59 @@ def compute_relationship_summary(
         "closest_relationship_per_individual": closest_dist,
         "relatives_by_degree": counts_by_degree,
         "relatives_total": _numeric_distribution(total_relatives),
+        "related_pair_density_by_depth": depth_rows,
+    }
+
+
+def compute_relationship_summary_from_burden(df: pl.DataFrame, burden: RelationshipBurden) -> dict:
+    """Build the existing report from native O(N) degree counts."""
+    n = len(df)
+    n_possible = n * (n - 1) // 2
+    n_related = sum(burden.category_counts.values())
+    by_degree = {str(d): 0 for d in range(1, 6)}
+    for code, count in burden.category_counts.items():
+        degree = RELATIONSHIPS[code].degree
+        if degree > 0:
+            by_degree[str(degree)] += count
+
+    per_person = burden.per_person
+    closest = np.zeros(n, dtype=np.int8)
+    distributions = {}
+    for degree in range(5, 0, -1):
+        values = per_person[:, degree - 1]
+        closest[values > 0] = degree
+        distributions[str(degree)] = _numeric_distribution(values)
+    closest_dist = {"none": int((closest == 0).sum())}
+    closest_dist.update({str(d): int((closest == d).sum()) for d in range(1, 6)})
+
+    depth = df["ped_depth"].to_numpy()
+    depth_rows = []
+    for d in range(int(depth.max()) + 1 if n else 0):
+        n_d = int((depth == d).sum())
+        possible = n_d * (n_d - 1) // 2
+        related = int(burden.same_depth_pairs[d])
+        depth_rows.append(
+            {
+                "depth": d,
+                "n": n_d,
+                "n_individual_pairs": possible,
+                "n_related_pairs": related,
+                "n_unrelated_pairs": possible - related,
+                "related_pair_density": related / possible if possible else 0.0,
+            }
+        )
+
+    return {
+        "computed": True,
+        **({"max_degree": 5} if n else {}),
+        "n_individual_pairs": n_possible,
+        "n_related_pairs": n_related,
+        "n_unrelated_pairs": n_possible - n_related,
+        "related_pair_density": n_related / n_possible if n_possible else 0.0,
+        "related_pairs_by_closest_degree": by_degree,
+        "closest_relationship_per_individual": closest_dist,
+        "relatives_by_degree": distributions,
+        "relatives_total": _numeric_distribution(per_person.sum(axis=1, dtype=np.int64)),
         "related_pair_density_by_depth": depth_rows,
     }
 
