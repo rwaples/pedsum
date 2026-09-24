@@ -284,7 +284,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="compute seven pedigree-based effective population size "
-        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_CT) via "
+        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_GC) via "
         "pedigree-graph's estimate_effective_sizes (default: on; pass "
         "--no-effective-size to skip). The eighth estimator (Ne_C, coancestry "
         "rate) is opt-in via `--ne-coancestry` because its kinship DP can "

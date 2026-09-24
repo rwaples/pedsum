@@ -142,9 +142,9 @@ Flags:
   when `--effective-size` is also on, F is shared with the Ne pipeline
   and the cost is paid once.
 - `--no-effective-size` — skip seven pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
-  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_CT`).  The
+  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_GC`).  The
   eighth estimator (`Ne_C`, coancestry rate) is opt-in via
-  `--ne-coancestry`..
+  `--ne-coancestry`.
 - `--ne-coancestry` — additionally compute `Ne_C`. Off by default —
   its kinship DP can blow up RAM on pedigrees larger than ~500K rows.
   Unselected, `Ne_C` still occupies its slot in the output with a null
