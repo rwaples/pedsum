@@ -11,7 +11,7 @@ are a pure function of the pedigree:
 
     person_id          <- id
     relationship_kind  <- the EPIMIGHT relationship codes (EPIMIGHT_RELATIONSHIP_ORDER)
-    relatives          <- count_total_relatives (pure pedigree structure)
+    relatives          <- PedigreeGraph.relatives_per_person (pure pedigree structure)
     born_at_year       <- birth_year if available, else base_year + depth
 
 The remaining columns need phenotype/affection/demography a pedigree does not
@@ -57,10 +57,11 @@ class _EpiRel:
         code: the EPIMIGHT relationship code (the emitted ``relationship_kind``).
         pair_codes: constituent ``pedigree_graph`` pair codes summed for this
             relationship (e.g. ``HS`` = maternal + paternal half sibs).
-        directional: when True the relationship is asymmetric and only the
-            younger member is counted (``count_total_relatives`` unidirectional).
-            pedigree-graph orients an asymmetric block by role, junior member
-            first, so no reordering is needed here.
+        directional: when True the relationship is asymmetric: only the
+            younger member is counted, and the pairs export keeps the block's
+            junior-first orientation instead of canonicalizing. pedigree-graph
+            supplies both (``relatives_per_person`` credits only the junior
+            member of an asymmetric category), so nothing is reordered here.
     """
 
     code: str
@@ -98,8 +99,7 @@ _EPI_REGISTRY: dict[str, _EpiRel] = {r.code: r for r in _EPIMIGHT_RELS}
 EPIMIGHT_RELATIONSHIP_ORDER: tuple[str, ...] = tuple(r.code for r in _EPIMIGHT_RELS)
 
 #: Degree that covers every constituent pair code above (``1C`` is the deepest).
-#: pedigree-graph 0.8 requires an explicit selector on ``relationship_pairs``,
-#: and the CLI shares one extraction between the skeleton and the pairs list.
+#: pedigree-graph 0.8 requires an explicit selector on ``relationship_pairs``.
 EPIMIGHT_MAX_DEGREE: int = max(RELATIONSHIPS[pc].degree for rel in _EPIMIGHT_RELS for pc in rel.pair_codes)
 
 #: Output column order (the EPIMIGHT Pipeline-input schema).
@@ -170,34 +170,6 @@ def _relationship_pair_blocks(
     return tuple(blocks)
 
 
-def count_total_relatives(
-    pair_blocks: tuple[tuple[np.ndarray, np.ndarray], ...],
-    n: int,
-    *,
-    unidirectional: bool = False,
-) -> np.ndarray:
-    """Count, per person, their total relatives across the given pair blocks.
-
-    Args:
-        pair_blocks: ``(idx1, idx2)`` arrays for one relationship type.
-        n: total number of individuals (output length).
-        unidirectional: when True, only ``idx1`` accrues the relative (used for
-            asymmetric relationships where ``idx1`` is the younger member).
-
-    Returns:
-        An ``int32`` array of per-person relative counts.
-    """
-    # int64 accumulation is faster than narrow ints for np.add.at on this kernel.
-    counts = np.zeros(n, dtype=np.int64)
-    for idx1, idx2 in pair_blocks:
-        if len(idx1) == 0:
-            continue
-        np.add.at(counts, idx1, 1)
-        if not unidirectional:
-            np.add.at(counts, idx2, 1)
-    return counts.astype(np.int32, copy=False)
-
-
 def _born_at_year(df: pl.DataFrame, depths: np.ndarray, base_year: int) -> pl.Series:
     """Birth year per row: real ``birth_year`` if present (``-1`` → null), else derived.
 
@@ -219,7 +191,6 @@ def build_epimight_skeleton(
     df: pl.DataFrame,
     pg: PedigreeGraph,
     *,
-    all_pairs: RelationshipPairs | None = None,
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
     disorder: str = "trait1",
     base_year: int = BASE_YEAR,
@@ -234,11 +205,9 @@ def build_epimight_skeleton(
         df: the topologically-sorted frame returned by ``load_and_validate``
             (must carry an ``id`` column; ``birth_year`` is used when present).
         pg: a ``PedigreeGraph`` built from ``df`` (row order must match ``df``);
-            its ``depth`` supplies ``born_at_year`` and the founder filter.
-        all_pairs: the result of ``pg.relationship_pairs(max_degree=3)``;
-            extracted here when None. Pass a precomputed result to share one
-            extraction with another consumer.
-        rels: EPIMIGHT relationship codes to emit, in output order.
+            its ``depth`` supplies ``born_at_year`` and the founder filter, and
+            ``relatives_per_person`` the ``relatives`` counts without a pair list.
+        rels: EPIMIGHT relationship codes to emit; rows come out sorted by code.
         disorder: the single ``disorder`` label emitted (one block per disorder
             in EPIMIGHT long form; a pedigree carries no trait).
         base_year: calendar offset for the derived ``born_at_year``.
@@ -258,8 +227,9 @@ def build_epimight_skeleton(
     person_id = df["id"].cast(pl.String).rename("person_id")
     born_at_year = _born_at_year(df, depths, base_year)
 
-    if all_pairs is None:
-        all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
+    # One engine pass over every constituent code; sum() folds a kind's codes.
+    pair_codes = tuple(dict.fromkeys(pc for code in rels for pc in _EPI_REGISTRY[code].pair_codes))
+    counts = pg.relatives_per_person(categories=pair_codes)
 
     # Reused placeholder columns — every block shares the same null columns.
     na_i8 = pl.Series("failure_status", [None] * n, dtype=pl.Int8)
@@ -269,9 +239,7 @@ def build_epimight_skeleton(
 
     blocks: list[pl.DataFrame] = []
     for code in rels:
-        rel = _EPI_REGISTRY[code]
-        pair_blocks = _relationship_pair_blocks(all_pairs, code)
-        relatives = count_total_relatives(pair_blocks, n, unidirectional=rel.directional)
+        relatives = counts.sum(_EPI_REGISTRY[code].pair_codes).astype(np.int32)
         blocks.append(
             pl.DataFrame(
                 {
@@ -301,7 +269,6 @@ def build_relative_pairs(
     df: pl.DataFrame,
     pg: PedigreeGraph,
     *,
-    all_pairs: RelationshipPairs | None = None,
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
     exact_kinship: bool = False,
 ) -> pl.DataFrame:
@@ -329,8 +296,6 @@ def build_relative_pairs(
         df: the frame from ``load_and_validate`` (provides the ``id`` column).
         pg: a ``PedigreeGraph`` built from ``df`` (row order must match ``df``);
             supplies the pair blocks and the exact kinship.
-        all_pairs: the result of ``pg.relationship_pairs(max_degree=3)``;
-            extracted here when None.
         rels: EPIMIGHT relationship codes to emit, in output order.
         exact_kinship: add a ``kinship_exact`` column with exact pedigree kinship.
             Runs the kinship recurrence over every pair (no ``n×n`` matrix), so
@@ -342,8 +307,7 @@ def build_relative_pairs(
     """
     rels = validate_relationship_codes(rels)
     ids = df["id"].to_numpy()
-    if all_pairs is None:
-        all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
+    all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
     columns = (*RELATIVE_PAIR_COLUMNS, "kinship_exact") if exact_kinship else RELATIVE_PAIR_COLUMNS
 
     # First pass: the (idx1, idx2) row indices per code. An EPIMIGHT code can

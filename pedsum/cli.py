@@ -17,7 +17,6 @@ from pedigree_graph import configure_threads
 from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
 from pedsum.epimight import (
     BASE_YEAR,
-    EPIMIGHT_MAX_DEGREE,
     EPIMIGHT_RELATIONSHIP_ORDER,
     PLACEHOLDER_COLUMNS,
     build_epimight_skeleton,
@@ -1140,15 +1139,12 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
 
-    # Extract once; both the skeleton and the optional pairs list read it.
-    with _timed("extract pairs"):
-        all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
-
+    # The skeleton counts relatives without a pair list. --pairs extracts the
+    # list for its own export, after the skeleton's counts are freed.
     with _timed("epimight skeleton"):
         frame = build_epimight_skeleton(
             df,
             pg,
-            all_pairs=all_pairs,
             rels=rels,
             disorder=args.disorder,
             base_year=args.base_year,
@@ -1165,7 +1161,7 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
 
     if args.pairs:
         with _timed("relative pairs"):
-            pairs = build_relative_pairs(df, pg, all_pairs=all_pairs, rels=rels, exact_kinship=args.exact_kinship)
+            pairs = build_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship)
         rc = _write_epimight_table(pairs, out_dir, "relative_pairs", parquet=args.parquet)
         if rc != 0:
             return rc

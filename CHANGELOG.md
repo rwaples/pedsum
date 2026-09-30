@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — pedigree-graph 0.11.1
+
+Pedsum now requires `pedigree-graph>=0.11.1,<0.12`, the first release with
+`PedigreeGraph.relatives_per_person`.
+
+### Changed
+
+- **`epimight-input` counts relatives without a pair list** (pedsum #3). The
+  `relatives` column comes from one `relatives_per_person` call, which credits
+  pairs in the engine, so peak memory follows the row count instead of the
+  degree-3 pair count. `pipeline_input.tsv` is byte-identical to before on
+  `example_pedigree.tsv`, a 90k-row simACE pedigree and pedsum_2M, with and
+  without `--drop-founders`. `--pairs` now extracts pairs only for
+  `relative_pairs.tsv`, after the counts are freed, so the skeleton no longer
+  depends on the flag; the price is a second engine pass under `--pairs`.
+  `count_total_relatives` and the `all_pairs` parameter of
+  `build_epimight_skeleton` and `build_relative_pairs` are gone.
+
 ## Unreleased — pedigree-graph 0.9
 
 ### Changed
