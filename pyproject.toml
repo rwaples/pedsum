@@ -19,7 +19,7 @@ dependencies = [
     # can move results without moving the API.  Resolved from PyPI; pixi.toml
     # documents the editable-checkout override for ad-hoc work.  The floor is
     # 0.10 because the burden summary reads RelationshipBurden.
-    "pedigree-graph>=0.10,<0.11",
+    "pedigree-graph>=0.11,<0.12",
 ]
 
 [project.optional-dependencies]
