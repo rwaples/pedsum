@@ -17,6 +17,13 @@ Pedsum now requires `pedigree-graph>=0.11.1,<0.12`, the first release with
   depends on the flag; the price is a second engine pass under `--pairs`.
   `count_total_relatives` and the `all_pairs` parameter of
   `build_epimight_skeleton` and `build_relative_pairs` are gone.
+- **`epimight-input` builds its skeleton in output order instead of
+  sorting it.** Each block holds one relationship kind and there is one
+  disorder, so emitting the blocks in sorted kind order is the old stable
+  `(relationship_kind, disorder)` sort, and the output is byte-identical.
+  Sorting the 8N-row frame had set the process's peak memory: at 20M rows,
+  peak RSS falls from 24.4 GB to 9.4 GB with both changes (medians of three
+  runs; 4.03 GB to 1.25 GB at 2M).
 
 ## Unreleased — pedigree-graph 0.9
 

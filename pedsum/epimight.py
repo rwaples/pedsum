@@ -237,8 +237,11 @@ def build_epimight_skeleton(
     na_i16_dead = pl.Series("dead_at_year", [None] * n, dtype=pl.Int16)
     na_i32 = pl.Series("relatives_diagnosed", [None] * n, dtype=pl.Int32)
 
+    # Blocks go out in sorted kind order, which is the (relationship_kind,
+    # disorder) sort: one kind per block and one disorder. Sorting the 8N-row
+    # frame instead would set the process's peak memory.
     blocks: list[pl.DataFrame] = []
-    for code in rels:
+    for code in sorted(rels):
         relatives = counts.sum(_EPI_REGISTRY[code].pair_codes).astype(np.int32)
         blocks.append(
             pl.DataFrame(
@@ -262,7 +265,7 @@ def build_epimight_skeleton(
         keep = person_id.to_numpy()[depths > depths.min()]
         out = out.filter(pl.col("person_id").is_in(keep.tolist()))
 
-    return out.sort(["relationship_kind", "disorder"], maintain_order=True)
+    return out
 
 
 def build_relative_pairs(
