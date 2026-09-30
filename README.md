@@ -13,7 +13,7 @@ Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package f
 
 ## Install
 
-Python ≥ 3.13 required. 
+Python ≥ 3.14 required. 
 
 ### Get the code
 

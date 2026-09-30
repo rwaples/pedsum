@@ -2,7 +2,7 @@ name: pedsum
 channels:
   - conda-forge
 dependencies:
-  - python>=3.13
+  - python>=3.14
   - numpy
   - scipy
   - polars>=1.43.2,<2
