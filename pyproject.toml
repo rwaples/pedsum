@@ -8,7 +8,7 @@ description = "Pedigree summary CLI: structure, relatedness, inbreeding, Ne esti
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dynamic = ["version"]
 dependencies = [
     "numpy>=2.2,<3",

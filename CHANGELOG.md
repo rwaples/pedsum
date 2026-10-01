@@ -29,6 +29,9 @@ Pedsum now requires `pedigree-graph>=0.11.1,<0.12`, the first release with
 
 ### Changed
 
+- **Python 3.14.** pixi locks Python 3.14, and `requires-python`, ruff's
+  `target-version` and ty's `python-version` move to 3.14 with the rest of
+  the simACE family.
 - **The default `summarize` reports exact counts for all 23 pair codes.**
   The default path now calls `PedigreeGraph.relationship_counts(max_degree=5)`,
   the Rust row-streaming engine that classifies every pair under its closest

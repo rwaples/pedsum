@@ -1,4 +1,4 @@
-target-version = "py313"
+target-version = "py314"
 required-version = ">=0.16,<0.17"
 line-length = 120
 
