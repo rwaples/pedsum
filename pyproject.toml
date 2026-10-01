@@ -19,7 +19,7 @@ dependencies = [
     # can move results without moving the API.  Resolved from PyPI; pixi.toml
     # documents the editable-checkout override for ad-hoc work.  The floor is
     # 0.11.1 because epimight-input reads relatives_per_person.
-    "pedigree-graph>=0.11.1,<0.12",
+    "pedigree-graph>=0.12,<0.13",
 ]
 
 [project.optional-dependencies]

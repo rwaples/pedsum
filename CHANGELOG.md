@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — pedigree-graph 0.12
+
+Pedsum now requires `pedigree-graph>=0.12,<0.13`. 0.12's kinship walk
+skips provable zeros and runs one walker per pool worker, with values
+bit-identical to 0.11; pedsum's code is unchanged.
+
 ## Unreleased — pedigree-graph 0.11.1
 
 Pedsum now requires `pedigree-graph>=0.11.1,<0.12`, the first release with
