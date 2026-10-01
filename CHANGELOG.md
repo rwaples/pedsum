@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 
 Pedsum now requires `pedigree-graph>=0.12,<0.13` (0.13.0 required
 `>=0.7,<0.8`) and Python 3.14. The pedigree-graph API 0.13.0 called is gone
