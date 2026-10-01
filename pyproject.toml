@@ -29,7 +29,7 @@ test = [
     "hypothesis>=6,<7",
     "ruff>=0.16,<0.17",
 ]
-typecheck = ["ty==0.0.70"]
+typecheck = ["ty==0.0.84"]
 
 [project.urls]
 Homepage = "https://github.com/rwaples/pedsum"
