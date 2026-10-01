@@ -2,9 +2,11 @@
 # Compare the serial suite with candidate pytest-xdist worker/thread splits.
 #
 # The default matrix runs three sweeps of serial, pinned n6 and n8, and
-# unpinned n6. Each pytest process starts in its own process group so the
-# sampler can report aggregate RSS across the controller, workers, and CLI
-# subprocesses instead of the largest single process.
+# unpinned n6. Each pytest run gets its own systemd scope, and tree_peak_mib
+# is the scope's cgroup memory.peak: the exact high-water mark of the
+# controller, workers, and CLI subprocesses together, a shared page counted
+# once, page cache included. It is `-` where `systemd-run --user --scope`
+# does not work.
 #
 #   bash benchmarks/bench_pytest_workers.sh
 #   SWEEPS=1 CELLS="n8t1" bash benchmarks/bench_pytest_workers.sh tests/test_pairs_properties.py
@@ -60,7 +62,18 @@ for cell in $CELLS; do
 done
 
 mkdir -p "$OUT"
-printf 'cell\tsweep\tworkers\tthreads\twall_s\tpeak_tree_rss_mib\ttests\tstatus\n' > "$RESULTS"
+printf 'cell\tsweep\tworkers\tthreads\twall_s\ttree_peak_mib\ttests\tstatus\n' > "$RESULTS"
+
+# The shell stays in the scope after pytest exits, so it can still read the
+# scope's memory.peak; the scope goes away with its last process.
+SCOPE=()
+if systemd-run --user --scope --quiet true 2>/dev/null; then
+  SCOPE=(systemd-run --user --scope --quiet -- sh -c '
+    "$@"; s=$?
+    cat "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.peak" > "$0"; exit $s')
+else
+  echo "systemd-run --user --scope is unavailable; tree_peak_mib will be -" >&2
+fi
 
 if [ "$WARMUP" -eq 1 ]; then
   printf '[%s] WARMUP serial, unpinned, discarded\n' "$(date +%T)"
@@ -83,24 +96,18 @@ for sweep in $(seq 1 "$SWEEPS"); do
     fi
 
     log=$OUT/$cell.$sweep.log
+    peak_file=$OUT/$cell.$sweep.peak
+    scope=()
+    [ ${#SCOPE[@]} -eq 0 ] || scope=("${SCOPE[@]}" "$peak_file")
     printf '[%s] START %s sweep %s\n' "$(date +%T)" "$cell" "$sweep"
     start_ns=$(date +%s%N)
-    setsid env "${env_args[@]}" pixi run pytest "${xdist_args[@]}" "$@" > "$log" 2>&1 &
-    run_pid=$!
-    peak_rss_kib=0
-    while kill -0 "$run_pid" 2>/dev/null; do
-      rss_kib=$(ps -eo pgid=,rss= | awk -v pg="$run_pid" '$1 == pg { total += $2 } END { print total + 0 }')
-      if [ "$rss_kib" -gt "$peak_rss_kib" ]; then
-        peak_rss_kib=$rss_kib
-      fi
-      sleep 0.1
-    done
-    wait "$run_pid"
+    "${scope[@]}" env "${env_args[@]}" pixi run pytest "${xdist_args[@]}" "$@" > "$log" 2>&1
     status=$?
     end_ns=$(date +%s%N)
 
     wall_s=$(awk -v start="$start_ns" -v end="$end_ns" 'BEGIN { printf "%.2f", (end - start) / 1000000000 }')
-    peak_rss_mib=$(awk -v rss="$peak_rss_kib" 'BEGIN { printf "%.1f", rss / 1024 }')
+    tree_peak_mib=-
+    [ -s "$peak_file" ] && tree_peak_mib=$(awk '{ printf "%.1f", $1 / 1048576 }' "$peak_file")
     tests=$(grep -Eo '[0-9]+ (passed|failed|skipped|xfailed|xpassed|errors?)' "$log" |
       awk '{ total += $1 } END { print total + 0 }')
     if [ "$status" -eq 0 ]; then
@@ -110,15 +117,15 @@ for sweep in $(seq 1 "$SWEEPS"); do
     fi
 
     row=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-      "$cell" "$sweep" "$workers" "$threads" "$wall_s" "$peak_rss_mib" "$tests" "$state")
+      "$cell" "$sweep" "$workers" "$threads" "$wall_s" "$tree_peak_mib" "$tests" "$state")
     printf '%s\n' "$row" >> "$RESULTS"
     printf '%s\n' "$row" >> "$RUN_ROWS"
-    printf '[%s] DONE  %s sweep %s  wall=%ss tree_rss=%sMiB tests=%s %s\n' \
-      "$(date +%T)" "$cell" "$sweep" "$wall_s" "$peak_rss_mib" "$tests" "$state"
+    printf '[%s] DONE  %s sweep %s  wall=%ss tree_peak=%sMiB tests=%s %s\n' \
+      "$(date +%T)" "$cell" "$sweep" "$wall_s" "$tree_peak_mib" "$tests" "$state"
   done
 done
 
-printf '\n%-14s %4s %27s %20s %7s\n' cell runs 'wall_s median (min-max)' 'tree_rss_mib median' tests
+printf '\n%-14s %4s %27s %20s %7s\n' cell runs 'wall_s median (min-max)' 'tree_peak_mib median' tests
 for cell in $CELLS; do
   rows=$(awk -F'\t' -v cell="$cell" '$1 == cell && $8 == "ok"' "$RUN_ROWS")
   runs=$(printf '%s\n' "$rows" | awk 'NF { count++ } END { print count + 0 }')
