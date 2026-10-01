@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,7 +21,7 @@ from pedsum.epimight import (
     EPIMIGHT_RELATIONSHIP_ORDER,
     PLACEHOLDER_COLUMNS,
     build_epimight_skeleton,
-    build_relative_pairs,
+    iter_relative_pairs,
     relationship_diagnostics,
     validate_relationship_codes,
 )
@@ -1111,6 +1112,30 @@ def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parq
     return 0
 
 
+def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parquet: bool) -> None:
+    """Append each kind's pairs to ``relative_pairs.tsv`` (and ``.parquet``) as they come.
+
+    Only one kind's frame is alive at a time. The parquet is written as one
+    temporary file per kind, then streamed into a single file.
+    """
+    tsv_path = out_dir / "relative_pairs.tsv"
+    n_rows = 0
+    with tsv_path.open("wb") as tsv, tempfile.TemporaryDirectory(dir=out_dir) as tmp:
+        parts: list[Path] = []
+        for i, frame in enumerate(frames):
+            frame.write_csv(tsv, separator="\t", include_header=i == 0)
+            if parquet:
+                parts.append(Path(tmp) / f"{i}.parquet")
+                frame.write_parquet(parts[-1])
+            n_rows += len(frame)
+            del frame
+        logger.info("wrote %s (%d rows)", tsv_path, n_rows)
+        if parquet:
+            parquet_path = out_dir / "relative_pairs.parquet"
+            pl.scan_parquet(parts).sink_parquet(parquet_path)
+            logger.info("wrote %s", parquet_path)
+
+
 def _run_epimight_input(args: argparse.Namespace) -> int:
     _commit_thread_budget(args)
     """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
@@ -1152,22 +1177,26 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
     rc = _write_epimight_table(frame, out_dir, "pipeline_input", parquet=args.parquet)
     if rc != 0:
         return rc
+    # Summarize the skeleton now and free it, so it is not resident under --pairs.
+    diagnostics = relationship_diagnostics(frame, rels)
+    del frame
 
     if args.exact_kinship and not args.pairs:
         logger.warning("--exact-kinship has no effect without --pairs")
 
     if args.pairs:
         with _timed("relative pairs"):
-            pairs = build_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship)
-        rc = _write_epimight_table(pairs, out_dir, "relative_pairs", parquet=args.parquet)
-        if rc != 0:
-            return rc
+            _write_relative_pairs(
+                iter_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship),
+                out_dir,
+                parquet=args.parquet,
+            )
 
     logger.info(
         "structural columns computed; placeholder column(s) left empty: %s",
         ", ".join(PLACEHOLDER_COLUMNS),
     )
-    for code, n_with, mean_rel in relationship_diagnostics(frame, rels):
+    for code, n_with, mean_rel in diagnostics:
         logger.info(
             "  %s %3s: %d person(s) with relatives, mean relatives %.3f",
             args.disorder,

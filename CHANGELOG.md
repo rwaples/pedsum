@@ -7,6 +7,27 @@ Pedsum now requires `pedigree-graph>=0.11.1,<0.12`, the first release with
 
 ### Changed
 
+- **`epimight-input --pairs` writes `relative_pairs` one kind at a time**
+  (pedsum #5). It used to extract every degree-3 category, build one frame
+  of all kinds with a per-row `relationship_kind` string, and sort it on
+  `(relationship_kind, id1, id2)`; that sort set the process's peak. It now
+  asks `relationship_pairs` for only the categories the `--rels` kinds read,
+  with `execution="memory"`, and appends each kind to the file in sorted
+  kind order after sorting it on `(id1, id2)`. `--parquet` assembles
+  `relative_pairs.parquet` from one temporary file per kind. The skeleton
+  frame is freed before the pairs phase. `relative_pairs.tsv` and
+  `pipeline_input.tsv` are byte-identical to before (and the parquet files
+  equal) on `example_pedigree.tsv`, a 120k-row simACE pedigree and pedsum_2M,
+  across default and subset `--rels`, a repeated code, `--drop-founders` and
+  `--parquet`; `--exact-kinship` and `--birth-year-col` were checked on the
+  two smaller inputs. Peak RSS of `epimight-input --pairs` at
+  `--threads 12`, median of three interleaved runs: 4,996 MiB to 1,736 MiB on
+  pedsum_2M (wall 23.8 s to 22.0 s); 9,429 MiB on pedsum_20M, level with the
+  skeleton-only peak (the old path was not run at 20M: scaled from its 2M
+  peak it would exceed the machine's 31 GiB of RAM). `build_relative_pairs`
+  concatenates the new `iter_relative_pairs`, and `EPIMIGHT_MAX_DEGREE` is
+  gone. An empty `--rels` is now a usage error (exit 2) instead of a
+  `cannot concat empty list` traceback.
 - **`epimight-input` counts relatives without a pair list** (pedsum #3). The
   `relatives` column comes from one `relatives_per_person` call, which credits
   pairs in the engine, so peak memory follows the row count instead of the

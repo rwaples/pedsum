@@ -82,6 +82,11 @@ its Rust row-streaming engine, so neither builds a pair list:
   and its use in `_run_summarize` (`pedsum/cli.py`).
 - `--per-individual-burden`: O(N) output storage like the default; it
   builds no pair list.
+- `epimight-input --pairs`: the one path that still materialises pairs,
+  because `relative_pairs.tsv` lists them. It requests only the categories
+  the `--rels` kinds read, with `execution="memory"`, and writes one kind
+  at a time: beyond the engine's pair blocks it holds one kind's frame,
+  and it never sorts the whole list.
 - `--ne-coancestry`: kinship DP scales with cumulative ancestor set;
   blows up RAM above ~500K rows.
 

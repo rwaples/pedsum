@@ -25,6 +25,7 @@ from pedsum.epimight import (
     RELATIVE_PAIR_COLUMNS,
     build_epimight_skeleton,
     build_relative_pairs,
+    iter_relative_pairs,
 )
 
 _DIRECTIONAL = {"PO", "Av", "1G"}
@@ -164,6 +165,14 @@ def test_unknown_rel_code_exits_rc2(tmp_path):
     assert "unknown relationship code" in res.stderr
 
 
+def test_empty_rels_rejected(tmp_path):
+    """An empty --rels is a usage error (rc 2), not a crash in the frame builders."""
+    out = tmp_path / "out"
+    res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--rels", ",", "--pairs"])
+    assert res.returncode == 2
+    assert "no relationship codes given" in res.stderr
+
+
 def test_cli_disorder_and_rels_subset(tmp_path):
     """`--disorder` labels the single block and `--rels` restricts the kinds."""
     out = tmp_path / "out"
@@ -256,6 +265,41 @@ def test_pairs_parquet_dtypes(tmp_path):
     pairs = pl.read_parquet(out / "relative_pairs.parquet")
     assert pairs.schema["kinship"] == pl.Float64
     assert set(pairs["relationship_kind"].to_list()) <= set(EPIMIGHT_RELATIONSHIP_ORDER)
+    # The parquet is assembled from per-kind parts; it carries the TSV's rows
+    # in the TSV's order and leaves no part files behind.
+    tsv = pl.read_csv(out / "relative_pairs.tsv", separator="\t", schema=pairs.schema)
+    assert pairs.equals(tsv)
+    assert sorted(p.name for p in out.iterdir()) == [
+        "pipeline_input.parquet",
+        "pipeline_input.tsv",
+        "relative_pairs.parquet",
+        "relative_pairs.tsv",
+    ]
+
+
+def test_cli_pairs_with_no_pairs_writes_header_only(tmp_path):
+    """A kind with no pairs still yields a TSV header and an empty, typed parquet."""
+    ped = write_ped(tmp_path / "ped.tsv", _PEDIGREE)
+    out = tmp_path / "out"
+    res = _run(["epimight-input", "--in", str(ped), "--out", str(out), "--rels", "HS", "--pairs", "--parquet"])
+    assert res.returncode == 0, res.stderr
+    assert (out / "relative_pairs.tsv").read_text() == "\t".join(RELATIVE_PAIR_COLUMNS) + "\n"
+    pairs = pl.read_parquet(out / "relative_pairs.parquet")
+    assert pairs.is_empty()
+    assert list(pairs.columns) == list(RELATIVE_PAIR_COLUMNS)
+
+
+def test_iter_relative_pairs_one_sorted_frame_per_kind(tmp_path):
+    """One frame per distinct kind, in sorted kind order, each sorted by (id1, id2)."""
+    df, pg = _load_graph(_PEDIGREE, tmp_path)
+    rels = ("PO", "FS", "HS", "1G", "PO")
+    frames = list(iter_relative_pairs(df, pg, rels=rels))
+    assert [f["relationship_kind"].unique().to_list() or [None] for f in frames] == [["1G"], ["FS"], [None], ["PO"]]
+    assert frames[2].is_empty()
+    assert list(frames[2].columns) == list(RELATIVE_PAIR_COLUMNS)
+    for frame in frames:
+        assert frame.equals(frame.sort(["id1", "id2"]))
+    assert pl.concat(frames).equals(build_relative_pairs(df, pg, rels=rels))
 
 
 def test_pairs_reconcile_with_skeleton_counts(tmp_path):

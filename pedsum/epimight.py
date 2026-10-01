@@ -39,7 +39,7 @@ import polars as pl
 from pedigree_graph import RELATIONSHIPS
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from pedigree_graph import PedigreeGraph, RelationshipPairs
 
@@ -98,10 +98,6 @@ _EPI_REGISTRY: dict[str, _EpiRel] = {r.code: r for r in _EPIMIGHT_RELS}
 #: Canonical close-to-distant relationship order (matches the fitACE emitter).
 EPIMIGHT_RELATIONSHIP_ORDER: tuple[str, ...] = tuple(r.code for r in _EPIMIGHT_RELS)
 
-#: Degree that covers every constituent pair code above (``1C`` is the deepest).
-#: pedigree-graph 0.8 requires an explicit selector on ``relationship_pairs``.
-EPIMIGHT_MAX_DEGREE: int = max(RELATIONSHIPS[pc].degree for rel in _EPIMIGHT_RELS for pc in rel.pair_codes)
-
 #: Output column order (the EPIMIGHT Pipeline-input schema).
 EPIMIGHT_COLUMNS: tuple[str, ...] = (
     "person_id",
@@ -137,9 +133,12 @@ def validate_relationship_codes(codes: Iterable[str]) -> tuple[str, ...]:
         The codes as a tuple.
 
     Raises:
-        ValueError: if any code is not a known EPIMIGHT relationship code.
+        ValueError: if no code is given, or any code is not a known EPIMIGHT
+            relationship code.
     """
     requested = tuple(codes)
+    if not requested:
+        raise ValueError(f"no relationship codes given; valid codes: {', '.join(EPIMIGHT_RELATIONSHIP_ORDER)}")
     unknown = [c for c in requested if c not in _EPI_REGISTRY]
     if unknown:
         valid = ", ".join(EPIMIGHT_RELATIONSHIP_ORDER)
@@ -147,27 +146,19 @@ def validate_relationship_codes(codes: Iterable[str]) -> tuple[str, ...]:
     return requested
 
 
-def _relationship_pair_blocks(
-    all_pairs: RelationshipPairs,
-    code: str,
-) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
-    """Materialize the non-empty ``(idx1, idx2)`` blocks for one EPIMIGHT code.
+def _relationship_rows(all_pairs: RelationshipPairs, code: str) -> tuple[np.ndarray, np.ndarray]:
+    """The ``(idx1, idx2)`` graph rows of every pair of one EPIMIGHT code.
 
-    Gathers the row arrays for each constituent pair code and drops the empty
-    ones. Orientation is the library's: an asymmetric block stores the junior
-    role first (``MO``/``FO`` offspring, ``GP`` descendant, ``Av``
-    niece/nephew), which is exactly the ``idx1`` a directional EPIMIGHT kind
-    charges. Re-deriving it from depth would disagree with the contract on a
+    Concatenates the row arrays of the code's constituent pair codes, so one
+    kinship call covers the whole kind. Orientation is the library's: an
+    asymmetric block stores the junior role first (``MO``/``FO`` offspring,
+    ``GP`` descendant, ``Av`` niece/nephew), which is exactly the ``idx1`` a
+    directional EPIMIGHT kind charges. Re-deriving it from depth would disagree with the contract on a
     skipped-generation pedigree, where an aunt can sit at the same depth as
     her niece.
     """
-    rel = _EPI_REGISTRY[code]
-    blocks = []
-    for pair_code in rel.pair_codes:
-        block = all_pairs[pair_code]
-        if len(block):
-            blocks.append((block.first_rows, block.second_rows))
-    return tuple(blocks)
+    blocks = [all_pairs[pair_code] for pair_code in _EPI_REGISTRY[code].pair_codes]
+    return np.concatenate([b.first_rows for b in blocks]), np.concatenate([b.second_rows for b in blocks])
 
 
 def _born_at_year(df: pl.DataFrame, depths: np.ndarray, base_year: int) -> pl.Series:
@@ -268,6 +259,61 @@ def build_epimight_skeleton(
     return out
 
 
+def iter_relative_pairs(
+    df: pl.DataFrame,
+    pg: PedigreeGraph,
+    *,
+    rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
+    exact_kinship: bool = False,
+) -> Iterator[pl.DataFrame]:
+    """Yield the relative pairs one relationship kind at a time, in output order.
+
+    Kinds come out in sorted order, one frame per distinct code in ``rels``
+    (empty when the kind has no pairs), each sorted by ``id1, id2``. Their
+    concatenation is :func:`build_relative_pairs`, so a writer can append the
+    frames as they come without holding every kind, or sorting the whole list,
+    at once. See :func:`build_relative_pairs` for the columns and orientation.
+    """
+    rels = validate_relationship_codes(rels)
+    ids = df["id"].to_numpy()
+    kinds = sorted(dict.fromkeys(rels))
+    # Only the categories these kinds read: the engine still resolves the closer
+    # categories a selected one depends on, so each pair keeps its closest code.
+    # The "memory" assembly lowers the --pairs peak by 18% at 20M rows for 5%
+    # more wall time.
+    all_pairs = pg.relationship_pairs(
+        categories=dict.fromkeys(pc for code in kinds for pc in _EPI_REGISTRY[code].pair_codes),
+        execution="memory",
+    )
+    columns = (*RELATIVE_PAIR_COLUMNS, "kinship_exact") if exact_kinship else RELATIVE_PAIR_COLUMNS
+
+    for code in kinds:
+        rel = _EPI_REGISTRY[code]
+        idx1, idx2 = _relationship_rows(all_pairs, code)
+        id1, id2 = ids[idx1], ids[idx2]
+        if not rel.directional:
+            # Symmetric: canonicalize so the smaller id comes first. pair_kinship
+            # is symmetric, so this column swap leaves kinship_exact aligned.
+            id1, id2 = np.minimum(id1, id2), np.maximum(id1, id2)
+        data = {"id1": id1, "id2": id2}
+        if exact_kinship:
+            data["kinship_exact"] = np.asarray(pg.pair_kinship(idx1, idx2), dtype=np.float64)
+        del idx1, idx2, id1, id2
+        frame = (
+            pl.DataFrame(data)
+            .sort(["id1", "id2"], maintain_order=True)
+            .with_columns(
+                relationship_kind=pl.lit(code, dtype=pl.String),
+                kinship=pl.lit(rel.kinship, dtype=pl.Float64),
+            )
+            .select(columns)
+        )
+        del data
+        yield frame
+        # Drop this kind before building the next, so at most one is held.
+        del frame
+
+
 def build_relative_pairs(
     df: pl.DataFrame,
     pg: PedigreeGraph,
@@ -280,7 +326,9 @@ def build_relative_pairs(
     One row per relative pair per relationship code, with columns
     ``id1, id2, relationship_kind, kinship``. For directional kinds (``PO``,
     ``Av``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
-    symmetric kinds are canonicalized so ``id1 < id2``.
+    symmetric kinds are canonicalized so ``id1 < id2``. This concatenates
+    :func:`iter_relative_pairs`; the CLI writes that iterator kind by kind
+    instead, so it never holds the whole list.
 
     ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
     (identical for every pair of a kind) — not computed from the pedigree. Because
@@ -308,51 +356,7 @@ def build_relative_pairs(
         A DataFrame of relative pairs sorted by ``relationship_kind``, ``id1``,
         ``id2``. Empty (with the right columns) when no pairs exist.
     """
-    rels = validate_relationship_codes(rels)
-    ids = df["id"].to_numpy()
-    all_pairs = pg.relationship_pairs(max_degree=EPIMIGHT_MAX_DEGREE)
-    columns = (*RELATIVE_PAIR_COLUMNS, "kinship_exact") if exact_kinship else RELATIVE_PAIR_COLUMNS
-
-    # First pass: the (idx1, idx2) row indices per code. An EPIMIGHT code can
-    # span several pedigree-graph codes, so concatenate before one kinship call.
-    code_idx: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for code in rels:
-        pair_blocks = _relationship_pair_blocks(all_pairs, code)
-        if pair_blocks:
-            idx1 = np.concatenate([a for a, _ in pair_blocks])
-            idx2 = np.concatenate([b for _, b in pair_blocks])
-            code_idx[code] = (idx1, idx2)
-
-    blocks: list[pl.DataFrame] = []
-    for code, (idx1, idx2) in code_idx.items():
-        id1, id2 = ids[idx1], ids[idx2]
-        if not _EPI_REGISTRY[code].directional:
-            # Symmetric: canonicalize so the smaller id comes first. pair_kinship
-            # is symmetric, so this column swap leaves kinship_exact aligned.
-            id1, id2 = np.minimum(id1, id2), np.maximum(id1, id2)
-        n_rows = len(id1)
-        data = {
-            "id1": id1,
-            "id2": id2,
-            "relationship_kind": pl.Series([code] * n_rows, dtype=pl.String),
-            "kinship": np.full(n_rows, _EPI_REGISTRY[code].kinship, dtype=np.float64),
-        }
-        if exact_kinship:
-            data["kinship_exact"] = np.asarray(pg.pair_kinship(idx1, idx2), dtype=np.float64)
-        blocks.append(pl.DataFrame(data).select(columns))
-
-    if not blocks:
-        return pl.DataFrame(
-            schema={
-                "id1": pl.Int64,
-                "id2": pl.Int64,
-                "relationship_kind": pl.String,
-                "kinship": pl.Float64,
-                **({"kinship_exact": pl.Float64} if exact_kinship else {}),
-            }
-        )
-    out = pl.concat(blocks)
-    return out.sort(["relationship_kind", "id1", "id2"], maintain_order=True)
+    return pl.concat(iter_relative_pairs(df, pg, rels=rels, exact_kinship=exact_kinship))
 
 
 def relationship_diagnostics(frame: pl.DataFrame, rels: tuple[str, ...]) -> list[tuple[str, int, float]]:
