@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import polars as pl
 import pytest
+from relationship_summary_oracle import compute_relationship_summary
 
 from pedsum.base import PedigreeError
 from pedsum.checks import (
@@ -19,7 +20,6 @@ from pedsum.checks import (
     _check_sex_role_consistency,
     _summarize_findings,
 )
-from pedsum.pairs import _build_pedigree_graph, _count_pairs_matrix_with_lists
 from pedsum.parse import (
     _as_parent_int_col,
     _decode_sex,
@@ -58,7 +58,6 @@ from pedsum.sections import (
     compute_aggregate_sections,
     compute_founder_summary,
     compute_mating_pair_summary,
-    compute_relationship_summary,
     compute_sibship_sizes,
     compute_size_structure,
 )
@@ -212,34 +211,6 @@ class TestPedigreeOpsAndPairsEdgeCases:
         np.testing.assert_array_equal(depth, np.array([0, 1], dtype=np.int32))
         with pytest.raises(PedigreeError, match="cycle"):
             _compute_depth_unordered(np.array([1, 0]), np.array([-1, -1]), 2)
-
-    def test_count_pairs_matrix_builds_graph_when_not_supplied(self) -> None:
-        """The matrix pair counter builds a PedigreeGraph when the caller does not pass one."""
-        df = pl.DataFrame(
-            {
-                "id": [10, 20, 30],
-                "sex": [1, 0, 1],
-                "mother": [-1, -1, 20],
-                "father": [-1, -1, 10],
-            }
-        )
-        out = _count_pairs_matrix_with_lists(df)
-        assert out["PO"] == out.get("MO", 0) + out.get("FO", 0)
-        assert "_pair_lists" in out
-
-    def test_count_pairs_matrix_reuses_supplied_graph(self) -> None:
-        """The matrix pair counter accepts a prebuilt PedigreeGraph."""
-        df = pl.DataFrame(
-            {
-                "id": [10, 20, 30],
-                "sex": [1, 0, 1],
-                "mother": [-1, -1, 20],
-                "father": [-1, -1, 10],
-            }
-        )
-        pg = _build_pedigree_graph(df)
-        out = _count_pairs_matrix_with_lists(df, pg=pg)
-        assert out["PO"] == out.get("MO", 0) + out.get("FO", 0)
 
 
 class TestSchemaEdgeCases:

@@ -45,20 +45,23 @@ See [CHANGELOG.md](CHANGELOG.md). Notable:
 
 ## Engine selection & semantics
 
-Pedsum uses two pair-counting paths, picked by `--per-individual-pairs`
-(no engine auto-tiering — per ADR 0001, the matrix/BFS dispatch was
-removed). Both delegate to `pedigree-graph`:
+Pedsum uses two pair-counting paths, picked by `--per-individual-burden`
+(alias `--per-individual-pairs`; no engine auto-tiering — per ADR 0001, the
+matrix/BFS dispatch was removed). Both delegate to `pedigree-graph` and run
+its Rust row-streaming engine, so neither builds a pair list:
 
 - Default: `PedigreeGraph.relationship_counts(max_degree=5)` (`_engine`
-  reported as `rust_streaming`). The Rust row-streaming engine classifies
-  every pair one row at a time and never builds a pair list, so the 23
-  counts are exact in O(N) memory; aggregate counts only.
-- `--per-individual-pairs`: `_count_pairs_matrix_with_lists`, over
-  `PedigreeGraph.relationship_pairs(execution="memory")` (`_engine` reported
-  as `rust_streaming_pairs`). The same engine as the default; it additionally
-  materialises full pair lists so the per-individual relationship-burden
-  summary can be computed, which is why its peak scales with the pair count
-  rather than the row count. It reports the same 23 counts as the default.
+  reported as `rust_streaming`). The engine classifies every pair one row
+  at a time, so the 23 counts are exact in O(N) memory; aggregate counts
+  only.
+- `--per-individual-burden`: `PedigreeGraph.relationship_burden()` (`_engine`
+  reported as `rust_streaming_burden`). Besides the 23 category counts it
+  returns each person's relative counts by degree (1-5) and the related-pair
+  count within each depth, in O(N) output storage.
+  `compute_relationship_summary_from_burden` (`pedsum/sections.py`) turns
+  those arrays into the per-individual relationship-burden summary. It reports the same 23 counts as the default.
+  Its parity oracle, a fold over explicit pair lists, lives in
+  `tests/relationship_summary_oracle.py`.
 - Both paths assign each pair its single closest relationship category, so
   the 23 counts partition the related pairs. A pair that is both
   parent-offspring and half sib (parent-offspring incest) counts only as
@@ -77,9 +80,8 @@ removed). Both delegate to `pedigree-graph`:
 - F kernel (Meuwissen-Luo): logs INFO above `N = 1,000,000` so naive
   runs don't silently hang. See `_F_KERNEL_WARN_THRESHOLD` (`pedsum/base.py`)
   and its use in `_run_summarize` (`pedsum/cli.py`).
-- `--per-individual-pairs`: holds every pair list, so its peak scales
-  with the related-pair count, not the row count. It asks pedigree-graph
-  for `execution="memory"`, the lowest-peak assembly.
+- `--per-individual-burden`: O(N) output storage like the default; it
+  builds no pair list.
 - `--ne-coancestry`: kinship DP scales with cumulative ancestor set;
   blows up RAM above ~500K rows.
 

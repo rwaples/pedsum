@@ -794,10 +794,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         pairs["_engine"] = "rust_streaming"
         relationship_summary = {
             "computed": False,
-            "skip_reason": (
-                "per-individual relationship burden requires full pair-list "
-                "aggregation; pass --per-individual-burden to compute it"
-            ),
+            "skip_reason": "per-individual relationship burden is opt-in; pass --per-individual-burden to compute it",
             "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
 

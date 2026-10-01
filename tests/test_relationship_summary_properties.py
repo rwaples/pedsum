@@ -8,8 +8,9 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pedigree_graph import RELATIONSHIPS, PedigreeGraph
+from relationship_summary_oracle import compute_relationship_summary
 
-from pedsum.sections import compute_relationship_summary, compute_relationship_summary_from_burden
+from pedsum.sections import compute_relationship_summary_from_burden
 
 PairLists = dict[str, tuple[np.ndarray, np.ndarray]]
 RelationshipInput = tuple[pl.DataFrame, PairLists]

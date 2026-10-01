@@ -188,26 +188,25 @@ def test_incest_fold_agrees_between_engines(tmp_path):
 
 
 def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
-    """The folded counts equal the pair lists the enumerator materialises."""
-    from pedsum.pairs import _build_pedigree_graph, _count_pairs_matrix_with_lists
+    """The folded counts equal the pair lists pedigree-graph materialises."""
+    from pedsum.pairs import _build_pedigree_graph
     from pedsum.validate import load_and_validate
 
     ped = write_ped(tmp_path / "incest.tsv", _INCEST_PEDIGREE)
     df, _ = load_and_validate(ped)
     pg = _build_pedigree_graph(df)
-    counts = _count_pairs_matrix_with_lists(df, pg=pg)
+    pair_lists = pg.relationship_pairs(max_degree=5)
     streamed = pg.relationship_counts(max_degree=5)
     for code in _ALL_CODES:
-        n_pairs = len(counts["_pair_lists"][code])
-        assert counts[code] == n_pairs
+        n_pairs = len(pair_lists[code])
         assert streamed[code] == n_pairs, f"{code}: streamed={streamed[code]} pairs={n_pairs}"
 
     # The overlapping pair appears under MO, and under no half-sib code.
     ids = df["id"].to_numpy()
-    mo_block = counts["_pair_lists"]["MO"]
+    mo_block = pair_lists["MO"]
     mo_pairs = set(zip(ids[mo_block.first_rows].tolist(), ids[mo_block.second_rows].tolist(), strict=True))
     assert (7, 5) in mo_pairs
-    phs_block = counts["_pair_lists"]["PHS"]
+    phs_block = pair_lists["PHS"]
     phs_pairs = {
         tuple(sorted(p))
         for p in zip(ids[phs_block.first_rows].tolist(), ids[phs_block.second_rows].tolist(), strict=True)

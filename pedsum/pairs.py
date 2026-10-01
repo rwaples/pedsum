@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     """Add ``PO`` (= MO + FO) and ``by_degree`` aggregates to a named-codes dict.
 
-    Shared by the matrix pair-list enumerator and the streaming-scalar
-    counter so the YAML output schema is identical regardless of source.
+    Shared by the default counts and the ``--per-individual-burden`` category
+    counts, so the YAML output schema is identical regardless of source.
 
     A ``None`` count means the code was not computed (pedigree-graph
     reports an unrequested code as ``None``, never as ``0``). Such a code
@@ -38,30 +38,6 @@ def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     fo = out.get("FO", 0)
     out["PO"] = None if (mo is None or fo is None) else mo + fo
     out["by_degree"] = by_degree
-    return out
-
-
-def _count_pairs_matrix_with_lists(df: pl.DataFrame, pg: PedigreeGraph | None = None) -> dict:
-    """Sparse matrix enumerator that retains pair lists for richer summaries.
-
-    Delegates relationship enumeration to ``pedigree_graph.PedigreeGraph``.
-    Every pair is assigned its single closest relationship category, so the
-    23 counts partition the related pairs instead of overlapping, and they
-    equal the ones the default counting path reports.
-
-    When ``pg`` is supplied the wrapper reuses it instead of building a
-    fresh compacted PedigreeGraph; saves one compaction pass when the
-    caller already needed a graph for other primitives (F, lineage,
-    effective size).
-    """
-    if pg is None:
-        pg = _build_pedigree_graph(df)
-    # The lists are this path's whole reason to exist and are what makes it
-    # OOM-prone, so ask for the lowest-peak assembly rather than the fastest.
-    pair_lists = pg.relationship_pairs(max_degree=5, execution="memory")
-    named = {code: len(block) for code, block in pair_lists.items()}
-    out = _augment_pair_counts(named)
-    out["_pair_lists"] = pair_lists
     return out
 
 
