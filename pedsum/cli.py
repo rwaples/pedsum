@@ -352,6 +352,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=argparse.SUPPRESS,
     )
     p_sum.add_argument(
+        "--max-degree",
+        type=int,
+        choices=range(1, 6),
+        default=5,
+        metavar="{1..5}",
+        help="count relationship pairs up to this degree (default: %(default)s). "
+        "Codes past it, and their by_degree entries, are null: not counted, "
+        "not zero. Cost climbs steeply with degree; on a 783K-row pedigree at "
+        "--threads 10, degree 2 took 1.4 s, 3 took 221 s, and 5 took 1,833 s.",
+    )
+    p_sum.add_argument(
         "--per-individual-burden",
         "--per-individual-pairs",
         dest="per_individual_pairs",
@@ -661,6 +672,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
+    if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
+        p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "effective-size":
         selected = set(args.estimators or DEFAULT_EFFECTIVE_SIZE_ESTIMATORS)
         args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
@@ -859,7 +872,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             relationship_summary = compute_relationship_summary_from_burden(df, burden)
     else:
         with _timed("relationship pair counts (relationship_counts)"):
-            counts = pg.relationship_counts(max_degree=5)
+            counts = pg.relationship_counts(max_degree=args.max_degree)
         # The Rust row-streaming engine counts every pair under its closest
         # category without materialising pair lists, so the 23 counts are
         # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
@@ -924,6 +937,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         relationship_summary,
         aggregates,
         sex_concordance,
+        max_degree=args.max_degree,
     )
 
     ind_data = _build_individual_data(

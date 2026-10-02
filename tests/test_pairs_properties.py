@@ -2,7 +2,8 @@
 
 ``_augment_pair_counts`` derives ``PO`` and a ``by_degree`` rollup from a dict of
 raw relationship-code counts. These tests assert the conservation invariants
-(``PO == MO + FO``; the degree buckets reproduce the input total) over arbitrary
+(``PO == MO + FO``; the degree buckets reproduce the input total; a degree with
+no computed code is ``None``) over arbitrary
 count dicts, which the example tests (driven by a single bundled pedigree) cannot.
 """
 
@@ -32,9 +33,11 @@ def test_augment_pair_counts_conserves(named: dict) -> None:
 
     by_degree = out["by_degree"]
     assert set(by_degree.keys()) == set(range(6))
-    assert sum(by_degree.values()) == sum(int(v) for v in named.values())
+    assert sum(v for v in by_degree.values() if v is not None) == sum(int(v) for v in named.values())
     for degree in range(6):
-        expected = sum(int(named[c]) for c in named if RELATIONSHIPS[c].degree == degree)
+        codes = [c for c in named if RELATIONSHIPS[c].degree == degree]
+        # A degree with no computed code is "not counted", never 0.
+        expected = sum(int(named[c]) for c in codes) if codes else None
         assert by_degree[degree] == expected
 
     # The function must not mutate its input dict.
@@ -54,4 +57,5 @@ def test_augment_pair_counts_treats_none_as_not_computed() -> None:
     assert out["1C"] is None
     assert out["PO"] is None
     assert out["by_degree"][RELATIONSHIPS["MO"].degree] == 7 + 3
-    assert sum(out["by_degree"].values()) == 10
+    assert out["by_degree"][RELATIONSHIPS["1C"].degree] is None
+    assert sum(v for v in out["by_degree"].values() if v is not None) == 10

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 #: One value in the ``relationship_pairs`` section: a count (``None`` when the
 #: code was not computed) or the ``by_degree`` rollup.
-PairEntry = Union[int, None, "Mapping[int, int]"]
+PairEntry = Union[int, None, "Mapping[int, int | None]"]
 
 _NUMERIC_COLS = (
     "F",
@@ -142,6 +142,8 @@ def _build_pedigree_data(
     relationship_summary: dict | None,
     aggregates: dict | None = None,
     sex_concordance: dict | None = None,
+    *,
+    max_degree: int = 5,
 ) -> dict:
     """Build the flat pedigree-level payload.
 
@@ -177,7 +179,7 @@ def _build_pedigree_data(
         "version": VERSION,
         "generated_at": _now_iso(),
         "n_total": int(size["n_total"]),
-        "max_degree_enumerated": 5,
+        "max_degree_enumerated": max_degree,
         "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
         "sibship_size": sibship_section,
         "mating_pairs": mating_pairs,
@@ -209,7 +211,7 @@ def _serialise_pair_entry(value: PairEntry) -> object:
     if value is None:
         return None
     if isinstance(value, Mapping):
-        return {str(degree): int(count) for degree, count in value.items()}
+        return {str(degree): None if count is None else int(count) for degree, count in value.items()}
     return int(value)
 
 

@@ -13,7 +13,7 @@ pair only under ``MO`` / ``FO`` and not additionally as a half sib.
 from __future__ import annotations
 
 import numpy as np
-from conftest import EXAMPLE, write_ped
+from conftest import EXAMPLE, load_summary_tsv, write_ped
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
 from pedigree_graph import RELATIONSHIPS, PedigreeGraph
@@ -212,3 +212,55 @@ def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
     }
     assert (5, 7) not in phs_pairs
     assert phs_pairs == {(5, 6), (6, 7)}
+
+
+# ----- --max-degree ----------
+
+
+def test_max_degree_nulls_codes_past_the_cutoff(tmp_path):
+    """``--max-degree 2``: codes and by_degree past 2 are null; codes up to 2 match the default run."""
+    full = tmp_path / "full"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(full), "--no-inbreeding", "--tsv"])
+    assert res.returncode == 0, res.stderr
+    cut = tmp_path / "cut"
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(cut), "--no-inbreeding", "--tsv", "--max-degree", "2"])
+    assert res.returncode == 0, res.stderr
+
+    full_pairs = _load_yaml(full)["pedigree"]["relatedness"]["relationship_pairs"]
+    cut_yaml = _load_yaml(cut)["pedigree"]
+    cut_pairs = cut_yaml["relatedness"]["relationship_pairs"]
+    for code, rel in RELATIONSHIPS.items():
+        if rel.degree > 2:
+            assert cut_pairs[code] is None, code
+        else:
+            assert cut_pairs[code] == full_pairs[code], code
+    assert cut_yaml["structure"]["max_degree_enumerated"] == 2
+    assert _load_yaml(full)["pedigree"]["structure"]["max_degree_enumerated"] == 5
+
+    def by_degree(out_dir):
+        return {
+            r[2]: r[3] for r in load_summary_tsv(out_dir)[1:] if r[0] == "relationship_pairs" and r[1] == "by_degree"
+        }
+
+    full_by, cut_by = by_degree(full), by_degree(cut)
+    assert [cut_by[d] for d in "345"] == ["", "", ""]
+    assert all(full_by[d] != "" for d in "345")
+    assert [cut_by[d] for d in "012"] == [full_by[d] for d in "012"]
+
+
+def test_max_degree_conflicts_with_per_individual_burden(tmp_path):
+    """The burden always counts degrees 1-5, so a lower ``--max-degree`` is a usage error."""
+    out_dir = tmp_path / "out"
+    res = _run(
+        ["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--per-individual-burden", "--max-degree", "3"]
+    )
+    assert res.returncode == 2
+    assert "--per-individual-burden always counts degrees 1-5; drop --max-degree" in res.stderr
+    assert not (out_dir / "summary.yaml").exists()
+
+
+def test_max_degree_out_of_range_exits_2(tmp_path):
+    """``--max-degree`` accepts 1 to 5 only."""
+    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(tmp_path / "out"), "--max-degree", "6"])
+    assert res.returncode == 2
+    assert "--max-degree" in res.stderr

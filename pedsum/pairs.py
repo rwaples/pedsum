@@ -22,17 +22,19 @@ def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     counts, so the YAML output schema is identical regardless of source.
 
     A ``None`` count means the code was not computed (pedigree-graph
-    reports an unrequested code as ``None``, never as ``0``). Such a code
-    contributes nothing to ``by_degree``, and ``PO`` is ``None`` whenever
-    either of ``MO`` / ``FO`` was not computed rather than silently
-    reporting a half sum.
+    reports an unrequested code as ``None``, never as ``0``, e.g. past
+    ``--max-degree``). A degree none of whose codes was computed is ``None``
+    in ``by_degree``, so "not counted" never reads as "none found". ``PO``
+    is ``None`` whenever either of ``MO`` / ``FO`` was not computed rather
+    than silently reporting a half sum.
     """
     out: dict = {code: (None if count is None else int(count)) for code, count in named.items()}
 
-    by_degree = dict.fromkeys(range(6), 0)
+    by_degree: dict[int, int | None] = dict.fromkeys(range(6))
     for code, count in out.items():
         if count is not None:
-            by_degree[RELATIONSHIPS[code].degree] += count
+            degree = RELATIONSHIPS[code].degree
+            by_degree[degree] = (by_degree[degree] or 0) + count
 
     mo = out.get("MO", 0)
     fo = out.get("FO", 0)
