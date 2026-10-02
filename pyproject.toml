@@ -51,6 +51,7 @@ include = ["pedsum*"]
 # norecursedirs are none of pedsum's business.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning"]
 
 # Lint and type-check config deliberately stay in the standalone ruff.toml and
 # ty.toml. ty.toml in particular carries an `extra-paths` entry pointing at the
