@@ -69,15 +69,16 @@ def test_slim_yaml_line_budget(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_ne_coancestry_absent_when_not_requested(tmp_path):
-    """Without ``--ne-coancestry``, slim has the stub and extra omits it entirely."""
+def test_kinship_dp_estimators_absent_when_not_requested(tmp_path):
+    """Without ``--ne-coancestry``, slim has Ne_C and Ne_GC stubs and extra omits both."""
     out_dir = tmp_path / "out"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
     slim_es = _load_yaml(out_dir)["pedigree"]["popgen"]["effective_size"]
-    assert slim_es["ne_coancestry"] == {"ne": None, "reason": "not_requested"}
     extra_es = _load_extra(out_dir)["pedigree"].get("popgen", {}).get("effective_size", {})
-    assert "ne_coancestry" not in extra_es
+    for name in ("ne_coancestry", "ne_group_coancestry"):
+        assert slim_es[name] == {"ne": None, "reason": "not_requested"}
+        assert name not in extra_es
 
 
 def test_per_depth_fields_preserved_in_extra(tmp_path):

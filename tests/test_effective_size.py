@@ -84,9 +84,10 @@ def test_effective_size_without_inbreeding_works(tmp_path):
     assert "inbreeding" not in ped.get("relatedness", {})
     assert "effective_size" in ped["popgen"]
     assert len(ped["popgen"]["effective_size"]) == 8
-    # Without --ne-coancestry the Ne_C scalar is null (compact stub) and the
-    # stub says why rather than leaving the absence unexplained.
-    assert ped["popgen"]["effective_size"]["ne_coancestry"] == {"ne": None, "reason": "not_requested"}
+    # Without --ne-coancestry the two kinship-DP scalars are null (compact
+    # stub) and the stub says why rather than leaving the absence unexplained.
+    for name in ("ne_coancestry", "ne_group_coancestry"):
+        assert ped["popgen"]["effective_size"][name] == {"ne": None, "reason": "not_requested"}
 
 
 def test_effective_size_with_inbreeding(tmp_path):
@@ -127,6 +128,9 @@ def test_ne_coancestry_opts_in(tmp_path):
     # The per-gen array lives in the extra YAML.
     extra_es = _load_extra(out_dir)["pedigree"]["popgen"]["effective_size"]
     assert all(v is not None for v in extra_es["ne_coancestry"]["mean_theta_per_gen"][1:])
+    # Ne_GC shares the kinship DP, so the same flag selects it.
+    assert isinstance(es["ne_group_coancestry"]["ne"], float)
+    assert "mean_group_coancestry_per_gen" in extra_es["ne_group_coancestry"]
 
 
 def test_observed_depth_labels_index_the_arrays(tmp_path):

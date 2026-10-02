@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`Ne_GC` is opt-in behind `--ne-coancestry`, with `Ne_C`.** Both run
+  pedigree-graph's kinship DP. On the 783,029-row horse pedigree, `Ne_GC`
+  passed 12 GiB within 100 s and an uncapped default `summarize` was
+  OOM-killed at 22 GB; the other six estimators finish in under a second
+  at 382 MB. Without the flag, `ne_group_coancestry` is now
+  `{ne: null, reason: not_requested}` in `summary.yaml` and absent from
+  `summary.extra.yaml`, like `ne_coancestry`.
+
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 
 Pedsum now requires `pedigree-graph>=0.12,<0.13` (0.13.0 required

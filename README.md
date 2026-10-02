@@ -141,14 +141,15 @@ Flags:
   expensive computation in pedsum (~minutes on 10M-row pedigrees);
   when `--effective-size` is also on, F is shared with the Ne pipeline
   and the cost is paid once.
-- `--no-effective-size` — skip seven pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
-  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`, `Ne_GC`).  The
-  eighth estimator (`Ne_C`, coancestry rate) is opt-in via
+- `--no-effective-size` — skip six pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
+  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`).  The other two
+  (`Ne_C`, coancestry rate, and `Ne_GC`, group coancestry) are opt-in via
   `--ne-coancestry`.
-- `--ne-coancestry` — additionally compute `Ne_C`. Off by default —
-  its kinship DP can blow up RAM on pedigrees larger than ~500K rows.
-  Unselected, `Ne_C` still occupies its slot in the output with a null
-  `ne` and `reason: not_requested`.
+- `--ne-coancestry` — additionally compute `Ne_C` and `Ne_GC`. Off by
+  default — their shared kinship DP can blow up RAM on pedigrees larger
+  than ~500K rows (`Ne_GC` alone passed 12 GiB on a 783K-row horse
+  pedigree). Unselected, each still occupies its slot in the output with a
+  null `ne` and `reason: not_requested`.
 - `--per-individual-burden` (`--per-individual-pairs` also accepted) — opt into the per-individual
   relationship-burden summary (`relationship_summary.relatives_total`,
   `.relatives_by_degree`, closest-degree distribution). Both paths run the
@@ -540,7 +541,7 @@ pl.DataFrame({"id": list(lut), "row": list(lut.values())}).write_csv("id_lookup.
 ## Large pedigrees
 
 pedsum's defaults include the most expensive computations in the tool
-— per-individual inbreeding (F) and the seven cheap effective-size
+— per-individual inbreeding (F) and the six cheap effective-size
 estimators. For very large pedigrees, the recommended first pass skips
 both and produces size + structure only:
 
@@ -616,7 +617,7 @@ id	sex	mother	father
 | `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only) |
 | `relatedness.relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
 | `relatedness.inbreeding` | distribution of F (only with `--inbreeding`) |
-| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_group_coancestry`); `ne_coancestry` is null without `--ne-coancestry` |
+| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_group_coancestry`); `ne_coancestry` and `ne_group_coancestry` are null without `--ne-coancestry` |
 | `strata.sex_summary` | per-sex sub-aggregates (n, n_founders, n_reproductive, n_terminal, …) |
 | `strata.depth_summary` | per-depth sub-aggregates (one row per depth) |
 | `individual.distributions` | mean/std/quartiles/`nz` for each per-individual numeric column |

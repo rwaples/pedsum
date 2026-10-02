@@ -283,23 +283,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--effective-size",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="compute seven pedigree-based effective population size "
-        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H, Ne_GC) via "
+        help="compute six pedigree-based effective population size "
+        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H) via "
         "pedigree-graph's estimate_effective_sizes (default: on; pass "
-        "--no-effective-size to skip). The eighth estimator (Ne_C, coancestry "
-        "rate) is opt-in via `--ne-coancestry` because its kinship DP can "
-        "blow up RAM on very large pedigrees. All eight keys are always "
-        "emitted; an estimator that was not selected, or that refused for "
+        "--no-effective-size to skip). The other two (Ne_C, coancestry rate, "
+        "and Ne_GC, group coancestry) are opt-in via `--ne-coancestry` because "
+        "their kinship DP can blow up RAM on very large pedigrees. All eight "
+        "keys are always emitted; an estimator that was not selected, or that refused for "
         "want of metadata, reports a null `ne` and a `reason`.",
     )
     p_sum.add_argument(
         "--ne-coancestry",
         action="store_true",
-        help="add `ne_coancestry` to the estimator selection passed to "
-        "pedigree-graph, alongside the other seven. Off by default because "
-        "the kinship DP can blow up RAM on very large pedigrees (>~500K "
-        "rows); unselected, Ne_C reports a null `ne` with reason "
-        "`not_requested`. No-op without `--effective-size`.",
+        help="add `ne_coancestry` and `ne_group_coancestry` to the estimator "
+        "selection passed to pedigree-graph, alongside the other six. Off by "
+        "default because their kinship DP can blow up RAM on very large "
+        "pedigrees (>~500K rows); unselected, Ne_C and Ne_GC report a null "
+        "`ne` with reason `not_requested`. No-op without `--effective-size`.",
     )
     p_sum.add_argument(
         "--per-individual-burden",
@@ -820,7 +820,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     effective_size: dict | None = None
     if args.effective_size:
-        n_estimators = 8 if args.ne_coancestry else 7
+        n_estimators = 8 if args.ne_coancestry else 6
         with _timed(f"effective size ({n_estimators} estimators)"):
             effective_size = compute_effective_size(pg, ne_coancestry=args.ne_coancestry)
 

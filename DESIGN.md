@@ -87,8 +87,9 @@ its Rust row-streaming engine, so neither builds a pair list:
   the `--rels` kinds read, with `execution="memory"`, and writes one kind
   at a time: beyond the engine's pair blocks it holds one kind's frame,
   and it never sorts the whole list.
-- `--ne-coancestry`: kinship DP scales with cumulative ancestor set;
-  blows up RAM above ~500K rows.
+- `--ne-coancestry` (Ne_C and Ne_GC): their kinship DP scales with the
+  cumulative ancestor set; blows up RAM above ~500K rows. Ne_GC passed
+  12 GiB on the 783K-row horse pedigree.
 
 ## Upstream integration
 

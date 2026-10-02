@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import scipy.sparse as sp
     from pedigree_graph import PedigreeGraph, RelationshipBurden
 
-from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
+from pedsum.base import INBRED_TOL, KINSHIP_DP_ESTIMATORS, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import IdIndex, _full_sib_groups, _grandparent_arrays, _parent_rows
 
 
@@ -542,19 +542,21 @@ def compute_effective_size(
     selected estimator, and serialises each record to a YAML-ready dict
     via its own ``.to_dict()`` method.
 
-    When ``ne_coancestry`` is False (the default), the coancestry-rate
-    Ne_C estimator is left out of the estimator selection — its kinship
-    DP can dominate memory on very large pedigrees.  Its slot then holds
-    an ``UnavailableEffectiveSize`` record, serialised as ``{ne: None,
-    reason: "not_requested", ...}``; the same shape carries a genuine
-    refusal (for example ``missing_metadata``) so the reason is never
-    lost.
+    When ``ne_coancestry`` is False (the default), the two estimators that
+    run the kinship DP (``KINSHIP_DP_ESTIMATORS``: Ne_C and Ne_GC) are left
+    out of the estimator selection — the DP can dominate memory on very
+    large pedigrees.  Each slot then holds an ``UnavailableEffectiveSize``
+    record, serialised as ``{ne: None, reason: "not_requested", ...}``; the
+    same shape carries a genuine refusal (for example ``missing_metadata``)
+    so the reason is never lost.
 
     All eight keys are always present, requested or not.
     """
     from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS, estimate_effective_sizes
 
-    estimators = tuple(name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if ne_coancestry or name != "ne_coancestry")
+    estimators = tuple(
+        name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if ne_coancestry or name not in KINSHIP_DP_ESTIMATORS
+    )
     raw = estimate_effective_sizes(pg, estimators)
     return {name: _normalise_effective_size_keys(raw[name].to_dict()) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
 

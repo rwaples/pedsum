@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pedsum.base import KINSHIP_DP_ESTIMATORS
+
 
 @dataclass(frozen=True)
 class SectionSpec:
@@ -231,8 +233,9 @@ def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
     stay in slim; per-generation / per-cohort / per-transition arrays
     plus ``age_table`` go to extra. Routing is name-based, so
     placeholder ``None`` values for unpopulated arrays still land in
-    extra. ``ne_coancestry`` with ``ne is None`` gets a slim-only stub and
-    no extra entry: ``{ne: null}``, plus ``reason`` when the payload
+    extra. A kinship-DP estimator (``KINSHIP_DP_ESTIMATORS``) with
+    ``ne is None`` gets a slim-only stub and no extra entry:
+    ``{ne: null}``, plus ``reason`` when the payload
     carries one (pedigree-graph 0.8 says *why* an estimator is absent —
     ``not_requested`` for the default opt-out, or a genuine refusal such
     as ``missing_metadata``).
@@ -243,7 +246,7 @@ def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
         if not isinstance(est_value, dict):
             slim[est_name] = est_value
             continue
-        if est_name == "ne_coancestry" and est_value.get("ne") is None:
+        if est_name in KINSHIP_DP_ESTIMATORS and est_value.get("ne") is None:
             stub: dict = {"ne": None}
             if "reason" in est_value:
                 stub["reason"] = est_value["reason"]
