@@ -113,7 +113,7 @@ _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
 def _build_effective_size_data(
     path: Path,
     cmd: str,
-    n_total: int,
+    n_total: int | None,
     status: str,
     requested: list[str],
     effective_size: dict,

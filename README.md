@@ -654,7 +654,10 @@ held, then exits with code 3.
   a truncated output. A stop mid-write can leave the `.partial-<pid>`
   file behind; delete it.
 - `effective-size` keeps the estimators that finished before the stop
-  (see above). The other commands write nothing more after a stop.
+  (see above). A stop while the input is still being read writes the
+  file with `n_total: null` and every requested estimator at
+  `reason: memory_limit`, replacing any file an earlier run left. The
+  other commands write nothing more after a stop.
 
 Exit codes:
 

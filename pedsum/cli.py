@@ -994,6 +994,32 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     _commit_thread_budget(args)
+
+    requested = args.estimators
+    out_path = args.out_dir / "effective_size.yaml"
+    # Registered before the input is read, so a stop at any point replaces an
+    # effective_size.yaml left by an earlier run. Until the graph is built,
+    # n_total is unknown and no estimator has run.
+    n_total: int | None = None
+    results: dict = {name: {"ne": None, "reason": "not_requested"} for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
+
+    def publish_partial(rss: int, limit: int) -> None:
+        stopped = {
+            "ne": None,
+            "reason": "memory_limit",
+            "rss_gib": round(rss / GiB, 2),
+            "limit_gib": round(limit / GiB, 2),
+        }
+        # One copy per estimator: a shared dict would be dumped as a YAML alias.
+        partial = {
+            name: dict(stopped) if name in requested and record.get("reason") == "not_requested" else record
+            for name, record in results.items()
+        }
+        data = _build_effective_size_data(args.in_path, cmd, n_total, "stopped_memory_limit", requested, partial)
+        _write_yaml(data, out_path)
+        logger.error("wrote %s with the estimators that finished", out_path)
+
+    watchdog.on_breach(publish_partial)
     try:
         with _timed("load+validate"):
             df, _children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
@@ -1015,28 +1041,8 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
 
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
-
-    requested = args.estimators
-    out_path = args.out_dir / "effective_size.yaml"
+    n_total = len(df)
     results = compute_effective_size(pg, ())
-
-    def publish_partial(rss: int, limit: int) -> None:
-        stopped = {
-            "ne": None,
-            "reason": "memory_limit",
-            "rss_gib": round(rss / GiB, 2),
-            "limit_gib": round(limit / GiB, 2),
-        }
-        # One copy per estimator: a shared dict would be dumped as a YAML alias.
-        partial = {
-            name: dict(stopped) if name in requested and record.get("reason") == "not_requested" else record
-            for name, record in results.items()
-        }
-        data = _build_effective_size_data(args.in_path, cmd, len(df), "stopped_memory_limit", requested, partial)
-        _write_yaml(data, out_path)
-        logger.error("wrote %s with the estimators that finished", out_path)
-
-    watchdog.on_breach(publish_partial)
     steps = (
         [name for name in requested if name not in KINSHIP_DP_ESTIMATORS],
         [name for name in requested if name in KINSHIP_DP_ESTIMATORS],

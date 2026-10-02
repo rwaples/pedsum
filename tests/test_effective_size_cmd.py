@@ -235,6 +235,51 @@ def test_breach_with_a_single_estimator(tmp_path):
     assert all(reasons[name] == "not_requested" for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name != "ne_coancestry")
 
 
+_LOAD_BREACH_SCRIPT = """
+import sys, time
+import numpy as np
+from pedsum import cli
+from pedsum.memory import read_rss_bytes
+
+real = cli.load_and_validate
+
+def load_allocates(*args, **kwargs):
+    block = np.ones(600 * 2**20, dtype=np.uint8)
+    time.sleep(30)
+    return real(*args, **kwargs)
+
+cli.load_and_validate = load_allocates
+limit = read_rss_bytes() + 300 * 2**20
+sys.exit(cli.main([*sys.argv[1:], "--max-memory", str(limit)]))
+"""
+
+
+def test_breach_while_loading_replaces_an_earlier_complete_file(tmp_path):
+    """A stop before the graph exists still writes this run's file, not a stale complete one."""
+    res, path = _run_es(tmp_path)
+    assert res.returncode == 0, res.stderr
+    assert _load(path)["status"] == "complete"
+
+    argv = ["effective-size", "--in", str(EXAMPLE), "--out", str(path.parent)]
+    res = subprocess.run(
+        [sys.executable, "-c", _LOAD_BREACH_SCRIPT, *argv],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert res.returncode == EXIT_MEMORY_LIMIT, res.stderr
+    assert "load+validate used" in res.stderr
+    data = _load(path)
+    assert data["status"] == "stopped_memory_limit"
+    assert data["n_total"] is None
+    assert _values(data) == {}
+    reasons = _reasons(data)
+    assert all(reasons[name] == "memory_limit" for name in DEFAULT_SIX)
+    assert all(reasons[name] == "not_requested" for name in KINSHIP_DP_ESTIMATORS)
+
+
 def _args(tmp_path, *extra):
     return cli._parse_args(["effective-size", "--in", str(EXAMPLE), "--out", str(tmp_path / "out"), *extra])
 
