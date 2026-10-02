@@ -55,6 +55,9 @@ under a second at 382 MB.
 
 ### Changed
 
+- **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
+  needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
+  longer run the kinship DP.
 - **Every output is published atomically.** Writers fill a hidden
   `.<name>.partial-<pid>` beside the target and rename it into place, so
   an interrupted run never leaves a truncated file. A stop mid-write can
