@@ -38,9 +38,9 @@ def test_parse_size(text, expected):
     assert parse_size(text) == expected
 
 
-@pytest.mark.parametrize("text", ["lots", "-1G", "G"])
+@pytest.mark.parametrize("text", ["lots", "-1G", "G", "inf", "infG", "nan"])
 def test_parse_size_rejects(text):
-    """Text, a negative size, and a bare unit are usage errors."""
+    """Text, a negative or non-finite size, and a bare unit are usage errors."""
     with pytest.raises(argparse.ArgumentTypeError):
         parse_size(text)
 
@@ -88,6 +88,17 @@ def test_headroom_host_binds_without_cgroup_limits(tmp_path):
     assert memory_headroom_bytes(proc, cgroup) == GiB
 
 
+def test_headroom_excludes_reclaimable_page_cache(tmp_path):
+    """inactive_file in memory.stat is reclaimed before memory.max bites, so it is not usage."""
+    proc, cgroup = _fake_roots(
+        tmp_path,
+        mem_available_kb=32 * 2**20,
+        levels={"user.slice": ("max", GiB), "user.slice/app.scope": (str(16 * GiB), 13 * GiB)},
+    )
+    (cgroup / "user.slice/app.scope/memory.stat").write_text(f"anon {GiB}\nfile {12 * GiB}\ninactive_file {12 * GiB}\n")
+    assert memory_headroom_bytes(proc, cgroup) == 15 * GiB
+
+
 def test_headroom_none_when_nothing_readable(tmp_path):
     """No /proc and no cgroup files means no default limit."""
     assert memory_headroom_bytes(tmp_path / "no-proc", tmp_path / "no-cgroup") is None
@@ -123,6 +134,30 @@ def test_breach_runs_callback_logs_and_exits_3(caplog):
     assert breaches == [(2 * GiB, GiB)]
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert any("kinship DP used 2.0 GiB RSS, over the 1.0 GiB limit; stopping" in m for m in errors)
+
+
+def test_failing_phase_lookup_still_exits_3():
+    """A phase label that raises must not kill the watchdog thread before it stops the process."""
+    exits: list[int] = []
+
+    def phase() -> str:
+        raise IndexError("pop from empty list")
+
+    wd = MemoryWatchdog(GiB, poll_s=0.01, rss_reader=lambda: 2 * GiB, exit_fn=exits.append, phase=phase)
+    with wd:
+        assert wd._thread is not None
+        wd._thread.join(timeout=5)
+    assert exits == [EXIT_MEMORY_LIMIT]
+
+
+def test_current_profile_phase_reads_the_innermost_label():
+    """The phase lookup returns the innermost ``_timed`` label, or None outside any block."""
+    from pedsum.cli import _current_profile_phase, _timed
+
+    assert _current_profile_phase() is None
+    with _timed("outer"), _timed("inner"):
+        assert _current_profile_phase() == "inner"
+    assert _current_profile_phase() is None
 
 
 def test_failing_callback_is_logged_and_skipped(caplog):
@@ -279,3 +314,11 @@ def test_cli_logs_default_limit(tmp_path):
     res = run_pedsum(["validate", "--in", str(EXAMPLE), "--out", str(tmp_path / "out")])
     assert res.returncode in (0, 1), res.stderr
     assert "memory limit" in res.stderr
+
+
+def test_cli_rejects_infinite_max_memory(tmp_path):
+    """``--max-memory inf`` is a usage error, not a traceback."""
+    res = run_pedsum(["validate", "--in", str(EXAMPLE), "--out", str(tmp_path / "out"), "--max-memory", "inf"])
+    assert res.returncode == 2
+    assert "not a size: 'inf'" in res.stderr
+    assert "Traceback" not in res.stderr

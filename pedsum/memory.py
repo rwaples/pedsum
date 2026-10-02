@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 import threading
@@ -42,7 +43,9 @@ def parse_size(text: str) -> int:
     try:
         size = float(number.removesuffix(unit)) * _SIZE_UNITS[unit]
     except ValueError:
-        raise argparse.ArgumentTypeError(f"not a size: {text!r} (use e.g. 500M, 12G, or 0 to disable)") from None
+        size = math.nan
+    if not math.isfinite(size):
+        raise argparse.ArgumentTypeError(f"not a size: {text!r} (use e.g. 500M, 12G, or 0 to disable)")
     if size < 0:
         raise argparse.ArgumentTypeError(f"size must not be negative: {text!r}")
     return int(size)
@@ -62,6 +65,19 @@ def _read_int(path: Path) -> int | None:
     return int(text) if text.isdigit() else None
 
 
+def _inactive_file(level: Path) -> int:
+    """Page cache the kernel can reclaim first, from ``memory.stat``; 0 when unreadable."""
+    try:
+        lines = (level / "memory.stat").read_text().splitlines()
+    except OSError:
+        return 0
+    for line in lines:
+        key, _, value = line.partition(" ")
+        if key == "inactive_file" and value.isdigit():
+            return int(value)
+    return 0
+
+
 def _mem_available(proc_root: Path) -> int | None:
     try:
         lines = (proc_root / "meminfo").read_text().splitlines()
@@ -74,10 +90,12 @@ def _mem_available(proc_root: Path) -> int | None:
 
 
 def _cgroup_headrooms(proc_root: Path, cgroup_root: Path) -> list[int]:
-    """``memory.max - memory.current`` for this process's cgroup and every ancestor that sets a limit.
+    """Headroom under ``memory.max`` for this process's cgroup and every ancestor that sets a limit.
 
     cgroup v2 limits are hierarchical, so a parent scope's ``memory.max`` binds
-    even when the leaf reads ``max``.
+    even when the leaf reads ``max``. Usage is ``memory.current`` less
+    ``inactive_file``: page cache left by earlier jobs counts toward
+    ``memory.current`` but is reclaimed before the limit bites.
     """
     try:
         lines = (proc_root / "self" / "cgroup").read_text().splitlines()
@@ -92,7 +110,7 @@ def _cgroup_headrooms(proc_root: Path, cgroup_root: Path) -> list[int]:
         limit = _read_int(level / "memory.max")
         current = _read_int(level / "memory.current")
         if limit is not None and current is not None:
-            headrooms.append(max(limit - current, 0))
+            headrooms.append(max(limit - max(current - _inactive_file(level), 0), 0))
         if level == cgroup_root:
             break
     return headrooms
@@ -204,7 +222,10 @@ class MemoryWatchdog:
                 return
 
     def _breach(self, rss: int, limit: int) -> None:
-        phase = self._phase() or "pedsum"
+        try:
+            phase = self._phase() or "pedsum"
+        except Exception:
+            phase = "pedsum"
         with self._lock:
             if not self._armed:
                 logger.warning(

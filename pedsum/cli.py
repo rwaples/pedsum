@@ -725,7 +725,10 @@ def _current_profile_phase() -> str | None:
     Exposed for the benchmark RSS profiler so it can attribute sampled RSS to a
     phase without depending on the private stack variable's name.
     """
-    return _PROFILE_PHASE_STACK[-1] if _PROFILE_PHASE_STACK else None
+    # One slice, not a check then an index: the memory watchdog calls this
+    # from its own thread while the main thread pops labels.
+    (label,) = _PROFILE_PHASE_STACK[-1:] or (None,)
+    return label
 
 
 @contextmanager
