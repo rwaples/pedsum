@@ -14,8 +14,18 @@ from typing import TYPE_CHECKING, NoReturn
 import numpy as np
 import polars as pl
 from pedigree_graph import configure_threads
+from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
-from pedsum.base import _F_KERNEL_WARN_THRESHOLD, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, VERSION, PedigreeError, logger
+from pedsum.base import (
+    _F_KERNEL_WARN_THRESHOLD,
+    KINSHIP_DP_ESTIMATORS,
+    SEX_FEMALE,
+    SEX_MALE,
+    SEX_UNKNOWN,
+    VERSION,
+    PedigreeError,
+    logger,
+)
 from pedsum.epimight import (
     BASE_YEAR,
     EPIMIGHT_RELATIONSHIP_ORDER,
@@ -25,7 +35,7 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.memory import MemoryWatchdog, parse_size, resolve_limit
+from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
@@ -33,6 +43,7 @@ from pedsum.report import (
     SAFE_MIN_CELL,
     _apply_safe_attempt,
     _build_added_founders,
+    _build_effective_size_data,
     _build_individual_data,
     _build_pedigree_data,
     _build_summary_data,
@@ -71,6 +82,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from pedsum.validate import ValidationContext
+
+DEFAULT_EFFECTIVE_SIZE_ESTIMATORS = tuple(
+    name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name not in KINSHIP_DP_ESTIMATORS
+)
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -179,6 +194,79 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_input_args(p: argparse.ArgumentParser, *, out_help: str, birth_year_help: str) -> None:
+    """``--in``, ``--out`` and the column / birth-year options of a command that summarises one pedigree."""
+    p.add_argument(
+        "--in",
+        dest="in_path",
+        required=True,
+        type=Path,
+        help="input pedigree (.tsv or .tsv.gz)",
+    )
+    p.add_argument(
+        "--out",
+        dest="out_dir",
+        required=True,
+        type=Path,
+        metavar="DIR",
+        help=out_help,
+    )
+    p.add_argument(
+        "--id-col",
+        default="id",
+        metavar="NAME",
+        help="column name for individual ID (int) (default: %(default)s)",
+    )
+    p.add_argument(
+        "--sex-col",
+        default="sex",
+        metavar="NAME",
+        help="column name for sex; accepts M/F (any case), Male/Female, or "
+        "0/1 (default: %(default)s; 0=female, 1=male). See --plink-sex.",
+    )
+    p.add_argument(
+        "--mother-col",
+        default="mother",
+        metavar="NAME",
+        help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
+    )
+    p.add_argument(
+        "--father-col",
+        default="father",
+        metavar="NAME",
+        help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
+    )
+    p.add_argument("--birth-year-col", default=None, metavar="NAME", help=birth_year_help)
+    p.add_argument(
+        "--birth-year-min",
+        type=int,
+        default=_BIRTH_YEAR_DEFAULT_MIN,
+        metavar="YEAR",
+        help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
+        "No-op without --birth-year-col.",
+    )
+    p.add_argument(
+        "--birth-year-max",
+        type=int,
+        default=None,
+        metavar="YEAR",
+        help="inclusive upper bound for birth_year sanity check "
+        "(default: current calendar year + 1). No-op without --birth-year-col.",
+    )
+
+
+def _estimator_list(v: str) -> list[str]:
+    """Argparse type for ``--estimators``: a comma list of estimator names, or ``all``."""
+    names = [name.strip() for name in v.split(",") if name.strip()]
+    unknown = [name for name in names if name != "all" and name not in ALL_EFFECTIVE_SIZE_ESTIMATORS]
+    if unknown or not names:
+        raise argparse.ArgumentTypeError(
+            f"unknown estimator(s) {', '.join(unknown) or repr(v)}; "
+            f"choose from {', '.join(ALL_EFFECTIVE_SIZE_ESTIMATORS)}, or all"
+        )
+    return list(ALL_EFFECTIVE_SIZE_ESTIMATORS) if "all" in names else names
+
+
 def _positive_int(v: str) -> int:
     """Argparse type guard for ints >= 1."""
     n = _nonnegative_int(v)
@@ -211,77 +299,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="subcommand", parser_class=_FullHelpParser)
 
     p_sum = sub.add_parser("summarize", help="summarise a pedigree (TSV input)")
-    p_sum.add_argument(
-        "--in",
-        dest="in_path",
-        required=True,
-        type=Path,
-        help="input pedigree (.tsv or .tsv.gz)",
-    )
-    p_sum.add_argument(
-        "--out",
-        dest="out_dir",
-        required=True,
-        type=Path,
-        metavar="DIR",
-        help="output directory (created if needed). Always writes "
+    _add_input_args(
+        p_sum,
+        out_help="output directory (created if needed). Always writes "
         "summary.yaml (slim categorised summary), summary.extra.yaml "
         "(per-generation / per-cohort / per-transition arrays and full "
         "per-individual quantiles), and annotated.tsv.gz (input pedigree "
         "+ per-individual columns; suppressed under --safe-attempt). "
         "Pass --tsv to also write summary.pedigree.tsv and "
         "summary.individual.tsv.",
-    )
-    p_sum.add_argument(
-        "--id-col",
-        default="id",
-        metavar="NAME",
-        help="column name for individual ID (int) (default: %(default)s)",
-    )
-    p_sum.add_argument(
-        "--sex-col",
-        default="sex",
-        metavar="NAME",
-        help="column name for sex; accepts M/F (any case), Male/Female, or "
-        "0/1 (default: %(default)s; 0=female, 1=male). See --plink-sex.",
-    )
-    p_sum.add_argument(
-        "--mother-col",
-        default="mother",
-        metavar="NAME",
-        help="column name for mother ID; -1/NA/blank for unknown (default: %(default)s)",
-    )
-    p_sum.add_argument(
-        "--father-col",
-        default="father",
-        metavar="NAME",
-        help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
-    )
-    p_sum.add_argument(
-        "--birth-year-col",
-        default=None,
-        metavar="NAME",
-        help="optional column name for birth year (integer or float "
+        birth_year_help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). When set, pedsum threads "
         "the column through to PedigreeGraph so the Hill overlapping-"
         "generation Ne estimator (Ne_H) can build its cohort window; "
         "without it Ne_H collapses to Ne_V.",
-    )
-    p_sum.add_argument(
-        "--birth-year-min",
-        type=int,
-        default=_BIRTH_YEAR_DEFAULT_MIN,
-        metavar="YEAR",
-        help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
-        "No-op without --birth-year-col.",
-    )
-    p_sum.add_argument(
-        "--birth-year-max",
-        type=int,
-        default=None,
-        metavar="YEAR",
-        help="inclusive upper bound for birth_year sanity check "
-        "(default: current calendar year + 1). No-op without --birth-year-col.",
     )
     p_sum.add_argument(
         "--inbreeding",
@@ -586,6 +617,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_memory_args(p_epi)
     _add_logging_args(p_epi)
 
+    p_es = sub.add_parser(
+        "effective-size",
+        help="estimate effective population size (Ne) with up to eight pedigree-based estimators",
+    )
+    _add_input_args(
+        p_es,
+        out_help="output directory (created if needed); writes effective_size.yaml "
+        "with every estimator's scalar and per-depth arrays. After a stop at "
+        "the memory limit (exit 3) the file holds the estimators that finished, "
+        "with status: stopped_memory_limit.",
+        birth_year_help="optional column name for birth year (integer or float "
+        "calendar year; -1/NA/blank for unknown). The Hill overlapping-"
+        "generation estimator (ne_hill_overlapping) builds its cohort window "
+        "from it; without it ne_hill_overlapping collapses to "
+        "ne_variance_family_size.",
+    )
+    p_es.add_argument(
+        "--estimators",
+        type=_estimator_list,
+        action="extend",
+        default=None,
+        metavar="NAME[,NAME...]",
+        help="estimators to run, as a comma list or repeated flags; 'all' "
+        f"selects every one. Choices: {', '.join(ALL_EFFECTIVE_SIZE_ESTIMATORS)}. "
+        f"Default: all but {' and '.join(KINSHIP_DP_ESTIMATORS)}, whose kinship "
+        "DP can need tens of GB on pedigrees past about 500K rows. Every "
+        "estimator appears in the output; one not selected reports reason: "
+        "not_requested.",
+    )
+    _add_format_args(p_es)
+    _add_threads_args(p_es)
+    _add_memory_args(p_es)
+    _add_logging_args(p_es)
+
     args = parser.parse_args(argv)
     if args.subcommand is None:
         parser.print_help(sys.stderr)
@@ -594,6 +659,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
+    if args.subcommand == "effective-size":
+        selected = set(args.estimators or DEFAULT_EFFECTIVE_SIZE_ESTIMATORS)
+        args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
     return args
 
 
@@ -842,7 +910,9 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if args.effective_size:
         n_estimators = 8 if args.ne_coancestry else 6
         with _timed(f"effective size ({n_estimators} estimators)"):
-            effective_size = compute_effective_size(pg, ne_coancestry=args.ne_coancestry)
+            effective_size = compute_effective_size(
+                pg, ALL_EFFECTIVE_SIZE_ESTIMATORS if args.ne_coancestry else DEFAULT_EFFECTIVE_SIZE_ESTIMATORS
+            )
 
     out_dir = args.out_dir
 
@@ -928,6 +998,79 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         with _timed("wrote annotated.tsv.gz"):
             _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
 
+    return 0
+
+
+def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:
+    """``effective-size``: run the selected Ne estimators and write ``effective_size.yaml``.
+
+    The cheap estimators run first, then the kinship-DP pair, so a stop at the
+    memory limit during the DP still publishes the finished ones (ADR 0004 §4).
+    """
+    if _prepare_out_dir(args.out_dir) != 0:
+        return 1
+    _commit_thread_budget(args)
+    try:
+        with _timed("load+validate"):
+            df, _children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
+    except PedigreeError as e:
+        logger.error("validation failed: %s", e)
+        _write_validation_failure_log(args)
+        return 1
+    except (FileNotFoundError, OSError) as e:
+        logger.error("file error: %s", e)
+        return 2
+
+    if (df["sex"].to_numpy() == SEX_UNKNOWN).any():
+        logger.error(
+            "effective size needs resolved sex for every row (ne_sex_ratio and the "
+            "sex-decomposed ne_variance_family_size use it); remove --allow-missing-sex "
+            "or supply sex for the offending rows",
+        )
+        return 1
+
+    with _timed("built PedigreeGraph"):
+        pg = _build_pedigree_graph(df)
+
+    requested = args.estimators
+    out_path = args.out_dir / "effective_size.yaml"
+    results = compute_effective_size(pg, ())
+
+    def publish_partial(rss: int, limit: int) -> None:
+        stopped = {
+            "ne": None,
+            "reason": "memory_limit",
+            "rss_gib": round(rss / GiB, 2),
+            "limit_gib": round(limit / GiB, 2),
+        }
+        # One copy per estimator: a shared dict would be dumped as a YAML alias.
+        partial = {
+            name: dict(stopped) if name in requested and record.get("reason") == "not_requested" else record
+            for name, record in results.items()
+        }
+        data = _build_effective_size_data(args.in_path, cmd, len(df), "stopped_memory_limit", requested, partial)
+        _write_yaml(data, out_path)
+        logger.error("wrote %s with the estimators that finished", out_path)
+
+    watchdog.on_breach(publish_partial)
+    steps = (
+        [name for name in requested if name not in KINSHIP_DP_ESTIMATORS],
+        [name for name in requested if name in KINSHIP_DP_ESTIMATORS],
+    )
+    for names in steps:
+        if not names:
+            continue
+        with _timed(f"effective size ({', '.join(names)})"):
+            out = compute_effective_size(pg, names)
+        # Only this step's names: out also holds not_requested placeholders for
+        # the other step. One update keeps a breach callback from seeing half a step.
+        results.update({name: out[name] for name in names})
+
+    with watchdog.disarm() as owns_output:
+        if owns_output:
+            data = _build_effective_size_data(args.in_path, cmd, len(df), "complete", requested, results)
+            _write_yaml(data, out_path)
+            logger.info("wrote %s", out_path)
     return 0
 
 
@@ -1240,9 +1383,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _init_logging(args.verbose, args.quiet)
     cmd = " ".join(sys.argv)
-    with MemoryWatchdog(resolve_limit(args.max_memory), phase=_current_profile_phase):
+    with MemoryWatchdog(resolve_limit(args.max_memory), phase=_current_profile_phase) as watchdog:
         if args.subcommand == "summarize":
             return _run_summarize(args, cmd)
+        if args.subcommand == "effective-size":
+            return _run_effective_size(args, cmd, watchdog)
         if args.subcommand == "validate":
             return _run_validate(args, cmd)
         if args.subcommand == "epimight-input":

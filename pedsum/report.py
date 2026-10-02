@@ -110,6 +110,27 @@ _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
 )
 
 
+def _build_effective_size_data(
+    path: Path,
+    cmd: str,
+    n_total: int,
+    status: str,
+    requested: list[str],
+    effective_size: dict,
+) -> dict:
+    """The ``effective_size.yaml`` payload: the summary's meta block, then the run status and every estimator."""
+    return {
+        "input": str(path),
+        "command": cmd,
+        "version": VERSION,
+        "generated_at": _now_iso(),
+        "n_total": n_total,
+        "status": status,
+        "estimators_requested": requested,
+        "effective_size": effective_size,
+    }
+
+
 def _build_pedigree_data(
     path: Path,
     cmd: str,

@@ -183,11 +183,17 @@ class MemoryWatchdog:
         self._callbacks.append(fn)
 
     @contextmanager
-    def disarm(self) -> Iterator[None]:
-        """Hold the publication lock for the block; a later breach no longer stops the process."""
+    def disarm(self) -> Iterator[bool]:
+        """Hold the publication lock for the block and yield whether the caller still owns the output.
+
+        After this, a breach only warns. The yield is False when a breach
+        already published its own output; that can only be seen when
+        ``exit_fn`` returns, as it does in tests.
+        """
         with self._lock:
+            owns_output = self._armed
             self._armed = False
-            yield
+            yield owns_output
 
     def _watch(self) -> None:
         assert self.limit_bytes is not None
@@ -208,6 +214,7 @@ class MemoryWatchdog:
                     limit / GiB,
                 )
                 return
+            self._armed = False
             logger.error(
                 "%s used %.1f GiB RSS, over the %.1f GiB limit; stopping. "
                 "Pass --max-memory SIZE to raise the limit, or --max-memory 0 to remove it",

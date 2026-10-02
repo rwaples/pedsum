@@ -11,10 +11,12 @@ import scipy.sparse.csgraph as csgraph
 from pedigree_graph import RELATIONSHIPS
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     import scipy.sparse as sp
     from pedigree_graph import PedigreeGraph, RelationshipBurden
 
-from pedsum.base import INBRED_TOL, KINSHIP_DP_ESTIMATORS, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
+from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import IdIndex, _full_sib_groups, _grandparent_arrays, _parent_rows
 
 
@@ -530,35 +532,22 @@ def compute_relationship_summary_from_burden(df: pl.DataFrame, burden: Relations
     }
 
 
-def compute_effective_size(
-    pg: PedigreeGraph,
-    *,
-    ne_coancestry: bool = False,
-) -> dict:
-    """Run the eight pedigree-based Ne estimators via ``pedigree_graph``.
+def compute_effective_size(pg: PedigreeGraph, estimators: Iterable[str]) -> dict:
+    """Run the named Ne estimators via ``pedigree_graph`` and return all eight as YAML-ready dicts.
 
-    Thin wrapper around ``pedigree_graph.effective_size.estimate_effective_sizes``:
-    builds the founder-contribution structures once, dispatches every
-    selected estimator, and serialises each record to a YAML-ready dict
-    via its own ``.to_dict()`` method.
-
-    When ``ne_coancestry`` is False (the default), the two estimators that
-    run the kinship DP (``KINSHIP_DP_ESTIMATORS``: Ne_C and Ne_GC) are left
-    out of the estimator selection — the DP can dominate memory on very
-    large pedigrees.  Each slot then holds an ``UnavailableEffectiveSize``
-    record, serialised as ``{ne: None, reason: "not_requested", ...}``; the
-    same shape carries a genuine refusal (for example ``missing_metadata``)
-    so the reason is never lost.
-
-    All eight keys are always present, requested or not.
+    Thin wrapper around ``pedigree_graph.effective_size.estimate_effective_sizes``.
+    An estimator outside ``estimators`` reports ``{ne: None, reason:
+    "not_requested", ...}``; the same shape carries a genuine refusal (for
+    example ``missing_metadata``), so every record has an ``ne`` and the
+    reason is never lost.
     """
     from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS, estimate_effective_sizes
 
-    estimators = tuple(
-        name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if ne_coancestry or name not in KINSHIP_DP_ESTIMATORS
-    )
-    raw = estimate_effective_sizes(pg, estimators)
-    return {name: _normalise_effective_size_keys(raw[name].to_dict()) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
+    raw = estimate_effective_sizes(pg, tuple(estimators))
+    return {
+        name: {"ne": None, **_normalise_effective_size_keys(raw[name].to_dict())}
+        for name in ALL_EFFECTIVE_SIZE_ESTIMATORS
+    }
 
 
 #: Upstream label / counter fields renamed on the way out. pedigree-graph

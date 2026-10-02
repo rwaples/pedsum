@@ -106,8 +106,8 @@ def test_disabled_limit_starts_no_thread():
     with MemoryWatchdog(None) as wd:
         assert wd._thread is None
         assert not any(t.name == "pedsum-memory-watchdog" for t in threading.enumerate())
-        with wd.disarm():
-            pass
+        with wd.disarm() as owns_output:
+            assert owns_output
 
 
 def test_breach_runs_callback_logs_and_exits_3(caplog):
