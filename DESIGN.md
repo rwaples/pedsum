@@ -92,11 +92,10 @@ its Rust row-streaming engine, so neither builds a pair list:
   the `--rels` kinds read, with `execution="memory"`, and writes one kind
   at a time: beyond the engine's pair blocks it holds one kind's frame,
   and it never sorts the whole list.
-- `effective-size --estimators ne_coancestry,ne_group_coancestry` (or
-  `all`): the kinship DP behind Ne_C and Ne_GC scales with the live
-  ancestor frontier, not N, and cannot be interrupted once started. Ne_GC
-  passed 12 GiB within 100 s on the 783K-row horse pedigree. Both stay out
-  of the default selection; the six default estimators take 0.35 s there.
+- `effective-size`: all eight estimators run in memory linear in N since
+  pedigree-graph 0.12.1, which took the kinship DP out of Ne_C and Ne_GC
+  (its issue #38; Ne_GC had passed 12 GiB within 100 s on the 783K-row
+  horse pedigree). The default selection runs all eight there in 1.11 s.
 - `summarize --max-degree`: `relationship_counts` wall time on the horse
   pedigree at 10 threads was 0.61 s at degree 1, 1.36 s at 2, 221 s at 3,
   632 s at 4 and 1,833 s at 5. Codes past the cutoff are null.

@@ -9,7 +9,10 @@ On the 783,029-row horse pedigree, `summarize` ran 30 minutes and was then
 OOM-killed in the Ne step, writing nothing and taking the launching
 terminal with it. `Ne_GC` alone passed 12 GiB within 100 s and the
 uncapped run reached 22 GB, while the other six estimators finished in
-under a second at 382 MB.
+under a second at 382 MB. pedigree-graph 0.12.1 then took the kinship DP
+out of `Ne_C` and `Ne_GC` (its issue #38), so `effective-size` runs all
+eight by default: 1.11 s on the horse pedigree, 394 MiB peak for the
+whole command.
 
 ### Removed
 
@@ -26,8 +29,7 @@ under a second at 382 MB.
   metadata, `status`, `estimators_requested`, and all eight estimator
   records with their scalars and per-depth arrays in one file.
   `--estimators NAME[,NAME...]` or `--estimators all` picks the
-  estimators; the default is the six that don't run the kinship DP, so
-  `ne_coancestry` and `ne_group_coancestry` stay opt-in. An unselected
+  estimators; the default is all eight. An unselected
   estimator reports `{ne: null, reason: not_requested}`; every record now
   has an `ne` key. `--birth-year-col` feeds `ne_hill_overlapping` here.
 - **`--max-memory SIZE` and exit code 3 on every command.** A thread
@@ -36,9 +38,9 @@ under a second at 382 MB.
   of the smallest of `MemAvailable` and every enclosing cgroup's headroom;
   `--max-memory 0` turns it off. The limit is best effort: a fast enough
   allocation can still reach the kernel's OOM killer. In
-  `effective-size`, a stop during the kinship DP keeps the six finished
-  estimators in `effective_size.yaml` with `status: stopped_memory_limit`,
-  and the stopped ones report `reason: memory_limit`.
+  `effective-size`, a stop still writes `effective_size.yaml`, with
+  `status: stopped_memory_limit`, and the estimators that were running
+  report `reason: memory_limit`.
 - **`summarize --max-degree N`** (1 to 5, default 5) stops pair counting
   at degree `N`. On the horse pedigree at 10 threads, degree 2 took 1.36 s
   and degree 5 took 1,833 s. Codes past `N` and their `by_degree` rollup

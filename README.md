@@ -386,18 +386,18 @@ the `estimators_requested`, and one record per estimator under
 
 pedsum offers eight pedigree-based estimators. They measure different
 things and are not interchangeable; [CONTEXT.md](CONTEXT.md) explains why
-every name carries its estimator.
+every name carries its estimator. All eight run by default.
 
-| Estimator | Short name | Runs by default |
-|---|---|---|
-| `ne_inbreeding` | Ne_I | yes |
-| `ne_variance_family_size` | Ne_V | yes |
-| `ne_sex_ratio` | Ne_sr | yes |
-| `ne_individual_delta_f` | Ne_iΔF | yes |
-| `ne_long_term_contributions` | Ne_LTC | yes |
-| `ne_hill_overlapping` | Ne_H | yes |
-| `ne_coancestry` | Ne_C | no |
-| `ne_group_coancestry` | Ne_GC | no |
+| Estimator | Short name |
+|---|---|
+| `ne_inbreeding` | Ne_I |
+| `ne_variance_family_size` | Ne_V |
+| `ne_sex_ratio` | Ne_sr |
+| `ne_individual_delta_f` | Ne_iΔF |
+| `ne_long_term_contributions` | Ne_LTC |
+| `ne_hill_overlapping` | Ne_H |
+| `ne_coancestry` | Ne_C |
+| `ne_group_coancestry` | Ne_GC |
 
 All eight records are always written. An estimator you did not select
 reports `{ne: null, reason: not_requested}`; one that cannot run for want
@@ -406,12 +406,9 @@ of metadata reports its own `reason`, for example `missing_metadata`.
 Flags:
 
 - `--estimators NAME[,NAME...]` — the estimators to run, as a comma list
-  or repeated flags; `all` selects all eight. The default is the six
-  that finish in under a second on the horse pedigree. `ne_coancestry`
-  and `ne_group_coancestry` share pedigree-graph's kinship DP, whose
-  memory depends on how long ancestors stay live rather than on N:
-  `ne_group_coancestry` alone passed 12 GiB within 100 s on the
-  783,029-row horse pedigree. Name them only on pedigrees you know fit.
+  or repeated flags; `all` selects all eight, which is also the default.
+  On the 783,029-row horse pedigree the eight take 1.11 s, and the whole
+  command peaks at 394 MiB.
 - `--birth-year-col NAME` — gives `ne_hill_overlapping` its cohort
   window and sex-decomposed `Ne_m` / `Ne_f`. Without it,
   `ne_hill_overlapping` collapses to `ne_variance_family_size`
@@ -422,20 +419,16 @@ Flags:
 Examples:
 
 ```bash
-# the six fast estimators, with Hill's cohort window
+# all eight, with Hill's cohort window
 python pedigree_summary.py effective-size --in PED.tsv --out DIR --birth-year-col birth_year
 
-# all eight, on a pedigree small enough for the kinship DP
-python pedigree_summary.py effective-size --in PED.tsv --out DIR --estimators all
-
-# only the two kinship-DP estimators, under an explicit 16 GiB limit
+# only the two coancestry estimators, under an explicit 16 GiB limit
 python pedigree_summary.py effective-size --in PED.tsv --out DIR \
     --estimators ne_coancestry,ne_group_coancestry --max-memory 16G
 ```
 
-The six default estimators run first and the kinship-DP pair second. If
-the DP crosses the memory limit, `effective_size.yaml` still holds the
-six finished values. The two stopped estimators report
+If the run crosses the memory limit, `effective_size.yaml` is still
+written: the estimators that were running report
 `{ne: null, reason: memory_limit, rss_gib, limit_gib}`, and the command
 exits 3.
 

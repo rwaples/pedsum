@@ -2,6 +2,8 @@
 
 Status: accepted (2026-10-02). Ships in pedsum 0.15.0. Builds on [ADR 0001](0001-collaborator-cli-redesign.md)'s hard-break precedent.
 
+Revised 2026-10-03, before 0.15.0 shipped: pedigree-graph 0.12.1 took the kinship DP out of Ne_C and Ne_GC (pedigree-graph#38), so §1's default became all eight and §4's two steps became one. The Context below is why this ADR exists and stays as written; earlier wording of §1 and §4 is in git history.
+
 ## Context
 
 On the 783,029-row horse pedigree, `summarize` ran for 30 minutes and was then OOM-killed in the Ne step. It wrote nothing. Ne_GC grew past 22 GB, and the kernel's global OOM kill also took down the terminal that launched pedsum. Two estimators, Ne_C and Ne_GC, run pedigree-graph's kinship DP. Its peak depends on how long ancestors stay live, so it can't be predicted from N, and the native call can't be interrupted part-way through. The other six estimators take under a second on the same pedigree. Every other `summarize` phase ran within 1.1 GB.
@@ -10,7 +12,7 @@ On the 783,029-row horse pedigree, `summarize` ran for 30 minutes and was then O
 
 1. **`pedsum effective-size` is the only command that computes Ne.** `summarize` no longer computes any Ne, and `summary.yaml` loses its `popgen` category.
    - The new command writes one `effective_size.yaml` holding scalars and arrays together.
-   - `--estimators NAME[,NAME...]` or `--estimators all` picks the estimators. The default is the six that don't run the kinship DP, so Ne_C and Ne_GC stay opt-in (DESIGN.md "opt-outs vs auto-tiering").
+   - `--estimators NAME[,NAME...]` or `--estimators all` picks the estimators. The default is all eight: on pedigree-graph 0.12.1 they take 1.11 s on the horse pedigree, and the whole command peaks at 394 MiB.
    - All eight keys are always emitted. An unselected estimator reports `reason: not_requested`.
    - The command is named for the glossary term. A bare `ne` is forbidden by CONTEXT.md.
 2. **The removed `summarize` flags fail loudly.** `--effective-size`, `--no-effective-size` and `--ne-coancestry` exit 2 with a message naming `pedsum effective-size`. There is no deprecation release, per ADR 0001.
@@ -20,13 +22,11 @@ On the 783,029-row horse pedigree, `summarize` ran for 30 minutes and was then O
    - When the limit is crossed, pedsum logs the running phase and its RSS, then exits 3.
    - This is protection, not a guarantee. Native allocation continues between samples and while the watchdog writes partial output, so a fast enough allocation can still reach the kernel OOM killer. The 20% margin of the default limit is what absorbs that overshoot.
    - The limit is a safety net. It never changes a result, so it is not the size-tiered behaviour that ADR 0001 rejected.
-4. **A limit stop in `effective-size` keeps the finished estimators.**
-   - The six non-DP estimators run first, as one step, so their results are held before the DP starts.
-   - Ne_C and Ne_GC follow as a second step. The DP itself is cached on the graph, so the split is for safe partial output, not for sharing the DP.
-   - Each step contributes only the estimators it requested. A step's `not_requested` placeholders never overwrite another step's results.
+4. **A limit stop in `effective-size` still writes its output.**
+   - The requested estimators run as one step, and their results replace the placeholders in one assignment, so a stop sees all of them or none.
    - Exactly one writer publishes `effective_size.yaml`, through a lock and an atomic replace. Whichever thread takes the lock first decides the outcome:
      - If the main thread wins, it publishes `status: complete` and disarms the watchdog.
-     - If the watchdog wins, it publishes `status: stopped_memory_limit` and exits 3. The finished estimators keep their values; the in-flight step's estimators report `reason: memory_limit`.
+     - If the watchdog wins, it publishes `status: stopped_memory_limit` and exits 3. The requested estimators report `reason: memory_limit`.
      - A reader never sees a truncated file.
 
 ## Considered options

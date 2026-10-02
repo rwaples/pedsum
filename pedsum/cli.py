@@ -18,7 +18,6 @@ from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
     _F_KERNEL_WARN_THRESHOLD,
-    KINSHIP_DP_ESTIMATORS,
     SEX_FEMALE,
     SEX_MALE,
     SEX_UNKNOWN,
@@ -83,10 +82,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from pedsum.validate import ValidationContext
-
-DEFAULT_EFFECTIVE_SIZE_ESTIMATORS = tuple(
-    name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name not in KINSHIP_DP_ESTIMATORS
-)
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -655,10 +650,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="NAME[,NAME...]",
         help="estimators to run, as a comma list or repeated flags; 'all' "
         f"selects every one. Choices: {', '.join(ALL_EFFECTIVE_SIZE_ESTIMATORS)}. "
-        f"Default: all but {' and '.join(KINSHIP_DP_ESTIMATORS)}, whose kinship "
-        "DP can need tens of GB on pedigrees past about 500K rows. Every "
-        "estimator appears in the output; one not selected reports reason: "
-        "not_requested.",
+        "Default: all. Every estimator appears in the output; one not selected "
+        "reports reason: not_requested.",
     )
     _add_format_args(p_es)
     _add_threads_args(p_es)
@@ -676,7 +669,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "effective-size":
-        selected = set(args.estimators or DEFAULT_EFFECTIVE_SIZE_ESTIMATORS)
+        selected = set(args.estimators or ALL_EFFECTIVE_SIZE_ESTIMATORS)
         args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
     return args
 
@@ -993,8 +986,8 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
 def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:
     """``effective-size``: run the selected Ne estimators and write ``effective_size.yaml``.
 
-    The cheap estimators run first, then the kinship-DP pair, so a stop at the
-    memory limit during the DP still publishes the finished ones (ADR 0004 §4).
+    A stop at the memory limit still publishes ``effective_size.yaml``, with
+    the estimators that were running marked ``memory_limit`` (ADR 0004 §4).
     """
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
@@ -1047,19 +1040,9 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
     n_total = len(df)
-    results = compute_effective_size(pg, ())
-    steps = (
-        [name for name in requested if name not in KINSHIP_DP_ESTIMATORS],
-        [name for name in requested if name in KINSHIP_DP_ESTIMATORS],
-    )
-    for names in steps:
-        if not names:
-            continue
-        with _timed(f"effective size ({', '.join(names)})"):
-            out = compute_effective_size(pg, names)
-        # Only this step's names: out also holds not_requested placeholders for
-        # the other step. One update keeps a breach callback from seeing half a step.
-        results.update({name: out[name] for name in names})
+    with _timed(f"effective size ({', '.join(requested)})"):
+        # One rebinding, so the breach callback sees every result or none.
+        results = compute_effective_size(pg, requested)
 
     with watchdog.disarm() as owns_output:
         if owns_output:

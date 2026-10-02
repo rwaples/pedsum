@@ -14,10 +14,9 @@ from conftest import EXAMPLE, REPO, run_pedsum, write_ped, write_stripped_pedigr
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum import cli
-from pedsum.base import KINSHIP_DP_ESTIMATORS
 from pedsum.memory import EXIT_MEMORY_LIMIT, GiB, MemoryWatchdog
 
-DEFAULT_SIX = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name not in KINSHIP_DP_ESTIMATORS]
+COANCESTRY = ("ne_coancestry", "ne_group_coancestry")
 
 
 def _run_es(tmp_path, *extra, pedigree=EXAMPLE):
@@ -38,35 +37,27 @@ def _reasons(data: dict) -> dict:
     return {name: record.get("reason") for name, record in data["effective_size"].items()}
 
 
-def test_default_runs_the_six_non_dp_estimators(tmp_path):
-    """The default selection fills six estimators and leaves the kinship-DP pair not_requested."""
+def test_default_runs_all_eight_estimators(tmp_path):
+    """The default selection fills all eight estimators."""
     res, path = _run_es(tmp_path)
     assert res.returncode == 0, res.stderr
     data = _load(path)
     assert data["status"] == "complete"
-    assert data["estimators_requested"] == DEFAULT_SIX
+    assert data["estimators_requested"] == list(ALL_EFFECTIVE_SIZE_ESTIMATORS)
     assert list(data["effective_size"]) == list(ALL_EFFECTIVE_SIZE_ESTIMATORS)
-    assert set(_values(data)) == set(DEFAULT_SIX)
-    for name in KINSHIP_DP_ESTIMATORS:
-        assert data["effective_size"][name]["ne"] is None
-        assert data["effective_size"][name]["reason"] == "not_requested"
+    assert set(_values(data)) == set(ALL_EFFECTIVE_SIZE_ESTIMATORS)
     assert data["n_total"] == 200
     assert {"input", "command", "version", "generated_at"} <= set(data)
 
 
-def test_all_keeps_step_one_values_and_adds_the_dp_pair(tmp_path):
-    """Merge rule: the six step-1 values under ``all`` equal the default run's, and Ne_C / Ne_GC are floats."""
+def test_all_is_the_default(tmp_path):
+    """``--estimators all`` writes the same records as the default run."""
     res, path = _run_es(tmp_path / "default")
     assert res.returncode == 0, res.stderr
     default = _load(path)["effective_size"]
     res, path = _run_es(tmp_path / "all", "--estimators", "all")
     assert res.returncode == 0, res.stderr
-    data = _load(path)
-    assert data["estimators_requested"] == list(ALL_EFFECTIVE_SIZE_ESTIMATORS)
-    for name in DEFAULT_SIX:
-        assert data["effective_size"][name] == default[name], name
-    for name in KINSHIP_DP_ESTIMATORS:
-        assert isinstance(data["effective_size"][name]["ne"], float), name
+    assert _load(path)["effective_size"] == default
 
 
 def test_single_named_estimator(tmp_path):
@@ -87,14 +78,16 @@ def test_repeated_and_comma_flags_extend(tmp_path):
     assert _load(path)["estimators_requested"] == ["ne_inbreeding", "ne_coancestry", "ne_sex_ratio"]
 
 
-def test_dp_only_selection(tmp_path):
-    """Only the DP pair: two values, six not_requested, status complete."""
-    res, path = _run_es(tmp_path, "--estimators", "ne_coancestry,ne_group_coancestry")
+def test_coancestry_pair_selection(tmp_path):
+    """Only the coancestry pair: two values, six not_requested, status complete."""
+    res, path = _run_es(tmp_path, "--estimators", ",".join(COANCESTRY))
     assert res.returncode == 0, res.stderr
     data = _load(path)
     assert data["status"] == "complete"
-    assert set(_values(data)) == set(KINSHIP_DP_ESTIMATORS)
-    assert all(_reasons(data)[name] == "not_requested" for name in DEFAULT_SIX)
+    assert set(_values(data)) == set(COANCESTRY)
+    assert all(
+        _reasons(data)[name] == "not_requested" for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name not in COANCESTRY
+    )
 
 
 @pytest.mark.parametrize("value", ["ne", "ne_inbreeding,bogus", "all,bogus"])
@@ -182,13 +175,12 @@ from pedsum.memory import read_rss_bytes
 
 real = cli.compute_effective_size
 
-def dp_allocates(pg, names):
-    if any(name in cli.KINSHIP_DP_ESTIMATORS for name in names):
-        block = np.ones(600 * 2**20, dtype=np.uint8)
-        time.sleep(30)
+def estimators_allocate(pg, names):
+    block = np.ones(600 * 2**20, dtype=np.uint8)
+    time.sleep(30)
     return real(pg, names)
 
-cli.compute_effective_size = dp_allocates
+cli.compute_effective_size = estimators_allocate
 limit = read_rss_bytes() + 300 * 2**20
 sys.exit(cli.main([*sys.argv[1:], "--max-memory", str(limit)]))
 """
@@ -208,19 +200,18 @@ def _breach_in_subprocess(tmp_path, *estimators):
     return res, out_dir / "effective_size.yaml"
 
 
-def test_breach_in_dp_step_keeps_the_six(tmp_path):
-    """A stop during the DP step publishes the six finished values and marks the DP pair memory_limit."""
+def test_breach_while_estimating_marks_every_requested_estimator(tmp_path):
+    """A stop in the estimator step publishes every requested estimator as memory_limit."""
     res, path = _breach_in_subprocess(tmp_path, "all")
     assert res.returncode == EXIT_MEMORY_LIMIT, res.stderr
-    assert "effective size (ne_coancestry, ne_group_coancestry) used" in res.stderr
+    assert f"effective size ({', '.join(ALL_EFFECTIVE_SIZE_ESTIMATORS)}) used" in res.stderr
     data = _load(path)
     assert data["status"] == "stopped_memory_limit"
-    for name in KINSHIP_DP_ESTIMATORS:
+    for name in ALL_EFFECTIVE_SIZE_ESTIMATORS:
         record = data["effective_size"][name]
         assert record["ne"] is None
         assert record["reason"] == "memory_limit"
         assert record["rss_gib"] > record["limit_gib"]
-    assert set(_values(data)) == set(DEFAULT_SIX)
     assert not [p for p in path.parent.iterdir() if ".partial-" in p.name]
 
 
@@ -275,9 +266,7 @@ def test_breach_while_loading_replaces_an_earlier_complete_file(tmp_path):
     assert data["status"] == "stopped_memory_limit"
     assert data["n_total"] is None
     assert _values(data) == {}
-    reasons = _reasons(data)
-    assert all(reasons[name] == "memory_limit" for name in DEFAULT_SIX)
-    assert all(reasons[name] == "not_requested" for name in KINSHIP_DP_ESTIMATORS)
+    assert set(_reasons(data).values()) == {"memory_limit"}
 
 
 def _args(tmp_path, *extra):
@@ -338,21 +327,20 @@ def test_breach_before_final_publication_wins(tmp_path, monkeypatch):
 
     real_compute = cli.compute_effective_size
 
-    def dp_waits_for_breach(pg, names):
+    def compute_waits_for_breach(pg, names):
         out = real_compute(pg, names)
-        if "ne_coancestry" in names:
-            rss[0] = 2 * GiB
-            assert exited.wait(timeout=5)
+        rss[0] = 2 * GiB
+        assert exited.wait(timeout=5)
         return out
 
-    monkeypatch.setattr(cli, "compute_effective_size", dp_waits_for_breach)
+    monkeypatch.setattr(cli, "compute_effective_size", compute_waits_for_breach)
     args = _args(tmp_path, "--estimators", "all")
     with MemoryWatchdog(GiB, poll_s=0.01, rss_reader=lambda: rss[0], exit_fn=record_exit) as wd:
         assert cli._run_effective_size(args, "cmd", wd) == 0
     assert exits == [EXIT_MEMORY_LIMIT]
     data = _load(args.out_dir / "effective_size.yaml")
     assert data["status"] == "stopped_memory_limit"
-    assert {_reasons(data)[name] for name in KINSHIP_DP_ESTIMATORS} == {"memory_limit"}
+    assert set(_reasons(data).values()) == {"memory_limit"}
 
 
 @pytest.mark.parametrize("flag", ["--effective-size", "--no-effective-size", "--ne-coancestry"])
