@@ -72,14 +72,20 @@ python benchmarks/profile_memory.py --label narrow/matrix --repeats 3 --warmup 1
        --birth-year-col birth_year --per-individual-pairs
 ```
 
-Diagnostic rows that isolate pair-count RSS (later F/Ne peaks can otherwise
+Diagnostic rows that isolate pair-count RSS (a later F peak can otherwise
 hide whether releasing pair matrices lowered the overall peak):
 
 ```bash
-python benchmarks/profile_memory.py --label narrow/streaming/no-fne --repeats 2 --warmup 1 \
+python benchmarks/profile_memory.py --label narrow/streaming/no-f --repeats 2 --warmup 1 \
     -- summarize --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out --birth-year-col birth_year \
-       --no-inbreeding --no-effective-size
+       --no-inbreeding
 ```
+
+Since 0.15.0 `summarize` computes no Ne, so profiles have no
+effective-size phase, and results recorded before then (the
+`effective_size` key in `benchmarks/results/*.json`) are not comparable
+on total peak or runtime. The profiler drives `summarize` only;
+`effective-size` has no profile.
 
 For expensive ~1M-row cells use `--repeats 2`; for smaller inputs `--repeats 3`.
 Pass `--baseline <prior.json>` to flag (not block) >20% runtime regressions.

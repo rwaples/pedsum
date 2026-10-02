@@ -6,8 +6,9 @@ A Python command line tool for summarizing and validating pedigrees.
 Reports the size, structure, sibship-size distribution, relationship-pair
 counts (up to degree 5), mating-pair structure, founder contributions,
 per-individual reproduction and genealogy aggregates, depth- and
-sex-stratified summaries, and per-individual statistics. Output
-terminology follows [CONTEXT.md](CONTEXT.md).
+sex-stratified summaries, and per-individual statistics, and estimates
+effective population size eight ways. Output terminology follows
+[CONTEXT.md](CONTEXT.md).
 
 Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package for relationship-pair detection.
 
@@ -33,6 +34,7 @@ conda activate pedsum
 # run like this:
 python pedigree_summary.py validate --in ...
 python pedigree_summary.py summarize --in ...
+python pedigree_summary.py effective-size --in ...
 python pedigree_summary.py epimight-input --in ...
 ```
 
@@ -47,13 +49,15 @@ A 200-individual, 5-generation example pedigree
 ```bash
 python pedigree_summary.py validate      --in example_pedigree.tsv --out /tmp/demo-validate
 python pedigree_summary.py summarize     --in example_pedigree.tsv --out /tmp/demo
+python pedigree_summary.py effective-size --in example_pedigree.tsv --out /tmp/demo-ne --birth-year-col birth_year
 python pedigree_summary.py epimight-input --in example_pedigree.tsv --out /tmp/demo-epimight --pairs
 ```
 
 `--out` is a directory (created if needed). The bare `summarize` writes
 three files inside: `summary.yaml`, `summary.extra.yaml`, and
-`annotated.tsv.gz`. Estimators of inbreeding (F) and Effective population size (Ne) are computed by default. 
-Pass `--no-inbreeding` or `--no-effective-size` to skip them.
+`annotated.tsv.gz`. It computes inbreeding (F) by default; pass
+`--no-inbreeding` to skip it. Effective population size (Ne) has its own
+command, `effective-size`, which writes `effective_size.yaml`.
 
 The example has columns `id, sex, mother, father, generation,
 liability, birth_year`. Only the first four are required; the rest are
@@ -138,18 +142,23 @@ Flags:
 
 - `--inbreeding` / `--no-inbreeding` — compute per-individual `F` and
   the inbreeding summary section. On by default. F is the single most
-  expensive computation in pedsum (~minutes on 10M-row pedigrees);
-  when `--effective-size` is also on, F is shared with the Ne pipeline
-  and the cost is paid once.
-- `--no-effective-size` — skip six pedigree-based effective population size estimators (`Ne_I`, `Ne_V`,
-  `Ne_sr`, `Ne_iΔF`, `Ne_LTC`, `Ne_H`).  The other two
-  (`Ne_C`, coancestry rate, and `Ne_GC`, group coancestry) are opt-in via
-  `--ne-coancestry`.
-- `--ne-coancestry` — additionally compute `Ne_C` and `Ne_GC`. Off by
-  default — their shared kinship DP can blow up RAM on pedigrees larger
-  than ~500K rows (`Ne_GC` alone passed 12 GiB on a 783K-row horse
-  pedigree). Unselected, each still occupies its slot in the output with a
-  null `ne` and `reason: not_requested`.
+  expensive computation in pedsum (~minutes on 10M-row pedigrees).
+- `--max-degree N` — count relationship pairs up to degree `N` (1 to 5,
+  default 5). Codes past `N`, and their `by_degree` entries, are null:
+  not counted, which is different from zero. `structure.max_degree_enumerated`
+  records `N`. Cost climbs steeply past degree 2. On the 783,029-row horse
+  pedigree at `--threads 10`, `relationship_counts` took:
+
+  | `--max-degree` | wall time |
+  |---:|---:|
+  | 1 | 0.61 s |
+  | 2 | 1.36 s |
+  | 3 | 221 s |
+  | 4 | 632 s |
+  | 5 | 1,833 s |
+
+  Cannot be combined with `--per-individual-burden`, which always counts
+  degrees 1 to 5.
 - `--per-individual-burden` (`--per-individual-pairs` also accepted) — opt into the per-individual
   relationship-burden summary (`relationship_summary.relatives_total`,
   `.relatives_by_degree`, closest-degree distribution). Both paths run the
@@ -185,10 +194,9 @@ Flags:
   parent (orphan), or because it is used as BOTH mother and father
   with unknown sex (role-ambiguous). Such rows are auto-fixed to
   `sex=-1` in the validate-fixed output. Without this flag, either
-  case hard-blocks. Incompatible with `--effective-size` /
-  `--inbreeding` in `summarize` (sex-stratified estimators require
-  resolved sex; pass `--no-effective-size` and/or `--no-inbreeding`
-  if you want to keep `--allow-missing-sex`).
+  case hard-blocks. `summarize` runs normally on such rows, F included.
+  `effective-size` refuses them, because `ne_sex_ratio` and the
+  sex-decomposed `ne_variance_family_size` need every sex resolved.
 - `--no-override-asserted-sex` — disable the default behavior of
   overriding asserted sex when topology unambiguously implies the
   opposite (asserted M used only as mother → F; asserted F used only
@@ -364,6 +372,73 @@ inference and distributions nulled; counts of one through four are
 nulled; `by_group_size` rows get small-cell redaction; permutation
 count, seed and backend may remain.
 
+### Estimate effective population size
+
+```bash
+python pedigree_summary.py effective-size --in PED.tsv --out DIR [--estimators NAME[,NAME...]]
+```
+
+`--out DIR` is a directory (created if needed). The command writes one
+file, `DIR/effective_size.yaml`. It holds the run metadata, a `status`
+(`complete`, or `stopped_memory_limit`; see [Memory limit](#memory-limit)),
+the `estimators_requested`, and one record per estimator under
+`effective_size:` with its scalar `ne` and its per-depth arrays.
+
+pedsum offers eight pedigree-based estimators. They measure different
+things and are not interchangeable; [CONTEXT.md](CONTEXT.md) explains why
+every name carries its estimator.
+
+| Estimator | Short name | Runs by default |
+|---|---|---|
+| `ne_inbreeding` | Ne_I | yes |
+| `ne_variance_family_size` | Ne_V | yes |
+| `ne_sex_ratio` | Ne_sr | yes |
+| `ne_individual_delta_f` | Ne_iΔF | yes |
+| `ne_long_term_contributions` | Ne_LTC | yes |
+| `ne_hill_overlapping` | Ne_H | yes |
+| `ne_coancestry` | Ne_C | no |
+| `ne_group_coancestry` | Ne_GC | no |
+
+All eight records are always written. An estimator you did not select
+reports `{ne: null, reason: not_requested}`; one that cannot run for want
+of metadata reports its own `reason`, for example `missing_metadata`.
+
+Flags:
+
+- `--estimators NAME[,NAME...]` — the estimators to run, as a comma list
+  or repeated flags; `all` selects all eight. The default is the six
+  that finish in under a second on the horse pedigree. `ne_coancestry`
+  and `ne_group_coancestry` share pedigree-graph's kinship DP, whose
+  memory depends on how long ancestors stay live rather than on N:
+  `ne_group_coancestry` alone passed 12 GiB within 100 s on the
+  783,029-row horse pedigree. Name them only on pedigrees you know fit.
+- `--birth-year-col NAME` — gives `ne_hill_overlapping` its cohort
+  window and sex-decomposed `Ne_m` / `Ne_f`. Without it,
+  `ne_hill_overlapping` collapses to `ne_variance_family_size`
+  (`collapses_to_ne_v: true`).
+- The column, `--sep`, `--sex-encoding`, `--threads` and `--max-memory`
+  flags work as in `summarize`.
+
+Examples:
+
+```bash
+# the six fast estimators, with Hill's cohort window
+python pedigree_summary.py effective-size --in PED.tsv --out DIR --birth-year-col birth_year
+
+# all eight, on a pedigree small enough for the kinship DP
+python pedigree_summary.py effective-size --in PED.tsv --out DIR --estimators all
+
+# only the two kinship-DP estimators, under an explicit 16 GiB limit
+python pedigree_summary.py effective-size --in PED.tsv --out DIR \
+    --estimators ne_coancestry,ne_group_coancestry --max-memory 16G
+```
+
+The six default estimators run first and the kinship-DP pair second. If
+the DP crosses the memory limit, `effective_size.yaml` still holds the
+six finished values. The two stopped estimators report
+`{ne: null, reason: memory_limit, rss_gib, limit_gib}`, and the command
+exits 3.
+
 ### Emit EPIMIGHT input
 
 ```bash
@@ -455,7 +530,7 @@ the other a valid ID) are accepted.
 
 | Column | Recognised when | Effect |
 |---|---|---|
-| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). Threads into the Hill overlapping-generation Ne estimator — without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year >= parent.birth_year` on every known edge). |
+| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year >= parent.birth_year` on every known edge). |
 | *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
 
 ### Row order
@@ -540,19 +615,55 @@ pl.DataFrame({"id": list(lut), "row": list(lut.values())}).write_csv("id_lookup.
 
 ## Large pedigrees
 
-pedsum's defaults include the most expensive computations in the tool
-— per-individual inbreeding (F) and the six cheap effective-size
-estimators. For very large pedigrees, the recommended first pass skips
-both and produces size + structure only:
+Two `summarize` defaults dominate the cost on large pedigrees: counting
+relationship pairs through degree 5, and per-individual inbreeding (F).
+For a first pass, stop pair counting at degree 2 and skip F:
 
 ```bash
 python pedigree_summary.py summarize \
-    --in cohort.tsv --out cohort/ \
-    --no-inbreeding --no-effective-size
+    --in cohort.tsv --out cohort/ --threads 10 \
+    --max-degree 2 --no-inbreeding
 ```
 
-Once that pass succeeds, re-run without `--no-inbreeding
---no-effective-size` to add F and the cheap Ne estimators.
+On the 783,029-row horse pedigree, degree-2 counting takes 1.4 s where
+degree 5 takes about 30 minutes (see `--max-degree`). Once the first
+pass succeeds, raise `--max-degree` and drop `--no-inbreeding` as time
+allows. `effective-size` is a separate run; its default six estimators
+take under a second on the same pedigree.
+
+## Memory limit
+
+Every command runs under a best-effort memory limit. A background thread
+reads pedsum's resident memory about once a second. When it passes the
+limit, pedsum logs the step that was running and how much memory it
+held, then exits with code 3.
+
+- The default limit is 80% of the memory available at start: the
+  smallest of the host's `MemAvailable` and the headroom (`memory.max`
+  minus `memory.current`) of pedsum's cgroup and every enclosing cgroup.
+  pedsum logs the limit it chose when it starts.
+- `--max-memory SIZE` sets the limit, e.g. `--max-memory 12G` or
+  `--max-memory 500M`. `--max-memory 0` turns it off.
+- The limit narrows the window for the kernel's OOM killer; it does not
+  close it. Memory is sampled once a second, so a fast enough allocation
+  can still cross it before pedsum notices. To make a limit binding, run
+  pedsum in a cgroup, e.g.
+  `systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 python pedigree_summary.py ...`.
+- Every output file is written to a hidden `.<name>.partial-<pid>`
+  beside it and renamed into place when complete, so a stop never leaves
+  a truncated output. A stop mid-write can leave the `.partial-<pid>`
+  file behind; delete it.
+- `effective-size` keeps the estimators that finished before the stop
+  (see above). The other commands write nothing more after a stop.
+
+Exit codes:
+
+| Code | Meaning |
+|---:|---|
+| 0 | success |
+| 1 | `validate` reported findings or `--drop-offending` removed rows; another command's input failed validation; `effective-size` refused unresolved sex; or `--out` names an existing file |
+| 2 | bad arguments, an unreadable input file, or a `validate` hard-block |
+| 3 | stopped at the memory limit |
 
 ## Troubleshooting
 
@@ -614,17 +725,15 @@ id	sex	mother	father
 | `individuals.genealogy` | per-individual `descendant_paths` summary; `distinct_ancestors` summary when `--inbreeding` is set |
 | `founders.founder_contribution` | Founders with descendants + `descendant_paths_per_founder` distribution + `effective_founders_by_descendant_paths` |
 | `founders.founder_summary` | active Founders and effective-Founder contribution by depth, `founder_ancestors` per-depth distribution, bottleneck minima (may be skipped on very large pedigrees) |
-| `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only) |
+| `relatedness.relationship_pairs` | 23 named Relationship codes through Degree 5 plus `PO = MO + FO`, with `by_degree[0..5]` rollup (TSV-only); codes past `--max-degree` are null |
 | `relatedness.relationship_summary` | unique related/unrelated pair counts, related-pair density, closest-degree and relatives-by-degree distributions |
 | `relatedness.inbreeding` | distribution of F (only with `--inbreeding`) |
-| `popgen.effective_size` | per-estimator dict for the eight Ne estimators (`ne_inbreeding`, `ne_coancestry`, `ne_variance_family_size`, `ne_sex_ratio`, `ne_individual_delta_f`, `ne_long_term_contributions`, `ne_hill_overlapping`, `ne_group_coancestry`); `ne_coancestry` and `ne_group_coancestry` are null without `--ne-coancestry` |
 | `strata.sex_summary` | per-sex sub-aggregates (n, n_founders, n_reproductive, n_terminal, …) |
 | `strata.depth_summary` | per-depth sub-aggregates (one row per depth) |
 | `individual.distributions` | mean/std/quartiles/`nz` for each per-individual numeric column |
 
-Floats are rounded to 4 decimal places. With `--tsv`, Ne scalar
-values also appear in `summary.pedigree.tsv` under
-`effective_size_scalars`; per-depth vectors stay YAML-only.
+Floats are rounded to 4 decimal places. Effective population size is not
+in `summary.yaml`; `effective-size` writes it to `effective_size.yaml`.
 
 ## Logging
 

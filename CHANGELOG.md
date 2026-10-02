@@ -2,15 +2,61 @@
 
 ## Unreleased
 
+Breaking; ships as 0.15.0. Effective population size leaves `summarize`
+for its own command, and every command runs under a memory limit
+([ADR 0004](docs/adr/0004-effective-size-subcommand-and-memory-limit.md)).
+On the 783,029-row horse pedigree, `summarize` ran 30 minutes and was then
+OOM-killed in the Ne step, writing nothing and taking the launching
+terminal with it. `Ne_GC` alone passed 12 GiB within 100 s and the
+uncapped run reached 22 GB, while the other six estimators finished in
+under a second at 382 MB.
+
+### Removed
+
+- **`summarize` no longer computes Ne.** `summary.yaml` and
+  `summary.extra.yaml` lose the `popgen` category, and
+  `summary.pedigree.tsv` loses its `effective_size_scalars` rows.
+- **`--effective-size`, `--no-effective-size` and `--ne-coancestry` exit
+  2** on `summarize`, with a message naming `pedsum effective-size`. There
+  is no deprecation release, as in ADR 0001.
+
+### Added
+
+- **`pedsum effective-size`** writes `effective_size.yaml`: the summary's
+  metadata, `status`, `estimators_requested`, and all eight estimator
+  records with their scalars and per-depth arrays in one file.
+  `--estimators NAME[,NAME...]` or `--estimators all` picks the
+  estimators; the default is the six that don't run the kinship DP, so
+  `ne_coancestry` and `ne_group_coancestry` stay opt-in. An unselected
+  estimator reports `{ne: null, reason: not_requested}`; every record now
+  has an `ne` key. `--birth-year-col` feeds `ne_hill_overlapping` here.
+- **`--max-memory SIZE` and exit code 3 on every command.** A thread
+  samples resident memory once a second and stops pedsum with exit 3 past
+  the limit, logging the step that was running. The default limit is 80%
+  of the smallest of `MemAvailable` and every enclosing cgroup's headroom;
+  `--max-memory 0` turns it off. The limit is best effort: a fast enough
+  allocation can still reach the kernel's OOM killer. In
+  `effective-size`, a stop during the kinship DP keeps the six finished
+  estimators in `effective_size.yaml` with `status: stopped_memory_limit`,
+  and the stopped ones report `reason: memory_limit`.
+- **`summarize --max-degree N`** (1 to 5, default 5) stops pair counting
+  at degree `N`. On the horse pedigree at 10 threads, degree 2 took 1.36 s
+  and degree 5 took 1,833 s. Codes past `N` and their `by_degree` rollup
+  entries are null, and `structure.max_degree_enumerated` records `N`.
+  With `--per-individual-burden`, a `--max-degree` below 5 exits 2.
+
 ### Changed
 
-- **`Ne_GC` is opt-in behind `--ne-coancestry`, with `Ne_C`.** Both run
-  pedigree-graph's kinship DP. On the 783,029-row horse pedigree, `Ne_GC`
-  passed 12 GiB within 100 s and an uncapped default `summarize` was
-  OOM-killed at 22 GB; the other six estimators finish in under a second
-  at 382 MB. Without the flag, `ne_group_coancestry` is now
-  `{ne: null, reason: not_requested}` in `summary.yaml` and absent from
-  `summary.extra.yaml`, like `ne_coancestry`.
+- **Every output is published atomically.** Writers fill a hidden
+  `.<name>.partial-<pid>` beside the target and rename it into place, so
+  an interrupted run never leaves a truncated file. A stop mid-write can
+  leave the `.partial-<pid>` file behind.
+- **`summarize --allow-missing-sex` no longer needs `--no-inbreeding`.**
+  F never read sex; the refusal moved to `effective-size`, where
+  `ne_sex_ratio` and the sex-decomposed `ne_variance_family_size` need it.
+- **`summarize --birth-year-col` only adds validation.** The column no
+  longer feeds any `summarize` output beyond what `annotated.tsv.gz`
+  already copied from the input.
 
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 

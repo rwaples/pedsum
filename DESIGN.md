@@ -21,8 +21,9 @@ from those above it):
 | `pedsum/sections.py` | per-section summary computations |
 | `pedsum/sex_concordance.py` | Offspring Sex Concordance: group projection, exact conditional moments, Holm, permutation samplers |
 | `pedsum/schema.py` | categorised YAML schema + slim/extra split machinery |
-| `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers |
-| `pedsum/cli.py` | argparse + `summarize` / `validate` runners + `main` |
+| `pedsum/memory.py` | the best-effort memory limit: `MemoryWatchdog`, default-limit discovery, `--max-memory` parsing |
+| `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers, `atomic_output` |
+| `pedsum/cli.py` | argparse, the `summarize` / `validate` / `effective-size` / `epimight-input` runners, `main` |
 
 ## CLI design rationale
 
@@ -35,6 +36,9 @@ Output schema follows [CONTEXT.md](CONTEXT.md) as of 0.10. The glossary fixes se
 ## Flag and behavior version history
 
 See [CHANGELOG.md](CHANGELOG.md). Notable:
+- Effective population size moves from `summarize` to `effective-size`,
+  and every command runs under a memory limit (0.15; see
+  [docs/adr/0004](docs/adr/0004-effective-size-subcommand-and-memory-limit.md)).
 - `validate --drop-offending` emits a **Reduced Pedigree** (0.11; see
   [docs/adr/0003](docs/adr/0003-drop-offending-reduction.md)). `--no-sex-check`
   now lives in the registry (`ValidationContext.no_sex_check`) so the tolerance
@@ -50,8 +54,8 @@ Pedsum uses two pair-counting paths, picked by `--per-individual-burden`
 matrix/BFS dispatch was removed). Both delegate to `pedigree-graph` and run
 its Rust row-streaming engine, so neither builds a pair list:
 
-- Default: `PedigreeGraph.relationship_counts(max_degree=5)` (`_engine`
-  reported as `rust_streaming`). The engine classifies every pair one row
+- Default: `PedigreeGraph.relationship_counts(max_degree=N)`, with `N`
+  from `--max-degree` (default 5; `_engine` reported as `rust_streaming`). The engine classifies every pair one row
   at a time, so the 23 counts are exact in O(N) memory; aggregate counts
   only.
 - `--per-individual-burden`: `PedigreeGraph.relationship_burden()` (`_engine`
@@ -87,9 +91,22 @@ its Rust row-streaming engine, so neither builds a pair list:
   the `--rels` kinds read, with `execution="memory"`, and writes one kind
   at a time: beyond the engine's pair blocks it holds one kind's frame,
   and it never sorts the whole list.
-- `--ne-coancestry` (Ne_C and Ne_GC): their kinship DP scales with the
-  cumulative ancestor set; blows up RAM above ~500K rows. Ne_GC passed
-  12 GiB on the 783K-row horse pedigree.
+- `effective-size --estimators ne_coancestry,ne_group_coancestry` (or
+  `all`): the kinship DP behind Ne_C and Ne_GC scales with the live
+  ancestor frontier, not N, and cannot be interrupted once started. Ne_GC
+  passed 12 GiB within 100 s on the 783K-row horse pedigree. Both stay out
+  of the default selection; the six default estimators take 0.35 s there.
+- `summarize --max-degree`: `relationship_counts` wall time on the horse
+  pedigree at 10 threads was 0.61 s at degree 1, 1.36 s at 2, 221 s at 3,
+  632 s at 4 and 1,833 s at 5. Codes past the cutoff are null.
+- Memory limit (ADR 0004 §3): every command runs under `MemoryWatchdog`,
+  which samples `/proc/self/statm` once a second and exits 3 past the
+  limit (default 80% of the smallest of `MemAvailable` and each enclosing
+  cgroup's headroom). It runs breach callbacks first; `effective-size`
+  uses one to publish its finished estimators. Final publication and the
+  breach share a lock through `MemoryWatchdog.disarm()`. Every writer
+  publishes through `atomic_output`, so a stop leaves at most a
+  `.<name>.partial-<pid>` file, never a truncated output.
 
 ## Upstream integration
 
@@ -102,7 +119,10 @@ library indexes its own ids densely and accepts rows in any order.
 
 ## Stance: opt-outs vs auto-tiering
 
-Size-tiered behaviors stay as opt-outs the user types
-(`--no-inbreeding`, `--no-effective-size`, `--per-individual-pairs`,
-`--ne-coancestry`), not as auto-tiered defaults. Reasoning is
-informally documented here pending a future ADR.
+Size-tiered behaviors stay as flags the user types (`--no-inbreeding`,
+`--max-degree`, `--per-individual-pairs`, `effective-size --estimators`),
+not as auto-tiered defaults. The memory limit is not one of these: it
+never changes a result, only stops a run that would otherwise be
+OOM-killed ([ADR 0004](docs/adr/0004-effective-size-subcommand-and-memory-limit.md)).
+The rest of the reasoning is informally documented here pending a future
+ADR.
