@@ -67,7 +67,6 @@ def test_auto_sniffs_whitespace_plink_style(tmp_path):
             str(pedigree),
             "--out",
             str(out),
-            "--no-effective-size",
             "--no-inbreeding",
         ]
     )

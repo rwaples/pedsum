@@ -36,7 +36,6 @@ def test_safe_attempt_summarize_outputs(tmp_path):
             str(out_dir),
             "--safe-attempt",
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr

@@ -52,7 +52,6 @@ def test_annotated_tsv_has_sex_source_column(tmp_path):
             str(out_dir),
             "--allow-missing-sex",
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr
@@ -114,7 +113,6 @@ def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
             str(out_dir),
             "--no-override-asserted-sex",
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 1, r.stderr

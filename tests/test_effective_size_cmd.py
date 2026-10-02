@@ -308,3 +308,23 @@ def test_breach_before_final_publication_wins(tmp_path, monkeypatch):
     data = _load(args.out_dir / "effective_size.yaml")
     assert data["status"] == "stopped_memory_limit"
     assert {_reasons(data)[name] for name in KINSHIP_DP_ESTIMATORS} == {"memory_limit"}
+
+
+@pytest.mark.parametrize("flag", ["--effective-size", "--no-effective-size", "--ne-coancestry"])
+def test_removed_summarize_flags_name_the_new_command(tmp_path, flag):
+    """The 0.14 Ne flags on ``summarize`` exit 2 and point at ``effective-size`` (ADR 0004 §2)."""
+    out_dir = tmp_path / "out"
+    res = run_pedsum(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), flag])
+    assert res.returncode == 2
+    assert f"{flag} was removed in 0.15.0" in res.stderr
+    assert "pedsum effective-size --in X --out Y" in res.stderr
+    assert not (out_dir / "summary.yaml").exists()
+
+
+def test_ne_threads_flag_is_gone(tmp_path):
+    """``--ne-threads`` was removed; argparse rejects it instead of silently ignoring it."""
+    out_dir = tmp_path / "out"
+    res = run_pedsum(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--ne-threads", "4"])
+    assert res.returncode != 0
+    assert "--ne-threads" in res.stderr
+    assert not (out_dir / "summary.yaml").exists()

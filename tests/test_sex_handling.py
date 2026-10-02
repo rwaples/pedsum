@@ -292,61 +292,6 @@ def test_summarize_no_validate_log_when_valid(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Hard-refuse: --allow-missing-sex + --effective-size / --inbreeding
-# ---------------------------------------------------------------------------
-
-
-def test_unknown_sex_blocks_effective_size_in_summarize(tmp_path):
-    """Summarize --allow-missing-sex --effective-size exits 1 with clear message."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},
-        ],
-    )
-    r = run_pedsum(
-        [
-            "summarize",
-            "--in",
-            str(ped),
-            "--out",
-            str(tmp_path / "s"),
-            "--allow-missing-sex",
-            "--effective-size",
-        ]
-    )
-    assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
-    assert "sex-stratified" in r.stderr.lower() or "resolved sex" in r.stderr.lower()
-
-
-def test_unknown_sex_blocks_inbreeding_in_summarize(tmp_path):
-    """Summarize --allow-missing-sex --inbreeding exits 1 with clear message."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},
-        ],
-    )
-    r = run_pedsum(
-        [
-            "summarize",
-            "--in",
-            str(ped),
-            "--out",
-            str(tmp_path / "s"),
-            "--allow-missing-sex",
-            "--inbreeding",
-        ]
-    )
-    assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
-    assert "sex-stratified" in r.stderr.lower() or "resolved sex" in r.stderr.lower()
-
-
-# ---------------------------------------------------------------------------
 # 0.9: override asserted sex when topology unambiguously implies the opposite
 # ---------------------------------------------------------------------------
 

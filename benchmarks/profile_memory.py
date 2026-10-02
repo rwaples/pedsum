@@ -156,7 +156,6 @@ def _detect_metadata(summarize_argv: list[str]) -> dict:
         "extra_cols": meta.get("extra_cols"),
         "engine": "matrix" if "--per-individual-pairs" in summarize_argv else "streaming",
         "inbreeding": "--no-inbreeding" not in summarize_argv,
-        "effective_size": "--no-effective-size" not in summarize_argv,
     }
 
 
@@ -203,7 +202,7 @@ def _print_report(label: str, meta: dict, agg: dict, flags: list[str]) -> None:
     print(
         f"input={meta['input']} rows={meta['rows']} max_depth={meta['max_depth']} "
         f"extra_cols={meta['extra_cols']} engine={meta['engine']} "
-        f"inbreeding={meta['inbreeding']} effective_size={meta['effective_size']}"
+        f"inbreeding={meta['inbreeding']}"
     )
     print(
         f"peak RSS: median {agg['peak_mib_median']:.1f} MiB "

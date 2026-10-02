@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pedsum.base import KINSHIP_DP_ESTIMATORS
-
 
 @dataclass(frozen=True)
 class SectionSpec:
@@ -90,12 +88,6 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
             SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS),
             SectionSpec("relationship_summary"),
             SectionSpec("inbreeding"),
-        ),
-    ),
-    CategorySpec(
-        "popgen",
-        (
-            SectionSpec("effective_size"),  # per-estimator special handling
         ),
     ),
     CategorySpec(
@@ -186,86 +178,6 @@ def _categorise_pedigree(flat_ped: dict) -> dict:
     return nested
 
 
-# Per-estimator routing for effective_size. Detection is name-based (not
-# value-based) so a field that *normally* carries an array still routes to
-# extra when upstream emits ``None`` (e.g. Hill arrays when birth_year is
-# absent and the estimator collapses).
-_EFFECTIVE_SIZE_ARRAY_SUFFIXES: tuple[str, ...] = (
-    "_per_gen",
-    "_per_transition",
-    "_per_cohort",
-)
-
-_EFFECTIVE_SIZE_ARRAY_NAMES: frozenset[str] = frozenset(
-    {
-        "cohort_years",
-        "age_table",
-        "v_mm",
-        "v_mf",
-        "v_fm",
-        "v_ff",
-        "cov_m",
-        "cov_f",
-        # Observed-label index arrays. pedigree-graph 0.8 indexes each Ne
-        # record by the labels it actually saw rather than a dense range, and
-        # emits them alongside the per-label values; the names here are
-        # post-``_normalise_effective_size_keys`` (depth terminology). They are
-        # as long as the arrays they index, so slim must not carry them.
-        "depths",
-        "parent_depths",
-        "transition_from",
-        "transition_to",
-    }
-)
-
-
-def _is_effective_size_array_key(key: str) -> bool:
-    """Return True if ``key`` names an array field inside an Ne estimator."""
-    if key in _EFFECTIVE_SIZE_ARRAY_NAMES:
-        return True
-    return any(key.endswith(suf) for suf in _EFFECTIVE_SIZE_ARRAY_SUFFIXES)
-
-
-def _split_effective_size(es_dict: dict) -> tuple[dict, dict]:
-    """Per-estimator scalar/array split for ``popgen.effective_size``.
-
-    For each estimator: scalars and small dicts like ``cohort_window``
-    stay in slim; per-generation / per-cohort / per-transition arrays
-    plus ``age_table`` go to extra. Routing is name-based, so
-    placeholder ``None`` values for unpopulated arrays still land in
-    extra. A kinship-DP estimator (``KINSHIP_DP_ESTIMATORS``) with
-    ``ne is None`` gets a slim-only stub and no extra entry:
-    ``{ne: null}``, plus ``reason`` when the payload
-    carries one (pedigree-graph 0.8 says *why* an estimator is absent —
-    ``not_requested`` for the default opt-out, or a genuine refusal such
-    as ``missing_metadata``).
-    """
-    slim: dict = {}
-    extra: dict = {}
-    for est_name, est_value in es_dict.items():
-        if not isinstance(est_value, dict):
-            slim[est_name] = est_value
-            continue
-        if est_name in KINSHIP_DP_ESTIMATORS and est_value.get("ne") is None:
-            stub: dict = {"ne": None}
-            if "reason" in est_value:
-                stub["reason"] = est_value["reason"]
-            slim[est_name] = stub
-            continue
-        est_slim: dict = {}
-        est_extra: dict = {}
-        for k, v in est_value.items():
-            if _is_effective_size_array_key(k):
-                est_extra[k] = v
-            else:
-                est_slim[k] = v
-        if est_slim:
-            slim[est_name] = est_slim
-        if est_extra:
-            extra[est_name] = est_extra
-    return slim, extra
-
-
 def _split_sex_summary(sex_dict: dict) -> tuple[dict, dict]:
     """Per-stratum split for ``strata.sex_summary``: scalars in slim, dists in extra."""
     slim: dict = {}
@@ -329,9 +241,6 @@ def _split_section(value, spec: SectionSpec) -> tuple[object, object | None]:
                 any_extra = True
         return slim_rows, (extra_rows if any_extra else None)
     # Dict section.
-    if spec.name == "effective_size":
-        s, e = _split_effective_size(value)
-        return s, (e if e else None)
     if spec.name == "sex_summary":
         s, e = _split_sex_summary(value)
         return s, (e if e else None)

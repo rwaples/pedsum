@@ -142,18 +142,11 @@ def _build_pedigree_data(
     relationship_summary: dict | None,
     aggregates: dict | None = None,
     sex_concordance: dict | None = None,
-) -> tuple[dict, dict]:
-    """Build the pedigree-level report payloads.
+) -> dict:
+    """Build the flat pedigree-level payload.
 
-    Returns ``(tsv_payload, yaml_extras)``.
-
-    * ``tsv_payload`` is the dict that gets flattened into
-      ``summary.pedigree.tsv`` by ``_write_long_tsv``.  It contains every
-      section that should appear as long-form (key, subkey, value) rows.
-    * ``yaml_extras`` contains deep structures (e.g. ``effective_size``)
-      that should appear in ``summary.yaml`` under ``pedigree:`` but
-      should NOT be flattened to TSV.  Currently always returned empty
-      from this helper — populated by the caller after Ne computation.
+    ``_write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
+    ``_build_summary_data`` categorises it into the two summary YAMLs.
     """
     sibship_section: dict | None
     if sibships.get("empty"):
@@ -178,7 +171,7 @@ def _build_pedigree_data(
             "max_F": float(inbreeding["max_F"]),
             "hist": {str(k): float(v) for k, v in inbreeding["hist"].items()},
         }
-    tsv_payload = {
+    return {
         "input": str(path),
         "command": cmd,
         "version": VERSION,
@@ -203,8 +196,6 @@ def _build_pedigree_data(
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
         "inbreeding": inb_section,
     }
-    yaml_extras: dict = {}
-    return tsv_payload, yaml_extras
 
 
 def _serialise_pair_entry(value: PairEntry) -> object:
@@ -483,17 +474,11 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
         _null_below(dist, ("nz",), min_cell)
 
 
-def _build_summary_data(
-    ped_data: dict,
-    ind_data: dict,
-    *,
-    yaml_extras: dict | None = None,
-) -> tuple[dict, dict]:
+def _build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:
     """Build the (slim, extra) categorised YAML payloads from flat dicts.
 
-    Pipeline: strip meta → drop ``effective_size_scalars`` (TSV-only)
-    → splice ``yaml_extras`` (carries ``effective_size``) → categorise
-    → split per ``SUMMARY_SCHEMA``. The same meta block sits at the top
+    Pipeline: strip meta → categorise → split per ``SUMMARY_SCHEMA``.
+    The same meta block sits at the top
     of both files so each is self-identifying. Per-individual
     ``distributions`` gets its own slim/extra split via
     ``_split_individual_distributions``.
@@ -503,14 +488,6 @@ def _build_summary_data(
     meta = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
 
     flat_ped = {k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS}
-    # ``effective_size_scalars`` is the TSV's separate scalar projection
-    # (built in ``_run_summarize``); it never belonged in YAML. Drop it
-    # before categorisation so it doesn't leak into the slim or extra
-    # YAML files.
-    flat_ped.pop("effective_size_scalars", None)
-    if yaml_extras:
-        flat_ped.update(yaml_extras)
-
     nested_ped = _categorise_pedigree(flat_ped)
     slim_ped, extra_ped = _split_summary(nested_ped)
 

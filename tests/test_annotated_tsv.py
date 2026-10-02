@@ -33,7 +33,6 @@ def test_annotated_tsv_realigns_to_topological_order(tmp_path):
             "--out",
             str(out_dir),
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr
@@ -66,7 +65,6 @@ def test_annotated_tsv_renames_colliding_input_column(tmp_path):
             "--out",
             str(out_dir),
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr
@@ -112,7 +110,6 @@ def test_annotated_tsv_drops_reserved_sex_source_collision(tmp_path):
             "--out",
             str(out_dir),
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr
@@ -147,7 +144,6 @@ def test_annotated_tsv_renames_component_id_collision(tmp_path):
             "--out",
             str(out_dir),
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert r.returncode == 0, r.stderr

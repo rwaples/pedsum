@@ -105,6 +105,24 @@ class _FullHelpParser(argparse.ArgumentParser):
         sys.exit(2)
 
 
+class _RemovedForEffectiveSize(argparse.Action):
+    """Exit 2 on a summarize flag that 0.15.0 removed when Ne moved to ``effective-size`` (ADR 0004)."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> NoReturn:
+        """Name the flag and the command that replaced it."""
+        parser.exit(
+            2,
+            f"{option_string} was removed in 0.15.0; effective population size moved to its own command:\n"
+            "  pedsum effective-size --in X --out Y [--estimators all]\n",
+        )
+
+
 def _add_logging_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group()
     g.add_argument(
@@ -180,8 +198,8 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         "because it is used as BOTH mother and father with unknown sex "
         "(role-ambiguous). Such rows are auto-fixed to sex=-1 in the "
         "validate-fixed output. Without this flag, either case hard-blocks. "
-        "Incompatible with --effective-size / --inbreeding in summarize "
-        "(sex-stratified estimators require resolved sex).",
+        "effective-size refuses such rows (its sex-stratified estimators "
+        "need resolved sex).",
     )
     p.add_argument(
         "--no-override-asserted-sex",
@@ -309,10 +327,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Pass --tsv to also write summary.pedigree.tsv and "
         "summary.individual.tsv.",
         birth_year_help="optional column name for birth year (integer or float "
-        "calendar year; -1/NA/blank for unknown). When set, pedsum threads "
-        "the column through to PedigreeGraph so the Hill overlapping-"
-        "generation Ne estimator (Ne_H) can build its cohort window; "
-        "without it Ne_H collapses to Ne_V.",
+        "calendar year; -1/NA/blank for unknown). When set, summarize "
+        "validates it: numeric, within --birth-year-min/--birth-year-max, and "
+        "no child born before a parent. annotated.tsv.gz copies the column "
+        "like any other input column, with or without this flag.",
     )
     p_sum.add_argument(
         "--inbreeding",
@@ -322,32 +340,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: on; pass --no-inbreeding to skip). F is the most expensive "
         "single computation in pedsum (~minutes on 10M-row pedigrees); pedsum "
         "logs an INFO line above N=1,000,000 so naive runs cannot silently "
-        "hang. When `--effective-size` is also on, F is shared with the Ne "
-        "pipeline (computed once via pedigree-graph's Meuwissen-Luo kernel). "
-        "When off, F and n_ancestors in the per-individual table are "
+        "hang. When off, F and n_ancestors in the per-individual table are "
         "zero-filled.",
     )
     p_sum.add_argument(
         "--effective-size",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="compute six pedigree-based effective population size "
-        "estimators (Ne_I, Ne_V, Ne_sr, Ne_iDeltaF, Ne_LTC, Ne_H) via "
-        "pedigree-graph's estimate_effective_sizes (default: on; pass "
-        "--no-effective-size to skip). The other two (Ne_C, coancestry rate, "
-        "and Ne_GC, group coancestry) are opt-in via `--ne-coancestry` because "
-        "their kinship DP can blow up RAM on very large pedigrees. All eight "
-        "keys are always emitted; an estimator that was not selected, or that refused for "
-        "want of metadata, reports a null `ne` and a `reason`.",
-    )
-    p_sum.add_argument(
+        "--no-effective-size",
         "--ne-coancestry",
-        action="store_true",
-        help="add `ne_coancestry` and `ne_group_coancestry` to the estimator "
-        "selection passed to pedigree-graph, alongside the other six. Off by "
-        "default because their kinship DP can blow up RAM on very large "
-        "pedigrees (>~500K rows); unselected, Ne_C and Ne_GC report a null "
-        "`ne` with reason `not_requested`. No-op without `--effective-size`.",
+        action=_RemovedForEffectiveSize,
+        nargs=0,
+        help=argparse.SUPPRESS,
     )
     p_sum.add_argument(
         "--per-individual-burden",
@@ -811,31 +813,13 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         logger.error("file error: %s", e)
         return 2
 
-    # Sex-stratified Ne / F kernel cannot honour SEX_UNKNOWN rows; refuse
-    # the combination cleanly rather than producing silently-miscounted
-    # output.
-    if (df["sex"].to_numpy() == SEX_UNKNOWN).any() and (args.effective_size or args.inbreeding):
-        logger.error(
-            "sex-stratified Ne / F kernel requires resolved sex for every row; "
-            "remove --allow-missing-sex, supply sex for the offending rows, or "
-            "pass --no-effective-size / --no-inbreeding",
-        )
-        return 1
-
-    # Flag-combination validation (must happen before any heavy work).
-    # --effective-size is on by default; the warning fires only when the user
-    # explicitly passed --no-effective-size alongside --ne-coancestry.
-    if not args.effective_size and args.ne_coancestry:
-        logger.warning(
-            "--ne-coancestry has no effect under --no-effective-size",
-        )
     if args.sex_concordance_seed is not None and args.sex_concordance_permutations == 0:
         logger.warning(
             "--sex-concordance-seed has no effect without --sex-concordance-permutations",
         )
 
     # Build the PedigreeGraph once and reuse for every primitive that
-    # needs it (relationship pairs, F, lineage counts, effective size).
+    # needs it (relationship pairs, F, lineage counts).
     # ``ped_depth`` MUST be populated from ``pg.depth`` before any summary
     # function runs — six callers read it. ``pg.depth`` is the topological
     # depth; pedigree-graph 0.8 keeps ``generation_labels`` for a supplied
@@ -906,14 +890,6 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     with _timed("descendants"):
         n_desc = pg.descendant_path_counts()
 
-    effective_size: dict | None = None
-    if args.effective_size:
-        n_estimators = 8 if args.ne_coancestry else 6
-        with _timed(f"effective size ({n_estimators} estimators)"):
-            effective_size = compute_effective_size(
-                pg, ALL_EFFECTIVE_SIZE_ESTIMATORS if args.ne_coancestry else DEFAULT_EFFECTIVE_SIZE_ESTIMATORS
-            )
-
     out_dir = args.out_dir
 
     with _timed("individual table built"):
@@ -937,7 +913,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             include_inbreeding=args.inbreeding,
         )
 
-    tsv_payload, yaml_extras = _build_pedigree_data(
+    tsv_payload = _build_pedigree_data(
         args.in_path,
         cmd,
         size,
@@ -949,11 +925,6 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         aggregates,
         sex_concordance,
     )
-    if effective_size is not None:
-        # An unavailable estimator's payload carries no ``ne`` at all, so the
-        # scalar projection reads it as null and still emits all eight rows.
-        tsv_payload["effective_size_scalars"] = {name: result.get("ne") for name, result in effective_size.items()}
-        yaml_extras["effective_size"] = effective_size
 
     ind_data = _build_individual_data(
         idf,
@@ -966,11 +937,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         _apply_safe_attempt(tsv_payload, ind_data)
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
 
-    slim_yaml, extra_yaml = _build_summary_data(
-        tsv_payload,
-        ind_data,
-        yaml_extras=yaml_extras,
-    )
+    slim_yaml, extra_yaml = _build_summary_data(tsv_payload, ind_data)
     _write_yaml(slim_yaml, out_dir / "summary.yaml")
     _write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
     logger.info(

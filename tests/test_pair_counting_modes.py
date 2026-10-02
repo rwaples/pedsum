@@ -78,15 +78,14 @@ def test_default_relationship_summary_is_stub(tmp_path):
     assert rs["n_individual_pairs"] == 200 * 199 // 2
 
 
-def test_default_works_with_inbreeding_and_effective_size(tmp_path):
-    """Streaming engine composes with ``--inbreeding`` and ``--effective-size`` (now defaults)."""
+def test_default_works_with_inbreeding(tmp_path):
+    """Streaming engine composes with the default ``--inbreeding``."""
     out_dir = tmp_path / "out"
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
     assert ped["relatedness"]["relationship_pairs"]["engine"] == "rust_streaming"
     assert ped["relatedness"]["inbreeding"] is not None
-    assert len(ped["popgen"]["effective_size"]) == 8
 
 
 # ----- per-individual burden mode ----------

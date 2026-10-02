@@ -1000,7 +1000,6 @@ def test_real_imputation_feeds_the_provenance_tally(tmp_path):
             "--out",
             str(out_dir),
             "--sex-concordance",
-            "--no-effective-size",
             "--no-inbreeding",
         ],
     )
@@ -1042,7 +1041,6 @@ def test_no_input_sex_pedigree_skips_with_its_message(tmp_path):
             str(out_dir),
             "--sex-concordance",
             "--allow-missing-sex",
-            "--no-effective-size",
             "--no-inbreeding",
         ],
     )

@@ -18,8 +18,6 @@ from pedsum.schema import (
     _SEX_SUMMARY_SLIM_KEYS,
     INDIVIDUAL_SLIM_COLS,
     INDIVIDUAL_SLIM_DIST_KEYS,
-    _is_effective_size_array_key,
-    _split_effective_size,
     _split_individual_distributions,
     _split_offspring_sex_concordance,
     _split_sex_summary,
@@ -27,25 +25,6 @@ from pedsum.schema import (
 )
 
 _SCALARS = st.integers(min_value=-1000, max_value=1000)
-
-# Effective-size key pools: names/suffixes that route to extra vs slim.
-_ES_ARRAY_KEYS = [
-    "ne_per_gen",
-    "ne_per_transition",
-    "x_per_cohort",
-    "cohort_years",
-    "age_table",
-    "v_mm",
-    "v_ff",
-    "cov_m",
-    # Observed-label index arrays (pedigree-graph 0.8), in pedsum's depth names.
-    "depths",
-    "parent_depths",
-    "transition_from",
-    "transition_to",
-]
-_ES_SCALAR_KEYS = ["ne", "se", "ci_low", "ci_high", "cohort_window", "method", "n"]
-_ES_NAMES = ["ne_inbreeding", "ne_variance_family_size", "ne_hill_overlapping"]
 
 _SEX_EXTRA_KEYS = ["offspring_count", "mate_count", "F_dist", "age"]
 
@@ -56,17 +35,6 @@ _PAIRS_EXTRA_KEYS = ["foo", "bar", "baz", "quux"]
 
 _CONCORDANCE_GROUPINGS = ["sibship", "maternal_offspring_group", "paternal_offspring_group"]
 _CONCORDANCE_EXTRA_KEYS = ["z", "p_analytical", "n_groups_total", "by_group_size", "all_resolved"]
-
-
-@st.composite
-def _es_dicts(draw: st.DrawFn) -> dict:
-    """Build an effective_size dict mapping estimators to mixed array/scalar keys."""
-    names = draw(st.lists(st.sampled_from(_ES_NAMES), unique=True, max_size=3))
-    out: dict = {}
-    for name in names:
-        keys = draw(st.lists(st.sampled_from(_ES_ARRAY_KEYS + _ES_SCALAR_KEYS), unique=True, max_size=6))
-        out[name] = {k: draw(_SCALARS) for k in keys}
-    return out
 
 
 @st.composite
@@ -103,39 +71,6 @@ def _rel_pairs(draw: st.DrawFn) -> dict:
     if draw(st.booleans()):
         out["by_degree"] = {0: draw(_SCALARS)}
     return out
-
-
-@settings(deadline=None)
-@given(es=_es_dicts())
-def test_split_effective_size_partitions_keys(es: dict) -> None:
-    """Every estimator key lands in slim or extra (disjoint), routed by array-ness."""
-    slim, extra = _split_effective_size(es)
-    array_keys = set(_ES_ARRAY_KEYS)
-    for name, value in es.items():
-        slim_keys = set(slim.get(name, {}))
-        extra_keys = set(extra.get(name, {}))
-        assert slim_keys & extra_keys == set()
-        assert slim_keys | extra_keys == set(value)
-        assert all(_is_effective_size_array_key(k) for k in extra_keys)
-        assert not any(_is_effective_size_array_key(k) for k in slim_keys)
-        # Every array-named key is routed correctly regardless of the pool above.
-        assert {k for k in value if k in array_keys} <= extra_keys
-
-
-def test_split_effective_size_ne_coancestry_none_stub() -> None:
-    """``ne_coancestry`` with ``ne`` None collapses to a slim-only ``{ne: None}`` stub."""
-    es = {"ne_coancestry": {"ne": None, "ne_per_gen": [1, 2], "se": 0.1}}
-    slim, extra = _split_effective_size(es)
-    assert slim["ne_coancestry"] == {"ne": None}
-    assert "ne_coancestry" not in extra
-
-
-def test_split_effective_size_stub_keeps_the_refusal_reason() -> None:
-    """An unavailable ``ne_coancestry`` keeps ``reason`` alongside the null ``ne``."""
-    es = {"ne_coancestry": {"ne": None, "reason": "not_requested", "code": None, "fields": {}}}
-    slim, extra = _split_effective_size(es)
-    assert slim["ne_coancestry"] == {"ne": None, "reason": "not_requested"}
-    assert "ne_coancestry" not in extra
 
 
 @settings(deadline=None)

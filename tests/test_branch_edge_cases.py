@@ -46,7 +46,6 @@ from pedsum.schema import (
     SectionSpec,
     _categorise_pedigree,
     _drop_dotted_path,
-    _split_effective_size,
     _split_individual_distributions,
     _split_section,
     _split_sex_summary,
@@ -230,20 +229,6 @@ class TestSchemaEdgeCases:
         assert "structure" not in nested
         assert "strata" not in nested
 
-    def test_split_effective_size_routes_scalars_arrays_and_ne_none_stub(self) -> None:
-        """Effective-size splitting keeps scalars slim and named arrays extra."""
-        slim, extra = _split_effective_size(
-            {
-                "scalar_estimator": 12.0,
-                "ne_coancestry": {"ne": None, "v_mf": [1, 2]},
-                "ne_demo": {"ne": 50.0, "cohort_years": [2000, 2001], "cohort_window": {"lo": 1}},
-            }
-        )
-        assert slim["scalar_estimator"] == 12.0
-        assert slim["ne_coancestry"] == {"ne": None}
-        assert slim["ne_demo"] == {"ne": 50.0, "cohort_window": {"lo": 1}}
-        assert extra["ne_demo"] == {"cohort_years": [2000, 2001]}
-
     def test_split_sex_summary_routes_non_dict_and_extra_stats(self) -> None:
         """Sex-summary splitting preserves scalar strata and routes distributions to extra."""
         slim, extra = _split_sex_summary({"unknown": 2, "female": {"n": 3, "depth": {"mean": 1.0}}})
@@ -263,12 +248,6 @@ class TestSchemaEdgeCases:
         assert extra == [None, {"mean_F": 0.1}]
 
         assert _split_section({"a": 1}, SectionSpec("plain_dict")) == ({"a": 1}, None)
-        eff_slim, eff_extra = _split_section(
-            {"est": {"ne": 1, "cohort_years": [2000]}},
-            SectionSpec("effective_size"),
-        )
-        assert eff_slim == {"est": {"ne": 1}}
-        assert eff_extra == {"est": {"cohort_years": [2000]}}
         sex_slim, sex_extra = _split_section(
             {"female": {"n": 2, "depth": {"mean": 0.0}}},
             SectionSpec("sex_summary"),
@@ -338,7 +317,7 @@ class TestReportEdgeCases:
             "largest_component_frac": 0.5,
             "next_components": [1],
         }
-        ped, extras = _build_pedigree_data(
+        ped = _build_pedigree_data(
             tmp_path / "p.tsv",
             "cmd",
             size,
@@ -350,22 +329,20 @@ class TestReportEdgeCases:
         )
         assert ped["sibship_size"] is None
         assert ped["inbreeding"] is None
-        assert extras == {}
 
         idf = pl.DataFrame({"id": [1], "n_offspring": [0]})
         ind = _build_individual_data(idf, tmp_path / "p.tsv", "cmd", include_inbreeding=False)
         assert "F" not in ind["distributions"]
         assert "n_offspring" in ind["distributions"]
 
-    def test_build_summary_data_yaml_extras_and_distribution_split(self, tmp_path) -> None:
-        """Summary data construction splices YAML extras and splits individual distributions."""
+    def test_build_summary_data_categorises_and_splits_distributions(self, tmp_path) -> None:
+        """Summary data construction categorises pedigree sections and splits individual distributions."""
         ped_data = {
             "input": str(tmp_path / "p.tsv"),
             "command": "cmd",
             "version": "test",
             "generated_at": "now",
             "n_total": 1,
-            "effective_size_scalars": {"legacy": 1},
             "relationship_pairs": {"FS": 1},
         }
         ind_data = {
@@ -376,9 +353,8 @@ class TestReportEdgeCases:
             "n_total": 1,
             "distributions": {"n_offspring": {"mean": 0.0, "median": 0.0, "max": 1}, "custom": {"mean": 2.0}},
         }
-        slim, extra = _build_summary_data(ped_data, ind_data, yaml_extras={"effective_size": {"est": 1}})
-        assert "effective_size_scalars" not in str(slim)
-        assert slim["pedigree"]["popgen"]["effective_size"] == {"est": 1}
+        slim, extra = _build_summary_data(ped_data, ind_data)
+        assert slim["pedigree"]["relatedness"]["relationship_pairs"] == {"FS": 1}
         assert "n_offspring" in slim["individual"]["distributions"]
         assert "custom" in extra["individual"]["distributions"]
 

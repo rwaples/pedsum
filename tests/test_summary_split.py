@@ -69,18 +69,6 @@ def test_slim_yaml_line_budget(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_kinship_dp_estimators_absent_when_not_requested(tmp_path):
-    """Without ``--ne-coancestry``, slim has Ne_C and Ne_GC stubs and extra omits both."""
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
-    assert res.returncode == 0, res.stderr
-    slim_es = _load_yaml(out_dir)["pedigree"]["popgen"]["effective_size"]
-    extra_es = _load_extra(out_dir)["pedigree"].get("popgen", {}).get("effective_size", {})
-    for name in ("ne_coancestry", "ne_group_coancestry"):
-        assert slim_es[name] == {"ne": None, "reason": "not_requested"}
-        assert name not in extra_es
-
-
 def test_per_depth_fields_preserved_in_extra(tmp_path):
     """``depth_summary[i]`` per-depth scalars survive — they're not duplicates."""
     out_dir = tmp_path / "out"
@@ -96,7 +84,7 @@ def test_per_depth_fields_preserved_in_extra(tmp_path):
 
 
 def test_empty_categories_omitted(tmp_path):
-    """With both opt-outs, popgen and inbreeding are absent (not present as empty)."""
+    """Under ``--no-inbreeding`` no category is present as an empty dict."""
     out_dir = tmp_path / "out"
     res = _run(
         [
@@ -106,12 +94,11 @@ def test_empty_categories_omitted(tmp_path):
             "--out",
             str(out_dir),
             "--no-inbreeding",
-            "--no-effective-size",
         ]
     )
     assert res.returncode == 0, res.stderr
     ped = _load_yaml(out_dir)["pedigree"]
-    assert "popgen" not in ped
+    assert "inbreeding" not in ped["relatedness"]
     # None of the categories that *are* present should be empty dicts.
     for cat_name, cat in ped.items():
         assert cat, f"category {cat_name!r} present but empty"
