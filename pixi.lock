@@ -51,6 +51,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/88/f9/16491d7ed2a919954993e48aa941b200f38040928474c9e85ea9e64222c3/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/8f/b8/206468912d2153306bb8a41afdfc59e45b7a73a0495bbe4b9cb4f0e79c1d/hypothesis-6.165.10-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/91/17/664416280ef9cf7595cf9adb2a6dd2b6ee148ca912b78bdbe27d978d8175/pedigree_graph-0.12.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/c7/99/461bd36dbdfac6c1c53efa370bd55a83227542d0d118f1677dbf1a3dacd5/numpy-2.5.2-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
@@ -426,6 +427,7 @@ packages:
   - scipy>=1.14,<2
   - polars>=1.43.2,<2
   - pyyaml>=6,<7
+  - tqdm>=4.66,<5
   - pedigree-graph>=0.12,<0.13
   - pytest>=9,<10 ; extra == 'test'
   - pytest-xdist>=3.8,<4 ; extra == 'test'
@@ -634,6 +636,20 @@ packages:
   - pyarrow>=17,<26 ; extra == 'test'
   - ty==0.0.70 ; extra == 'typecheck'
   requires_python: '>=3.13'
+- pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
+  name: tqdm
+  version: 4.70.1
+  sha256: c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+  requires_dist:
+  - colorama ; sys_platform == 'win32'
+  - requests ; extra == 'discord'
+  - envwrap ; extra == 'discord'
+  - slack-sdk ; extra == 'slack'
+  - envwrap ; extra == 'slack'
+  - requests ; extra == 'telegram'
+  - envwrap ; extra == 'telegram'
+  - ipywidgets>=6 ; extra == 'notebook'
+  requires_python: '>=3.8'
 - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
   name: execnet
   version: 2.1.2

@@ -744,6 +744,10 @@ in `summary.yaml`; `effective-size` writes it to `effective_size.yaml`.
 - `-v` / `--verbose`: also shows per-degree timings and matrix-product
   diagnostics from the relationship enumerator.
 - `-q` / `--quiet`: warnings only.
+- Relationship counting in `summarize` and `epimight-input` can run for
+  many minutes on a large pedigree. In a terminal it shows a progress bar
+  in rows walked; when stderr is redirected, it logs a progress line every
+  30 s instead. `--quiet` turns off both.
 
 ---
 

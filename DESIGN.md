@@ -13,6 +13,7 @@ from those above it):
 | Module | Responsibility |
 |---|---|
 | `pedsum/base.py` | shared constants, the `pedigree_summary` logger, `PedigreeError` |
+| `pedsum/progress.py` | `relationship_progress`: the terminal progress bar for pedigree-graph's long relationship calls |
 | `pedsum/pedigree_ops.py` | low-level array helpers (parent rows, sib groups, topological depth) |
 | `pedsum/parse.py` | delimiter sniffing, column coercion, sex decoding |
 | `pedsum/checks.py` | per-check finding producers + check metadata (`_CHECK_*`) |

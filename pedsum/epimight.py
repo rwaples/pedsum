@@ -38,6 +38,8 @@ import numpy as np
 import polars as pl
 from pedigree_graph import RELATIONSHIPS
 
+from pedsum.progress import relationship_progress
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
@@ -220,7 +222,8 @@ def build_epimight_skeleton(
 
     # One engine pass over every constituent code; sum() folds a kind's codes.
     pair_codes = tuple(dict.fromkeys(pc for code in rels for pc in _EPI_REGISTRY[code].pair_codes))
-    counts = pg.relatives_per_person(categories=pair_codes)
+    with relationship_progress("relatives_per_person") as progress:
+        counts = pg.relatives_per_person(categories=pair_codes, progress=progress)
 
     # Reused placeholder columns — every block shares the same null columns.
     na_i8 = pl.Series("failure_status", [None] * n, dtype=pl.Int8)
@@ -281,10 +284,12 @@ def iter_relative_pairs(
     # categories a selected one depends on, so each pair keeps its closest code.
     # The "memory" assembly lowers the --pairs peak by 18% at 20M rows for 5%
     # more wall time.
-    all_pairs = pg.relationship_pairs(
-        categories=dict.fromkeys(pc for code in kinds for pc in _EPI_REGISTRY[code].pair_codes),
-        execution="memory",
-    )
+    with relationship_progress("relationship_pairs") as progress:
+        all_pairs = pg.relationship_pairs(
+            categories=dict.fromkeys(pc for code in kinds for pc in _EPI_REGISTRY[code].pair_codes),
+            execution="memory",
+            progress=progress,
+        )
     columns = (*RELATIVE_PAIR_COLUMNS, "kinship_exact") if exact_kinship else RELATIVE_PAIR_COLUMNS
 
     for code in kinds:

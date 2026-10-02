@@ -7,6 +7,7 @@ dependencies:
   - scipy
   - polars>=1.43.2,<2
   - pyyaml
+  - tqdm
   # pedsum imports numba *optionally*, for the sex-concordance permutation
   # sampler only (`--sex-concordance-permutations`), and falls back to a NumPy
   # sampler when it is unimportable. It is also pedigree-graph's compiled

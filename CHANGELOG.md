@@ -44,6 +44,14 @@ under a second at 382 MB.
   and degree 5 took 1,833 s. Codes past `N` and their `by_degree` rollup
   entries are null, and `structure.max_degree_enumerated` records `N`.
   With `--per-individual-burden`, a `--max-degree` below 5 exits 2.
+- **A progress bar for relationship counting.** In a terminal,
+  `summarize` (pair counts and `--per-individual-burden`) and
+  `epimight-input` (relative counts and `--pairs`) draw a tqdm bar in rows
+  walked, with the phase and elapsed time and no time-remaining estimate,
+  since row cost is far from uniform. Log lines print above the bar. With
+  stderr redirected, pedigree-graph logs a progress line every 30 s
+  instead; `--quiet` turns off both. Adds the `tqdm` dependency and needs
+  pedigree-graph's `progress=` keyword (its ADR 0017).
 
 ### Changed
 

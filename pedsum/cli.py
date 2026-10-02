@@ -39,6 +39,7 @@ from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
+from pedsum.progress import relationship_progress
 from pedsum.report import (
     SAFE_MIN_CELL,
     _apply_safe_attempt,
@@ -869,13 +870,17 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     n_indiv = len(df)
     if args.per_individual_pairs:
         with _timed("relationship burden"):
-            burden = pg.relationship_burden()
+            with relationship_progress("relationship_burden") as progress:
+                burden = pg.relationship_burden(progress=progress)
             pairs = _augment_pair_counts(burden.category_counts)
             pairs["_engine"] = "rust_streaming_burden"
             relationship_summary = compute_relationship_summary_from_burden(df, burden)
     else:
-        with _timed("relationship pair counts (relationship_counts)"):
-            counts = pg.relationship_counts(max_degree=args.max_degree)
+        with (
+            _timed("relationship pair counts (relationship_counts)"),
+            relationship_progress("relationship_counts") as progress,
+        ):
+            counts = pg.relationship_counts(max_degree=args.max_degree, progress=progress)
         # The Rust row-streaming engine counts every pair under its closest
         # category without materialising pair lists, so the 23 counts are
         # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
