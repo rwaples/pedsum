@@ -673,7 +673,7 @@ def _write_annotated_tsv(
             [new_names[c] for c in user_collisions],
         )
 
-    annotated = pl.concat([idf, extras], how="horizontal")
+    annotated = pl.concat([idf, extras], how="horizontal", strict=True)
     _to_csv_gz(annotated, out_path)
 
 
