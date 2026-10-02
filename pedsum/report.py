@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import gzip
+import os
 import shutil
 import subprocess
 from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Union
 
@@ -52,6 +54,26 @@ _NUMERIC_COLS = (
 # the freshly derived columns; the stale copy is regenerated, so it is dropped
 # rather than preserved under an ``_input`` suffix (see _write_annotated_tsv).
 _RESERVED_PROVENANCE_COLS = frozenset({"sex_source"})
+
+
+@contextmanager
+def atomic_output(path: Path) -> Iterator[Path]:
+    """Yield a temporary path beside ``path`` and move it onto ``path`` when the block succeeds.
+
+    The temporary is ``.<name>.partial-<pid>`` in the same directory, so the
+    final ``os.replace`` stays on one filesystem and a reader never sees a
+    half-written output. When the block raises, the temporary is removed and
+    the previous ``path``, if any, is left as it was. A process stopped by
+    ``os._exit`` mid-write leaves its ``.partial-<pid>`` file behind.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.partial-{os.getpid()}")
+    try:
+        yield tmp
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
 
 
 def _now_iso() -> str:
@@ -520,8 +542,7 @@ def _round_floats(obj: object, ndigits: int = 4) -> object:
 
 def _write_yaml(data: dict, path: Path) -> None:
     """Write data as YAML to path (creates parent dirs); floats rounded to 4dp."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as fh:
+    with atomic_output(path) as tmp, tmp.open("w") as fh:
         yaml.safe_dump(_round_floats(data), fh, sort_keys=False, default_flow_style=False)
 
 
@@ -539,7 +560,6 @@ def _render_cell(value: object) -> str | None:
 
 def _write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(_flatten_long(_round_floats(data)))
     df = pl.DataFrame(
         {
@@ -550,7 +570,8 @@ def _write_long_tsv(data: dict, path: Path) -> None:
         },
         schema={"section": pl.String, "key": pl.String, "subkey": pl.String, "value": pl.String},
     )
-    df.write_csv(path, separator="\t")
+    with atomic_output(path) as tmp:
+        df.write_csv(tmp, separator="\t")
 
 
 def _prepare_out_dir(path: Path) -> int:
@@ -588,12 +609,12 @@ def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
 
     Output is standard .gz either way.
     """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     df = _csv_ready(df)
     pigz = shutil.which("pigz")
     if pigz is not None:
         with (
-            out_path.open("wb") as fh_out,
+            atomic_output(out_path) as tmp,
+            tmp.open("wb") as fh_out,
             subprocess.Popen(
                 [pigz, "-1", "-p", "4", "-c"],
                 stdin=subprocess.PIPE,
@@ -606,7 +627,7 @@ def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
             if proc.wait() != 0:
                 raise PedigreeError(f"pigz exited with status {proc.returncode}")
         return
-    with gzip.open(out_path, "wb", compresslevel=1) as fh:
+    with atomic_output(out_path) as tmp, gzip.open(tmp, "wb", compresslevel=1) as fh:
         # GzipFile satisfies the IO[bytes] target at runtime; polars' overloads
         # spell it more narrowly than ty can match.
         df.write_csv(fh, separator="\t")  # ty: ignore[no-matching-overload]
@@ -710,7 +731,6 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
 
 def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
     """Tab-separated log: one row per finding (check / id / row / detail)."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     # Missing id/row are nulls (not "") so the CSV writer emits a bare empty
     # field; polars quotes explicit empty strings as "".
     df = pl.DataFrame(
@@ -722,7 +742,8 @@ def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
         },
         schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String},
     )
-    df.write_csv(out_path, separator="\t")
+    with atomic_output(out_path) as tmp:
+        df.write_csv(tmp, separator="\t")
 
 
 def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path) -> None:
@@ -733,7 +754,6 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
     record offenders spawned by earlier drops). Written even when nothing was
     dropped (header only) so downstream tooling can rely on its presence.
     """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     seen: set[tuple[int, str, int]] = set()
     rows: list[tuple[int, str, int]] = []
     for fid, check, rnd in dropped:
@@ -748,7 +768,8 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
         },
         schema={"id": pl.Int64, "check": pl.String, "round": pl.Int64},
     )
-    df.write_csv(out_path, separator="\t")
+    with atomic_output(out_path) as tmp:
+        df.write_csv(tmp, separator="\t")
 
 
 def _build_added_founders(

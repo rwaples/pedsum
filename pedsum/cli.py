@@ -25,6 +25,7 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
+from pedsum.memory import MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
 from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
@@ -43,6 +44,7 @@ from pedsum.report import (
     _write_validate_log,
     _write_validate_tsv_gz,
     _write_yaml,
+    atomic_output,
 )
 from pedsum.sections import (
     _build_inbreeding_summary,
@@ -112,6 +114,21 @@ def _add_threads_args(p: argparse.ArgumentParser) -> None:
         help="worker threads for the pedigree-graph engine (default 1). "
         "Counts and pair lists are identical under any value; only wall "
         "time changes. Set once per process, before the first computation.",
+    )
+
+
+def _add_memory_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--max-memory",
+        type=parse_size,
+        default=None,
+        metavar="SIZE",
+        help="stop with exit code 3 once pedsum's resident memory passes SIZE "
+        "(e.g. 500M, 12G; 0 turns the limit off). Default: 80%% of the memory "
+        "available at start, the smallest of the host's MemAvailable and the "
+        "headroom of every enclosing cgroup. Best effort: memory is sampled "
+        "once a second, so a fast allocation can still reach the kernel's OOM "
+        "killer.",
     )
 
 
@@ -362,6 +379,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_format_args(p_sum)
     _add_threads_args(p_sum)
+    _add_memory_args(p_sum)
     _add_logging_args(p_sum)
 
     p_val = sub.add_parser("validate", help="run all integrity checks accumulating; report issues")
@@ -442,6 +460,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_format_args(p_val)
     _add_threads_args(p_val)
+    _add_memory_args(p_val)
     _add_logging_args(p_val)
 
     p_epi = sub.add_parser(
@@ -564,6 +583,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_format_args(p_epi)
     _add_threads_args(p_epi)
+    _add_memory_args(p_epi)
     _add_logging_args(p_epi)
 
     args = parser.parse_args(argv)
@@ -1103,11 +1123,13 @@ def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parq
     no longer needs pyarrow.)
     """
     tsv_path = out_dir / f"{stem}.tsv"
-    frame.write_csv(tsv_path, separator="\t")
+    with atomic_output(tsv_path) as tmp:
+        frame.write_csv(tmp, separator="\t")
     logger.info("wrote %s (%d rows)", tsv_path, len(frame))
     if parquet:
         parquet_path = out_dir / f"{stem}.parquet"
-        frame.write_parquet(parquet_path)
+        with atomic_output(parquet_path) as tmp:
+            frame.write_parquet(tmp)
         logger.info("wrote %s", parquet_path)
     return 0
 
@@ -1119,8 +1141,13 @@ def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parq
     temporary file per kind, then streamed into a single file.
     """
     tsv_path = out_dir / "relative_pairs.tsv"
+    parquet_path = out_dir / "relative_pairs.parquet"
     n_rows = 0
-    with tsv_path.open("wb") as tsv, tempfile.TemporaryDirectory(dir=out_dir) as tmp:
+    with (
+        atomic_output(tsv_path) as tsv_tmp,
+        tsv_tmp.open("wb") as tsv,
+        tempfile.TemporaryDirectory(dir=out_dir) as tmp,
+    ):
         parts: list[Path] = []
         for i, frame in enumerate(frames):
             frame.write_csv(tsv, separator="\t", include_header=i == 0)
@@ -1129,11 +1156,12 @@ def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parq
                 frame.write_parquet(parts[-1])
             n_rows += len(frame)
             del frame
-        logger.info("wrote %s (%d rows)", tsv_path, n_rows)
         if parquet:
-            parquet_path = out_dir / "relative_pairs.parquet"
-            pl.scan_parquet(parts).sink_parquet(parquet_path)
-            logger.info("wrote %s", parquet_path)
+            with atomic_output(parquet_path) as parquet_tmp:
+                pl.scan_parquet(parts).sink_parquet(parquet_tmp)
+    logger.info("wrote %s (%d rows)", tsv_path, n_rows)
+    if parquet:
+        logger.info("wrote %s", parquet_path)
 
 
 def _run_epimight_input(args: argparse.Namespace) -> int:
@@ -1212,10 +1240,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _init_logging(args.verbose, args.quiet)
     cmd = " ".join(sys.argv)
-    if args.subcommand == "summarize":
-        return _run_summarize(args, cmd)
-    if args.subcommand == "validate":
-        return _run_validate(args, cmd)
-    if args.subcommand == "epimight-input":
-        return _run_epimight_input(args)
+    with MemoryWatchdog(resolve_limit(args.max_memory), phase=_current_profile_phase):
+        if args.subcommand == "summarize":
+            return _run_summarize(args, cmd)
+        if args.subcommand == "validate":
+            return _run_validate(args, cmd)
+        if args.subcommand == "epimight-input":
+            return _run_epimight_input(args)
     return 1
