@@ -59,3 +59,7 @@ desktop.ini
 
 # pixi env (ADR 0018 dev manifest)
 .pixi/
+
+# Published-pedigree benchmark: downloads and per-dataset pedsum runs
+benchmarks/published/.cache/
+benchmarks/published/.work/

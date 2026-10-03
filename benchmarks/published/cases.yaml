@@ -1,0 +1,160 @@
+# Published pedigrees and the values pedsum is checked against.
+#
+# Each dataset is pinned to a commit of the read-only CRAN mirror on GitHub
+# and to the file's SHA-256. Citations for every source are in
+# docs/benchmark-pedigrees.md.
+#
+# A check's `via` says where the observed value comes from:
+#   summary:<dotted.path>   a scalar in pedsum's summary.yaml
+#   annotated:sum_F | annotated:max_F | annotated:F_of
+#                           aggregates of the F column in annotated.tsv.gz
+#                           (F_of reads the row whose original id is `id`)
+#   engine:<name>           computed with the pedigree_graph API that pedsum
+#                           depends on, for statistics the pedsum CLI does not
+#                           expose yet (see docs/missing-statistics.md)
+#   gap                     not reported by pedsum or pedigree_graph; listed so
+#                           the published value is not lost
+#
+# `status_if_differs: expected_difference` marks a known convention difference;
+# the run reports it as DIFF instead of FAIL. `tol` is an absolute tolerance.
+
+datasets:
+  atlas:
+    url: https://raw.githubusercontent.com/cran/purgeR/5f3c193e7c0f579dec6e8b981f75a0cb8929ba0d/data/atlas.rda
+    sha256: 594eaa3408284e6867a2c06e0153541c91ca0632f8fa20a625f42cb8b040a722
+    object: atlas
+    columns: {id: id, mother: dam, father: sire, sex: sex}
+    missing_parent: ["0"]
+    sex_map: {M: 1, F: 0}
+    reference_column: target
+  dama:
+    url: https://raw.githubusercontent.com/cran/purgeR/5f3c193e7c0f579dec6e8b981f75a0cb8929ba0d/data/dama.rda
+    sha256: ccf683c05432647f0f3ff786708d9928c62725e4cbe6f332e88250d3c904d0d1
+    object: dama
+    columns: {id: id, mother: dam, father: sire, sex: sex}
+    missing_parent: ["0"]
+    sex_map: {M: 1, F: 0}
+    allow_missing_sex: true  # 1 animal(s) with NA sex and no offspring
+    reference_column: target
+  arrui:
+    url: https://raw.githubusercontent.com/cran/purgeR/5f3c193e7c0f579dec6e8b981f75a0cb8929ba0d/data/arrui.rda
+    sha256: be6e27df6d996fc7054ba39fb08a064a1b198266368d4a4a21e3de996fcdd000
+    object: arrui
+    columns: {id: id, mother: dam, father: sire, sex: sex}
+    missing_parent: ["0"]
+    sex_map: {M: 1, F: 0}
+    allow_missing_sex: true  # 1 animal(s) with NA sex and no offspring
+    reference_column: target
+  dorcas:
+    url: https://raw.githubusercontent.com/cran/purgeR/5f3c193e7c0f579dec6e8b981f75a0cb8929ba0d/data/dorcas.rda
+    sha256: b118be0e38cc60824fbce3094a3109548e92543e42ad37e0c01d43b2b3ac6376
+    object: dorcas
+    columns: {id: id, mother: dam, father: sire, sex: sex}
+    missing_parent: ["0"]
+    sex_map: {M: 1, F: 0}
+    allow_missing_sex: true  # 7 animal(s) with NA sex and no offspring
+    reference_column: target
+  darwin:
+    url: https://raw.githubusercontent.com/cran/purgeR/5f3c193e7c0f579dec6e8b981f75a0cb8929ba0d/data/darwin.rda
+    sha256: de51d0775fcce81a37673ddbcbc4d9c03a0be9a36d737a1ea5591762bbf52ff8
+    object: darwin
+    columns: {id: Individual, mother: Mother, father: Father}
+    # The file deliberately mixes missing-parent spellings.
+    missing_parent: ["0", "Unknown", "unknown", "unk", "UNK"]
+    allow_missing_sex: true
+  genea140:
+    url: https://raw.githubusercontent.com/cran/GENLIB/84a2a9919feb864f3d30a83131a9efa74d14812e/data/genea140.rda
+    sha256: 4da7a8c66612dca1b810ff55295a08a4d5999a8eeb1c3bd13410c5bf9b3e5b1d
+    object: genea140
+    columns: {id: ind, mother: mother, father: father, sex: sex}
+    missing_parent: ["0"]
+    sex_map: {"1": 1, "2": 0}
+  deep_ped:
+    url: https://raw.githubusercontent.com/cran/visPedigree/a849317f5133e9764cdbc155e3657f4772b46531/data/deep_ped.rda
+    sha256: f0c6c96c05c69043fb86ce7f4706574dcc7a6c8ddc09121946c8dde6934211cb
+    object: deep_ped
+    columns: {id: Ind, mother: Dam, father: Sire, sex: Sex}
+    missing_parent: ["0"]
+    sex_map: {Male: 1, Female: 0}
+    allow_missing_sex: true  # 521 rows with blank sex
+  mrode2:
+    url: https://raw.githubusercontent.com/cran/nadiv/87dd7d0f9234668d2cc2cfd9830c282a3f1b35ed/data/Mrode2.rda
+    sha256: 4f89c9839f383df760f7e057058005f698cb0b3e0b843ca41193b003ad9a1e29
+    object: Mrode2
+    columns: {id: id, mother: dam, father: sire}
+    missing_parent: []
+    allow_missing_sex: true
+  btped:
+    url: https://raw.githubusercontent.com/cran/MCMCglmm/da5f2903e7ced4166e475ccdfae6d020672986ba/data/BTped.tab.gz
+    sha256: c16874d886b1d26892373b269cdd06b62d42c387f3c6e65d5bc0e7fbd6593ead
+    format: whitespace_table
+    columns: {id: animal, mother: dam, father: sire}
+    missing_parent: []
+    allow_missing_sex: true
+
+checks:
+  # --- purgeR zoo studbooks --------------------------------------------------
+  # purgeR tests/testthat/test_inbreeding.R and test_population_parameters.R;
+  # Ne for the reference population (`target == 1`) also in the abstract of
+  # López-Cortegano, Moreno & García-Dorado 2021 (Heredity), rounded.
+  - {dataset: atlas, stat: N, published: 948, via: summary:n_total, source: purgeR data}
+  - {dataset: atlas, stat: founders (both parents unknown), published: 5, via: summary:pedigree.structure.size_structure.n_founders, source: purgeR test_population_parameters.R:17}
+  - {dataset: atlas, stat: sum of F, published: 197.2809, tol: 1.0e-4, via: annotated:sum_F, source: purgeR test_inbreeding.R:14}
+  - {dataset: atlas, stat: max F, published: 0.4277344, tol: 1.0e-6, via: annotated:max_F, note: summary.yaml rounds max_F to 4 decimals, source: purgeR test_inbreeding.R:12}
+  - {dataset: atlas, stat: F of last row (id 948), id: "948", published: 0.2345642, tol: 1.0e-6, via: annotated:F_of, source: purgeR test_inbreeding.R:13}
+  - {dataset: atlas, stat: sum of equivalent complete generations, published: 5500.627, tol: 1.0e-3, via: engine:ecg_sum, gap: A1, source: purgeR test_population_parameters.R:56}
+  - {dataset: atlas, stat: max equivalent complete generations, published: 10.0639, tol: 1.0e-4, via: engine:ecg_max, gap: A1, source: purgeR test_population_parameters.R:54}
+  - {dataset: atlas, stat: "Ne_iΔF, reference = target (purgeR uses t-1)", published: 14.01041, tol: 1.0e-4, via: engine:ne_idf_t1_reference, gap: D1, source: purgeR test_population_parameters.R:74; Heredity 2021 abstract (14)}
+  - {dataset: atlas, stat: "Ne_iΔF, all rows (purgeR uses t-1, rows with t<=1 count as ΔF=0)", published: 8.184803, tol: 1.0e-4, via: engine:ne_idf_t1_all, gap: D2, status_if_differs: expected_difference, note: "pedigree_graph drops rows with t<=1 rather than counting them as zero", source: purgeR test_population_parameters.R:67}
+  - {dataset: atlas, stat: founder equivalents fe (reference = target), published: 3.583086, via: gap, gap: B1, source: purgeR test_population_parameters.R:20}
+  - {dataset: atlas, stat: effective number of ancestors fa (reference = target), published: 3.583086, via: gap, gap: B2, source: purgeR test_population_parameters.R:21}
+  - {dataset: dama, stat: N, published: 1316, via: summary:n_total, source: purgeR data}
+  - {dataset: dama, stat: "Ne_iΔF, reference = target (purgeR uses t-1)", published: 11.09927, tol: 1.0e-4, via: engine:ne_idf_t1_reference, gap: D1, source: purgeR vignette; Heredity 2021 abstract (11)}
+  - {dataset: dama, stat: founder equivalents fe (reference = target), published: 2.614750, via: gap, gap: B1, source: purgeR tutorial vignette, pop_Nancestors table}
+  - {dataset: arrui, stat: N, published: 380, via: summary:n_total, source: purgeR data}
+  - {dataset: arrui, stat: "Ne_iΔF, reference = target (purgeR uses t-1)", published: 3.83865, tol: 1.0e-4, via: engine:ne_idf_t1_reference, gap: D1, source: purgeR vignette; Heredity 2021 abstract (4)}
+  - {dataset: arrui, stat: founder equivalents fe (reference = target), published: 1.769424, via: gap, gap: B1, source: purgeR tutorial vignette, pop_Nancestors table}
+  - {dataset: dorcas, stat: N, published: 1279, via: summary:n_total, source: purgeR data}
+  - {dataset: dorcas, stat: "Ne_iΔF, reference = target (purgeR uses t-1)", published: 39.32125, tol: 1.0e-4, via: engine:ne_idf_t1_reference, gap: D1, source: purgeR vignette; Heredity 2021 abstract (39)}
+  - {dataset: dorcas, stat: founder equivalents fe (reference = target), published: 13.38647, via: gap, gap: B1, source: purgeR test_population_parameters.R:29}
+  - {dataset: dorcas, stat: effective number of ancestors fa (reference = target), published: 12.9906, via: gap, gap: B2, source: purgeR test_population_parameters.R:30}
+
+  # --- Darwin/Wedgwood (purgeR) ----------------------------------------------
+  - {dataset: darwin, stat: N, published: 63, via: summary:n_total, source: purgeR data}
+  - {dataset: darwin, stat: F of William Erasmus Darwin, id: William Erasmus Darwin, published: 0.06298828, tol: 1.0e-7, via: annotated:F_of, source: purgeR tutorial vignette; Berra, Alvarez & Ceballos 2010 report 0.0630 for Darwin's children}
+
+  # --- GENLIB genea140 (Gauvin et al. 2015, Results) -------------------------
+  - {dataset: genea140, stat: N, published: 41523, via: summary:n_total, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: males, published: 20773, via: summary:pedigree.structure.size_structure.n_male, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: females, published: 20750, via: summary:pedigree.structure.size_structure.n_female, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: founders, published: 7399, via: summary:pedigree.structure.size_structure.n_founders, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: nuclear families (mating pairs with children), published: 21230, via: summary:pedigree.demography.mating_pairs.n_pairs, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: full sibships (2 or more sibs), published: 5994, via: summary:pedigree.demography.mating_pairs.n_pairs_with_multiple_children, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: largest sibship, published: 14, via: summary:pedigree.demography.mating_pairs.children_per_pair.max, source: Gauvin et al. 2015}
+  - {dataset: genea140, stat: generations (counting generation 0), published: 18, via: summary:pedigree.structure.size_structure.max_depth, offset: 1, source: Gauvin et al. 2015 ("18 generations deep")}
+  - {dataset: genea140, stat: mean expected genealogical depth of probands, published: 9.4, via: gap, gap: A5, source: Gauvin et al. 2015}
+
+  # --- visPedigree deep_ped (package vignette pedigree-analysis) -------------
+  - {dataset: deep_ped, stat: N (3 absent parents added), published: 4399, via: summary:n_total, source: visPedigree vignette, pedstats summary}
+  - {dataset: deep_ped, stat: founders (visPedigree counts 135 founder rows + 3 added parents), published: 138, via: summary:pedigree.structure.size_structure.n_founders, source: visPedigree vignette, pedstats summary}
+  - {dataset: deep_ped, stat: max generation (visPedigree numbers founders 1), published: 13, via: summary:pedigree.structure.size_structure.max_depth, offset: 1, source: visPedigree vignette, pedstats summary}
+  - {dataset: deep_ped, stat: ECG of K110997Q, id: K110997Q, published: 7.616211, tol: 1.0e-6, via: engine:ecg_of, gap: A1, source: visPedigree vignette, pedstats ecg}
+  - {dataset: deep_ped, stat: ECG of K110998Q, id: K110998Q, published: 4.606445, tol: 1.0e-6, via: engine:ecg_of, gap: A1, source: visPedigree vignette, pedstats ecg}
+  - {dataset: deep_ped, stat: ECG of K110999Z, id: K110999Z, published: 6.875977, tol: 1.0e-6, via: engine:ecg_of, gap: A1, source: visPedigree vignette, pedstats ecg}
+  - {dataset: deep_ped, stat: complete generations of K110998Q, id: K110998Q, published: 2, via: gap, gap: A2, source: visPedigree vignette, pedstats ecg}
+  - {dataset: deep_ped, stat: "fe (reference = Gen >= max-1)", published: 64.73344, via: gap, gap: B1, source: visPedigree vignette, pediv summary}
+  - {dataset: deep_ped, stat: "fa (reference = Gen >= max-1)", published: 44.12033, via: gap, gap: B2, source: visPedigree vignette, pediv summary}
+  - {dataset: deep_ped, stat: "mean coancestry (reference = Gen >= max-1)", published: 0.0260693, via: gap, gap: C1, source: visPedigree vignette, pediv summary}
+
+  # --- Mrode (2005) example pedigree, via nadiv::Mrode2 ----------------------
+  # Values derived by hand with the tabular method: animal 4's sire is 1 and
+  # dam unknown, so a(3,4) = 0.25 and F5 = 0.125; a(2,5) = 0.25 so F6 = 0.125.
+  - {dataset: mrode2, stat: F of animal 5, id: "5", published: 0.125, tol: 1.0e-9, via: annotated:F_of, source: tabular method (hand-derived)}
+  - {dataset: mrode2, stat: F of animal 6, id: "6", published: 0.125, tol: 1.0e-9, via: annotated:F_of, source: tabular method (hand-derived)}
+  - {dataset: mrode2, stat: half-founders, published: 1, via: summary:pedigree.structure.size_structure.n_half_founders, source: data (animal 4 has sire only)}
+
+  # --- MCMCglmm BTped (blue tit; MCMCglmm man/BTped.Rd) ----------------------
+  - {dataset: btped, stat: N, published: 1040, via: summary:n_total, source: MCMCglmm BTped.Rd}
+  - {dataset: btped, stat: founders, published: 212, via: summary:pedigree.structure.size_structure.n_founders, source: MCMCglmm BTped.Rd}
+  - {dataset: btped, stat: full-sib families, published: 106, via: summary:pedigree.demography.mating_pairs.n_pairs, source: MCMCglmm BTped.Rd}
+  - {dataset: btped, stat: inbred individuals, published: 0, via: summary:pedigree.relatedness.inbreeding.n_inbred, source: "MCMCglmm BTped.Rd (parents unrelated; offspring of unrelated parents have F = 0)"}
