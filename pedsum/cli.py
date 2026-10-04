@@ -44,8 +44,10 @@ from pedsum.report import (
     _build_effective_size_data,
     _build_individual_data,
     _build_pedigree_data,
+    _build_phantom_parents,
     _build_summary_data,
     _format_check_summary,
+    _next_free_id,
     _prepare_out_dir,
     _write_annotated_tsv,
     _write_dropped_manifest,
@@ -473,6 +475,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "the pedigree passes under the invoked flags. Writes validate.dropped.tsv "
         "and exits 1 whenever anything was dropped. Column/parse-level failures "
         "still BLOCK. WARNING: changes relatedness/Ne/founder counts (default: off)",
+    )
+    p_val.add_argument(
+        "--fill-half-founders",
+        action="store_true",
+        help="give each half-founder (exactly one known parent) its own new "
+        "founder in the missing slot: female for a missing mother, male for a "
+        "missing father, with IDs above every existing ID. Kinship and F among the "
+        "input individuals are unchanged; founder contributions then sum to 1, "
+        "which ne_long_term_contributions requires. WARNING: adds one founder "
+        "per half-founder, so founder counts and founder-based statistics "
+        "change (default: off)",
     )
     p_val.add_argument(
         "--birth-year-col",
@@ -1107,13 +1120,17 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     return 0
 
 
-def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_dir: Path) -> int:
+def _write_fixed_pedigree(
+    ctx: ValidationContext, args: argparse.Namespace, out_dir: Path, *, next_id: int | None = None
+) -> int:
     """Write ``validate.tsv.gz`` from ``ctx``; return total rows written.
 
-    Synthesizes founder rows for missing parents, folds sex imputation into the
-    sex column, topo-reorders (parents before children), and writes the gzipped
-    TSV. Shared by the normal validate path and ``--drop-offending`` (which
-    passes the reduced context).
+    Synthesizes founder rows for missing parents (and, with
+    ``--fill-half-founders``, phantom parents numbered from ``next_id``), folds
+    sex imputation into the sex column, topo-reorders (parents before
+    children), and writes the gzipped TSV. Shared by the normal validate path
+    and ``--drop-offending`` (which passes the reduced context, and the input's
+    ``next_id`` so no phantom reuses a dropped ID).
     """
     n_total = len(ctx.df_raw)
     added_founders: list[dict] = []
@@ -1137,6 +1154,24 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
                 pl.Series(args.sex_col, sex_imp.imputed_sex).cast(pl.String),
                 pl.Series("sex_source", sex_imp.sex_source.astype(str)),
             )
+        if args.fill_half_founders:
+            if next_id is None:
+                next_id = _next_free_id(ctx.ids, ctx.mothers, ctx.fathers)
+            mothers, fathers, phantoms = _build_phantom_parents(ctx.mothers, ctx.fathers, next_id)
+            filled_m = mothers != ctx.mothers
+            filled_f = fathers != ctx.fathers
+            df_out = df_out.with_columns(
+                pl.when(pl.Series(filled_m))
+                .then(pl.Series(mothers.astype(str)))
+                .otherwise(pl.col(args.mother_col).cast(pl.String))
+                .alias(args.mother_col),
+                pl.when(pl.Series(filled_f))
+                .then(pl.Series(fathers.astype(str)))
+                .otherwise(pl.col(args.father_col).cast(pl.String))
+                .alias(args.father_col),
+            )
+            added_founders += phantoms
+            logger.info("validate: added %d phantom parent(s) for half-founders", len(phantoms))
         # Reorder so the fixed file is parents-before-children and feeds back
         # into pedsum without further auto-fixes.
         depth = ctx.depth
@@ -1185,7 +1220,7 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
 
     _write_dropped_manifest(result.dropped, manifest_path)
     sys.stderr.write(f"wrote {manifest_path} ({result.n_distinct_dropped} id(s) dropped)\n")
-    _write_fixed_pedigree(result.ctx_final, args, out_dir)
+    _write_fixed_pedigree(result.ctx_final, args, out_dir, next_id=_next_free_id(*ctx.require_id_parents()))
 
     # Self-verify the written artifact passes under the invoked flags. The
     # output is always tab-separated regardless of the input --sep, so sniff it,

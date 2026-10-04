@@ -84,6 +84,10 @@ _Avoid_: "ancestor" (unqualified), "progenitor", "root"
 An individual with exactly one parent missing in the input pedigree. Counted by `n_half_founders`. Not a **Founder**.
 _Avoid_: "partial founder"
 
+**Phantom Parent**:
+A **Founder** that `validate --fill-half-founders` adds in the missing parent slot of one **Half-Founder**, one per Half-Founder, so siblings never share one. Unrelated to everyone, so it leaves kinship and F among the input individuals unchanged; it does raise `n_founders`.
+_Avoid_: "dummy parent", "unknown parent group" (a shared unknown parent is a different model)
+
 **Founder Ancestor**:
 For one (non-founder) individual, a **Founder** that appears anywhere in that individual's ancestry. The per-individual count of *distinct* Founder Ancestors is the column `n_founder_ancestors`; its summary-stats distribution within each depth cohort is `founder_summary.by_depth[*].founder_ancestors`.
 _Avoid_: "founder line per individual", "ancestral founder count" (use the canonical term)

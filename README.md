@@ -104,6 +104,17 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Rows reordered so parents always precede children (topological
   order), if the input was not already ordered.
 
+**`--fill-half-founders`** also gives every half-founder (an individual with
+exactly one known parent) its own new founder in the missing slot: female (`0`) for
+a missing mother, male (`1`) for a missing father. The new founders take IDs above every
+ID in the input and are prepended with the other synthesized founders.
+`ne_long_term_contributions` needs this, because it refuses any pedigree with
+a half-founder. A new founder is unrelated to everyone, so kinship and F among
+the input individuals do not change. Founder counts do: each half-founder
+adds one founder, and founder-based statistics shift with them. Under
+`--drop-offending` the fill also covers the half-founders that dropping
+creates.
+
 Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
 unresolved sex without `--allow-missing-sex`, sex-role ambiguity)
 cause the fixed TSV to be skipped — fix the source data first.
@@ -409,6 +420,9 @@ every name carries its estimator. All eight run by default.
 All eight records are always written. An estimator you did not select
 reports `{ne: null, reason: not_requested}`; one that cannot run for want
 of metadata reports its own `reason`, for example `missing_metadata`.
+`ne_long_term_contributions` reports `missing_metadata` with `code:
+incomplete_parentage` for any pedigree with a half-founder; run `validate
+--fill-half-founders` first and pass it the written `validate.tsv.gz`.
 
 Flags:
 

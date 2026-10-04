@@ -65,6 +65,15 @@ whole command.
   instead; `--quiet` turns off both. Adds the `tqdm` dependency and needs
   pedigree-graph's `progress=` keyword (its ADR 0017).
 
+- **`validate --fill-half-founders`** gives each half-founder its own new
+  founder in the missing parent slot (female for a missing mother, male
+  for a missing father), numbered above every input ID, including IDs that
+  `--drop-offending` removed. `ne_long_term_contributions` refused 14 of
+  the 25 published pedigrees in the benchmark harness for having a
+  half-founder (issue #9); on the filled pedigree it runs. Kinship and F
+  among the input individuals are unchanged; founder counts rise by the
+  number of half-founders. Off by default.
+
 ### Changed
 
 - **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar

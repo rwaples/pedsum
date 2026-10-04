@@ -818,6 +818,43 @@ def _build_added_founders(
     return out
 
 
+def _next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
+    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
+    return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
+
+
+def _build_phantom_parents(
+    mothers: np.ndarray,
+    fathers: np.ndarray,
+    first_id: int,
+) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+    """Give each half-founder its own new founder in its missing parent slot.
+
+    Returns ``(mothers, fathers, phantoms)``: the parent arrays with every
+    half-founder's ``-1`` slot pointing at its phantom, and the phantom founder
+    rows (female for a missing mother, male for a missing father). Phantoms are
+    numbered from ``first_id`` in row order; pass :func:`_next_free_id` of the
+    input pedigree so they collide with no ID, including dropped ones, and
+    sort after every existing or synthesized founder.
+
+    A phantom is unrelated to everyone and not inbred, so kinship and F among
+    the original individuals are unchanged. Founder contributions now sum to 1
+    through every individual, at the cost of one more founder per half-founder.
+    """
+    rows = np.flatnonzero((mothers == -1) ^ (fathers == -1))
+    pids = first_id + np.arange(len(rows), dtype=np.int64)
+    for_mother = mothers[rows] == -1
+    mothers = mothers.copy()
+    fathers = fathers.copy()
+    mothers[rows[for_mother]] = pids[for_mother]
+    fathers[rows[~for_mother]] = pids[~for_mother]
+    phantoms = [
+        {"id": pid, "sex": SEX_FEMALE if m else SEX_MALE}
+        for pid, m in zip(pids.tolist(), for_mother.tolist(), strict=True)
+    ]
+    return mothers, fathers, phantoms
+
+
 def _write_validate_tsv_gz(
     df_raw: pl.DataFrame,
     added_founders: list[dict],
