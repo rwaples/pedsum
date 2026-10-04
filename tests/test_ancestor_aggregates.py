@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+from conftest import parent_rows
 
 from pedigree_summary import (
     SEX_FEMALE,
@@ -52,7 +53,7 @@ def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
     """Default mode emits None for genealogy/depth-summary ancestor stats."""
     idf = _individual_df()
 
-    founder_summary, _ = compute_founder_summary(idf)
+    founder_summary, _ = compute_founder_summary(idf, *parent_rows(idf))
     aggregates = compute_aggregate_sections(
         idf,
         founder_summary=founder_summary,
@@ -82,7 +83,7 @@ def test_inbreeding_mode_reports_ancestor_stats() -> None:
     """``--inbreeding`` populates genealogy, depth_summary, and per-individual ancestor stats."""
     idf = _individual_df()
 
-    founder_summary, _ = compute_founder_summary(idf)
+    founder_summary, _ = compute_founder_summary(idf, *parent_rows(idf))
     aggregates = compute_aggregate_sections(
         idf,
         founder_summary=founder_summary,

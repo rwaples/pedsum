@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 
-import numpy as np
 import polars as pl
 import pytest
-from conftest import run_pedsum
+from conftest import parent_rows, run_pedsum
 from conftest import write_ped as _write_ped
 
 import pedigree_summary as ps
@@ -122,7 +121,7 @@ def test_missing_sex_imputed_from_mother_role(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},  # uses 2 as mother
         ],
     )
-    df, _ = ps.load_and_validate(ped)
+    df = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
 
@@ -137,7 +136,7 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
             {"id": 3, "sex": "M", "mother": 1, "father": 2},  # uses 2 as father
         ],
     )
-    df, _ = ps.load_and_validate(ped)
+    df = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
 
@@ -166,7 +165,7 @@ def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df, _ = ps.load_and_validate(ped, allow_missing_sex=True)
+    df = ps.load_and_validate(ped, allow_missing_sex=True)
     assert (df["sex"] == ps.SEX_UNKNOWN).any()
 
 
@@ -180,20 +179,8 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df, csr = ps.load_and_validate(ped, allow_missing_sex=True)
-    # ped_depth is populated by _run_summarize from PedigreeGraph; for this
-    # unit test fake it from generation order (founders depth 0, kid depth 1).
-    df = df.with_columns(
-        pl.Series(
-            "ped_depth",
-            np.where(
-                (df["mother"].to_numpy() == -1) & (df["father"].to_numpy() == -1),
-                0,
-                1,
-            ).astype(np.int32),
-        )
-    )
-    summary, _ = ps.compute_size_structure(df, csr)
+    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    summary, _ = ps.compute_size_structure(df, *parent_rows(df))
     assert summary["n_male"] + summary["n_female"] + summary["n_unknown_sex"] == summary["n_total"]
     assert summary["n_unknown_sex"] == 1
 
@@ -222,7 +209,7 @@ def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
 def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
     """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
     ped = _ambig_pedigree(tmp_path / "p.tsv")
-    df, _ = ps.load_and_validate(ped, allow_missing_sex=True)
+    df = ps.load_and_validate(ped, allow_missing_sex=True)
     row = df.filter(pl.col("id") == 7).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_UNKNOWN
 
@@ -306,7 +293,7 @@ def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _ = ps.load_and_validate(ped)
+    df = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
     assert row["sex_source"] == "imputed_from_role"
@@ -322,7 +309,7 @@ def test_impute_overrides_asserted_f_used_as_father(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _ = ps.load_and_validate(ped)
+    df = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 1).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "imputed_from_role"
@@ -371,7 +358,7 @@ def test_assertion_kept_when_no_role(tmp_path):
             {"id": 4, "sex": "M", "mother": -1, "father": -1},  # orphan, no role
         ],
     )
-    df, _ = ps.load_and_validate(ped)
+    df = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 4).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "input"

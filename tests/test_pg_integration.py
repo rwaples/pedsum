@@ -36,7 +36,7 @@ _SNAPSHOT = {
 
 
 def _build_pg_and_df():
-    df, _ = ps.load_and_validate(EXAMPLE)
+    df = ps.load_and_validate(EXAMPLE)
     pg = ps._build_pedigree_graph(df)
     df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
     return pg, df

@@ -70,6 +70,17 @@ whole command.
 - **`summarize --birth-year-col` only adds validation.** The column no
   longer feeds any `summarize` output beyond what `annotated.tsv.gz`
   already copied from the input.
+- **`summarize` repeats less work; outputs are byte-identical.** Validation
+  computes topological depth once, and the cycle check, the row sort and
+  `ped_depth` all read it. The summary sections take parent rows from the
+  `PedigreeGraph` instead of rebuilding an id lookup, and the
+  (mother, father) grouping runs once for the sibship, mating-pair and
+  per-individual sections. On a generated 1M-row, 8-generation pedigree
+  (medians of 5 interleaved runs), wall time fell from 65.2 s to 57.9 s
+  and peak RSS from 858 MiB to 684 MiB; the per-individual table went from
+  6.65 s to 0.47 s. With rows out of topological order and
+  `--max-degree 1`, wall time fell from 19.0 s to 10.6 s.
+  `load_and_validate` now returns the frame alone, with `ped_depth`.
 
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 

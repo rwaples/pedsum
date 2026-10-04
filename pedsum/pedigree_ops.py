@@ -1,13 +1,12 @@
-"""Low-level pedigree array helpers (parent rows, sib groups, depth)."""
+"""Low-level pedigree array helpers (parent rows, mating pairs, depth)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.sparse as sp
-
-from pedsum.base import PedigreeError
 
 if TYPE_CHECKING:
     import polars as pl
@@ -68,114 +67,90 @@ def _parent_rows(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np
     return out, mask
 
 
-def _group_sizes_per_row(keys: np.ndarray) -> np.ndarray:
-    """Size of each row's group, where ``keys`` labels the group of each row.
+@dataclass(frozen=True)
+class MatingPairs:
+    """Children with both parents known, grouped by **Mating Pair**.
 
-    Vectorized ``groupby(key).size()`` + per-row lookup: rows sharing a key
-    value all receive that key's total count. ``keys`` may be any 1-D or 2-D
-    (row-wise composite key) integer array.
+    Pairs are numbered in ascending (mother id, father id) order and
+    ``children`` is sorted by pair, so ``pair`` is non-decreasing.
     """
-    if keys.ndim == 1:
-        _, inv, counts = np.unique(keys, return_inverse=True, return_counts=True)
-    else:
-        _, inv, counts = np.unique(keys, axis=0, return_inverse=True, return_counts=True)
-    return counts[inv]
+
+    children: np.ndarray  # row of each child with both parents known
+    pair: np.ndarray  # pair number of each entry of ``children``
+    sizes: np.ndarray  # children per pair
+    mother_rows: np.ndarray  # mother row of each pair
+    father_rows: np.ndarray  # father row of each pair
 
 
-def _full_sib_groups(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-row full-sib counts plus underlying mating-pair group sizes.
-
-    Returns (fs_count, fs_group_sizes, both_present) where fs_count[i] is the
-    number of full sibs of row i (0 if either parent is unknown),
-    fs_group_sizes is the array of distinct (mother, father) group sizes, and
-    both_present is the boolean row mask for rows with both parents known.
-    """
-    n = len(df)
-    fs_count = np.zeros(n, dtype=np.int64)
+def _group_mating_pairs(df: pl.DataFrame, mother_rows: np.ndarray, father_rows: np.ndarray) -> MatingPairs:
+    """Group the children of ``df`` by (mother, father); parent rows are ``-1`` when unknown."""
+    # Sorting by parent id rather than row keeps the per-pair order, and with
+    # it every float summed over ``sizes``, independent of row order.
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
-    both_present = (mothers != -1) & (fathers != -1)
-    if not both_present.any():
-        return fs_count, np.array([], dtype=np.int64), both_present
-    pair_keys = np.column_stack([mothers[both_present], fathers[both_present]])
-    _, inv, counts = np.unique(pair_keys, axis=0, return_inverse=True, return_counts=True)
-    fs_count[np.where(both_present)[0]] = counts[inv] - 1
-    return fs_count, counts, both_present
-
-
-def _grandparent_arrays(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (mm, mf, fm, ff) arrays of grandparent IDs (-1 for unknown)."""
-    id_index = IdIndex(df["id"].to_numpy())
-    mothers = df["mother"].to_numpy()
-    fathers = df["father"].to_numpy()
-    parent_cols = {"mother": mothers, "father": fathers}
-
-    def _lookup(outer: np.ndarray, inner: np.ndarray) -> np.ndarray:
-        rows, present = _parent_rows(outer, id_index)
-        out = np.full(len(outer), -1, dtype=np.int64)
-        hit = present & (rows != -1)
-        out[hit] = inner[rows[hit]]
-        return out
-
-    return tuple(  # ty: ignore[invalid-return-type]
-        _lookup(parent_cols[outer], parent_cols[inner])
-        for outer, inner in (
-            ("mother", "mother"),
-            ("mother", "father"),
-            ("father", "mother"),
-            ("father", "father"),
-        )
+    both = np.flatnonzero((mother_rows >= 0) & (father_rows >= 0))
+    children = both[np.lexsort((fathers[both], mothers[both]))]
+    m, f = mothers[children], fathers[children]
+    starts = np.ones(len(children), dtype=bool)
+    starts[1:] = (m[1:] != m[:-1]) | (f[1:] != f[:-1])
+    pair = np.cumsum(starts) - 1
+    first_child = children[starts]
+    return MatingPairs(
+        children=children,
+        pair=pair,
+        sizes=np.bincount(pair),
+        mother_rows=mother_rows[first_child],
+        father_rows=father_rows[first_child],
     )
 
 
-def _build_children_csr(
-    m_row: np.ndarray,
-    mask_m: np.ndarray,
-    f_row: np.ndarray,
-    mask_f: np.ndarray,
-    n: int,
-) -> sp.csr_matrix | None:
-    """Build parent→child CSR from parent-row arrays. None if no edges."""
-    parent_rows = np.concatenate([m_row[mask_m], f_row[mask_f]])
+def _build_children_csr(mother_rows: np.ndarray, father_rows: np.ndarray) -> sp.csr_matrix | None:
+    """Build the parent→child CSR from parent rows (``-1`` when unknown). None if no edges."""
+    n = len(mother_rows)
+    has_mom = mother_rows >= 0
+    has_dad = father_rows >= 0
+    parent_rows = np.concatenate([mother_rows[has_mom], father_rows[has_dad]])
     if len(parent_rows) == 0:
         return None
-    child_rows = np.concatenate([np.where(mask_m)[0], np.where(mask_f)[0]])
+    child_rows = np.concatenate([np.where(has_mom)[0], np.where(has_dad)[0]])
     return sp.csr_matrix(
         (np.ones(len(parent_rows), dtype=np.int8), (parent_rows, child_rows)),
         shape=(n, n),
     )
 
 
-def _compute_depth_unordered(
-    mother_rows: np.ndarray,
-    father_rows: np.ndarray,
-    n: int,
-) -> np.ndarray:
+def _concat_ranges(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
+    """``np.concatenate([np.arange(a, b) for a, b in zip(starts, stops)])`` without the loop."""
+    lengths = stops - starts
+    return np.arange(lengths.sum()) + np.repeat(starts - (np.cumsum(lengths) - lengths), lengths)
+
+
+def _structural_depth(mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
     """Per-row topological depth, tolerant of any input row order.
 
-    Vectorized fixed-point sweep: founders have depth 0, other rows have
-    ``max(parent_depth) + 1``.  Iterates until depths stabilise — unlike
-    a single Kahn pass, this does not require parents to already precede
-    children in row index.  Returns ``np.int32``.  Raises ``PedigreeError``
-    when no progress can be made (true cycle).
+    Founders have depth 0, other rows ``max(parent_depth) + 1``.  Kahn's
+    algorithm one level at a time: a row enters the frontier in the round its
+    last parent leaves it, which is its depth.  Rows in a cycle, or descended
+    from one, never enter it and keep depth -1.  Returns ``np.int32``.
     """
+    n = len(mother_rows)
+    parents = np.concatenate([mother_rows, father_rows])
+    children = np.tile(np.arange(n), 2)
+    known = parents >= 0
+    parents, children = parents[known], children[known]
+    children = children[np.argsort(parents, kind="stable")]
+    indptr = np.zeros(n + 1, dtype=np.int64)
+    np.cumsum(np.bincount(parents, minlength=n), out=indptr[1:])
+    unplaced = np.bincount(children, minlength=n)  # known parents not yet placed
+
     depth = np.full(n, -1, dtype=np.int32)
-    depth[(mother_rows < 0) & (father_rows < 0)] = 0
-    while True:
-        todo = depth < 0
-        if not todo.any():
-            return depth
-        m_safe = np.maximum(mother_rows, 0)
-        f_safe = np.maximum(father_rows, 0)
-        m_resolved = (mother_rows < 0) | (depth[m_safe] >= 0)
-        f_resolved = (father_rows < 0) | (depth[f_safe] >= 0)
-        eligible = todo & m_resolved & f_resolved
-        if not eligible.any():
-            unresolved = np.where(todo)[0][:5].tolist()
-            raise PedigreeError(
-                f"pedigree contains a cycle: {int(todo.sum())} individual(s) "
-                f"could not be topologically ordered (e.g. rows {unresolved})",
-            )
-        md = np.where(mother_rows >= 0, depth[m_safe], 0)
-        fd = np.where(father_rows >= 0, depth[f_safe], 0)
-        depth[eligible] = np.maximum(md[eligible], fd[eligible]) + 1
+    frontier = np.flatnonzero(unplaced == 0)
+    level = 0
+    while frontier.size:
+        depth[frontier] = level
+        reached = children[_concat_ranges(indptr[frontier], indptr[frontier + 1])]
+        reached, hits = np.unique(reached, return_counts=True)
+        unplaced[reached] -= hits
+        frontier = reached[unplaced[reached] == 0]
+        level += 1
+    return depth

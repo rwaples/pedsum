@@ -37,7 +37,7 @@ from pedsum.epimight import (
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
-from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _parent_rows
+from pedsum.pedigree_ops import _group_mating_pairs
 from pedsum.progress import relationship_progress
 from pedsum.report import (
     SAFE_MIN_CELL,
@@ -814,7 +814,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # Wrapped so the read/validation peak is attributed to a phase by the
         # benchmark profiler; load_and_validate already logs its own timing.
         with _timed("load+validate"):
-            df, children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)
@@ -829,25 +829,23 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         )
 
     # Build the PedigreeGraph once and reuse for every primitive that
-    # needs it (relationship pairs, F, lineage counts).
-    # ``ped_depth`` MUST be populated from ``pg.depth`` before any summary
-    # function runs — six callers read it. ``pg.depth`` is the topological
-    # depth; pedigree-graph 0.8 keeps ``generation_labels`` for a supplied
-    # generation column and applies no fallback, so depth is what pedsum wants.
+    # needs it (relationship pairs, F, lineage counts). Its graph rows are
+    # df's rows, so its parent rows index df directly.
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
-        df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
-
-    id_index = IdIndex(df["id"].to_numpy())
+    mother_rows, father_rows = pg.mother_rows, pg.father_rows
 
     with _timed("size+structure"):
-        size, comp_labels = compute_size_structure(df, children_csr)
+        size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
+
+    with _timed("mating pairs grouped"):
+        mating = _group_mating_pairs(df, mother_rows, father_rows)
 
     with _timed("sibship sizes"):
-        sibships = compute_sibship_sizes(df)
+        sibships = compute_sibship_sizes(mating.sizes)
 
     with _timed("mating-pair summary"):
-        mating_pairs = compute_mating_pair_summary(df)
+        mating_pairs = compute_mating_pair_summary(mating.sizes)
 
     # Opt-in: no grouping, no moments, no sampler unless --sex-concordance was
     # typed. Runs on the validated final sex, so it must follow load_and_validate.
@@ -910,14 +908,16 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         sex_source = df["sex_source"].to_numpy()
         idf = build_individual_df(
             df,
-            id_index,
+            mother_rows,
+            father_rows,
+            mating,
             F_vec,
             n_anc,
             n_desc,
             comp_labels,
             sex_source,
         )
-        founder_summary, n_founder_anc = compute_founder_summary(idf)
+        founder_summary, n_founder_anc = compute_founder_summary(idf, mother_rows, father_rows)
         idf = idf.with_columns(pl.Series("n_founder_ancestors", n_founder_anc))
 
     with _timed("aggregate pedigree sections"):
@@ -1020,7 +1020,7 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     watchdog.on_breach(publish_partial)
     try:
         with _timed("load+validate"):
-            df, _children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)
@@ -1064,8 +1064,7 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
     added_founders: list[dict] = []
     df_out = ctx.df_raw
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
-        id_index = IdIndex(ctx.ids)
-        added_founders = _build_added_founders(ctx.mothers, ctx.fathers, id_index, args.no_sex_check)
+        added_founders = _build_added_founders(ctx.mothers, ctx.fathers, ctx.id_index, args.no_sex_check)
         # Fold sex imputation into the fixed output so the user's "fixed"
         # file reflects the auto-fix instead of the original blanks.
         sex_imp = ctx.get_imputation()
@@ -1110,13 +1109,8 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
             df_out = df_out.with_columns(pl.Series("sex_source", sex_imp.sex_source.astype(str)))
         # Reorder so the fixed file is parents-before-children and feeds back
         # into pedsum without further auto-fixes.
-        m_row, _ = _parent_rows(ctx.mothers, id_index)
-        f_row, _ = _parent_rows(ctx.fathers, id_index)
-        try:
-            depth = _compute_depth_unordered(m_row, f_row, len(ctx.ids))
-        except PedigreeError:
-            depth = None  # acyclic FAIL already surfaced; skip reorder
-        if depth is not None:
+        depth = ctx.depth
+        if (depth >= 0).all():  # else the acyclic FAIL already surfaced; skip reorder
             order = np.argsort(depth, kind="stable")
             natural = np.arange(len(order))
             if not np.array_equal(order, natural):
@@ -1298,7 +1292,7 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
 
     try:
         with _timed("load+validate"):
-            df, _children_csr = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)

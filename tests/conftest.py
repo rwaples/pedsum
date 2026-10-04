@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -26,6 +27,10 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from pedsum.cli import main  # noqa: E402
+from pedsum.pedigree_ops import IdIndex, _parent_rows  # noqa: E402
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -90,6 +95,14 @@ def load_summary_tsv(out_dir: Path) -> list[list[str]]:
     path = out_dir / "summary.pedigree.tsv"
     with path.open() as fh:
         return list(csv.reader(fh, delimiter="\t"))
+
+
+def parent_rows(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Each row's (mother row, father row), ``-1`` when unknown, as summarize reads them off the graph."""
+    id_index = IdIndex(df["id"].to_numpy())
+    mother_rows, _ = _parent_rows(df["mother"].to_numpy(), id_index)
+    father_rows, _ = _parent_rows(df["father"].to_numpy(), id_index)
+    return mother_rows, father_rows
 
 
 def read_tsv_gz(path: Path, *, as_str: bool = False) -> pl.DataFrame:

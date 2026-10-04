@@ -88,7 +88,7 @@ def _load_graph(rows, tmp_path):
     from pedsum.validate import load_and_validate
 
     ped = write_ped(tmp_path / "ped.tsv", rows)
-    df, _ = load_and_validate(ped)
+    df = load_and_validate(ped)
     return df, _build_pedigree_graph(df)
 
 

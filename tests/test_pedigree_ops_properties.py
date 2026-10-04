@@ -1,8 +1,8 @@
 """Property-based tests for low-level pedigree array helpers in ``pedsum.pedigree_ops``.
 
-Covers the order-tolerant topological-depth sweep (row-order invariance,
-idempotence, cycle detection), full-sib counting (conservation per mating pair),
-and parent-row resolution (mask/row consistency). Inputs are random acyclic
+Covers the order-tolerant topological depth (row-order invariance,
+idempotence, cycle marking), mating-pair grouping (agreement with a
+``np.unique`` grouping), and parent-row resolution (mask/row consistency). Inputs are random acyclic
 pedigrees with ids ``0..n-1`` emitted in topological order.
 """
 
@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from pedsum.base import PedigreeError
-from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _full_sib_groups, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _group_mating_pairs, _parent_rows, _structural_depth
 
 
 @st.composite
@@ -38,11 +36,10 @@ def _pedigrees(draw: st.DrawFn) -> tuple[list[int], np.ndarray, np.ndarray]:
 
 def _depth_by_id(order: list[int], mothers: np.ndarray, fathers: np.ndarray) -> dict[int, int]:
     """Compute per-id depth for a given row ``order`` of the same pedigree."""
-    n = len(order)
     pos = {id_: row for row, id_ in enumerate(order)}
     m_rows = np.array([pos[int(mothers[i])] if mothers[i] != -1 else -1 for i in order], dtype=np.int64)
     f_rows = np.array([pos[int(fathers[i])] if fathers[i] != -1 else -1 for i in order], dtype=np.int64)
-    depth = _compute_depth_unordered(m_rows, f_rows, n)
+    depth = _structural_depth(m_rows, f_rows)
     return {id_: int(depth[row]) for row, id_ in enumerate(order)}
 
 
@@ -66,35 +63,37 @@ def test_depth_row_order_invariant_and_monotone(ped: tuple, data: st.DataObject)
             assert base[i] > base[int(fathers[i])]
 
 
-def test_depth_detects_cycle() -> None:
-    """A 2-row mutual-parent cycle has no founder, so the sweep raises ``PedigreeError``."""
-    mothers = np.array([1, 0], dtype=np.int64)
-    fathers = np.array([-1, -1], dtype=np.int64)
-    with pytest.raises(PedigreeError):
-        _compute_depth_unordered(mothers, fathers, 2)
+def test_depth_marks_cycle_and_descendants() -> None:
+    """Rows in a cycle, and rows descended from one, keep depth -1; the rest are placed."""
+    # rows 0 and 1 are each other's mother; row 3 has row 0 as mother and founder row 2 as father.
+    mothers = np.array([1, 0, -1, 0], dtype=np.int64)
+    fathers = np.array([-1, -1, -1, 2], dtype=np.int64)
+    np.testing.assert_array_equal(_structural_depth(mothers, fathers), [-1, -1, 0, -1])
 
 
 @settings(deadline=None)
-@given(ped=_pedigrees())
-def test_full_sib_counts_conserved(ped: tuple) -> None:
-    """fs_count is non-negative, zero when a parent is missing, and sums to n(n-1) per mating pair."""
+@given(ped=_pedigrees(), data=st.data())
+def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> None:
+    """Pairs, sizes, and parent rows agree with ``np.unique(axis=0)``, in any row order."""
     ids, mothers, fathers = ped
-    df = pl.DataFrame({"id": ids, "mother": mothers, "father": fathers})
-    fs_count, _, _ = _full_sib_groups(df)
+    order = data.draw(st.permutations(ids))
+    df = pl.DataFrame({"id": ids, "mother": mothers, "father": fathers})[order]
+    id_index = IdIndex(df["id"].to_numpy())
+    m_rows, _ = _parent_rows(df["mother"].to_numpy(), id_index)
+    f_rows, _ = _parent_rows(df["father"].to_numpy(), id_index)
+    mating = _group_mating_pairs(df, m_rows, f_rows)
 
-    assert (fs_count >= 0).all()
-    missing_parent = (mothers == -1) | (fathers == -1)
-    assert (fs_count[missing_parent] == 0).all()
-    assert (~missing_parent)[fs_count > 0].all()  # fs_count > 0 implies both parents present
-
-    both_present_rows = np.where(~missing_parent)[0]
-    pair_keys = np.column_stack([mothers[both_present_rows], fathers[both_present_rows]])
-    if both_present_rows.size:
-        _, inv = np.unique(pair_keys, axis=0, return_inverse=True)
-        for group in range(int(inv.max()) + 1):
-            rows = both_present_rows[inv == group]
-            size = len(rows)
-            assert fs_count[rows].sum() == size * (size - 1)
+    both = np.flatnonzero((m_rows >= 0) & (f_rows >= 0))
+    assert sorted(mating.children.tolist()) == both.tolist()
+    assert (np.diff(mating.pair) >= 0).all()
+    keys = np.column_stack([df["mother"].to_numpy()[both], df["father"].to_numpy()[both]])
+    if both.size:
+        _, sizes = np.unique(keys, axis=0, return_counts=True)
+        np.testing.assert_array_equal(mating.sizes, sizes)
+    else:
+        assert mating.sizes.size == 0
+    np.testing.assert_array_equal(mating.mother_rows[mating.pair], m_rows[mating.children])
+    np.testing.assert_array_equal(mating.father_rows[mating.pair], f_rows[mating.children])
 
 
 @settings(deadline=None)

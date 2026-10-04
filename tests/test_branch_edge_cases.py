@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import polars as pl
 import pytest
+from conftest import parent_rows
 from relationship_summary_oracle import compute_relationship_summary
 
 from pedsum.base import PedigreeError
@@ -28,7 +29,7 @@ from pedsum.parse import (
     _read_pedigree_table,
     _sniff_delimiter,
 )
-from pedsum.pedigree_ops import IdIndex, _compute_depth_unordered, _full_sib_groups, _id_list
+from pedsum.pedigree_ops import IdIndex, _group_mating_pairs, _id_list, _structural_depth
 from pedsum.report import (
     _apply_safe_attempt,
     _build_individual_data,
@@ -189,27 +190,26 @@ class TestPedigreeOpsAndPairsEdgeCases:
         assert _id_list([3, 4]) == "3, 4"
         assert _id_list(range(7), max_show=3) == "0, 1, 2, ... (7 total)"
 
-    def test_full_sib_groups_empty_and_present_parent_pairs(self) -> None:
-        """Full-sib grouping handles no-full-parent and full-parent sibling groups."""
-        df = pl.DataFrame({"mother": [-1, 1], "father": [-1, -1]})
-        counts, groups, both_present = _full_sib_groups(df)
-        np.testing.assert_array_equal(counts, np.array([0, 0], dtype=np.int64))
-        assert groups.size == 0
-        assert not both_present.any()
+    def test_mating_pairs_empty_and_present_parent_pairs(self) -> None:
+        """Mating-pair grouping handles no-full-parent and full-parent sibling groups."""
+        df = pl.DataFrame({"id": [1, 2], "mother": [-1, 1], "father": [-1, -1]})
+        mating = _group_mating_pairs(df, *parent_rows(df))
+        assert mating.children.size == 0
+        assert mating.sizes.size == 0
 
-        sibs = pl.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
-        counts, groups, both_present = _full_sib_groups(sibs)
-        np.testing.assert_array_equal(counts, np.array([0, 0, 1, 1], dtype=np.int64))
+        sibs = pl.DataFrame({"id": [1, 2, 3, 4], "mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
+        mating = _group_mating_pairs(sibs, *parent_rows(sibs))
         # One (mother=1, father=2) mating pair with two children.
-        assert groups.tolist() == [2]
-        assert both_present.tolist() == [False, False, True, True]
+        assert mating.children.tolist() == [2, 3]
+        assert mating.sizes.tolist() == [2]
+        assert mating.mother_rows.tolist() == [0]
+        assert mating.father_rows.tolist() == [1]
 
-    def test_compute_depth_unordered_detects_cycles(self) -> None:
-        """Depth computation raises when parent rows form a true cycle."""
-        depth = _compute_depth_unordered(np.array([-1, 0]), np.array([-1, -1]), 2)
+    def test_structural_depth_marks_cycles(self) -> None:
+        """Depth places acyclic rows and leaves rows in a true cycle at -1."""
+        depth = _structural_depth(np.array([-1, 0]), np.array([-1, -1]))
         np.testing.assert_array_equal(depth, np.array([0, 1], dtype=np.int32))
-        with pytest.raises(PedigreeError, match="cycle"):
-            _compute_depth_unordered(np.array([1, 0]), np.array([-1, -1]), 2)
+        np.testing.assert_array_equal(_structural_depth(np.array([1, 0]), np.array([-1, -1])), [-1, -1])
 
 
 class TestSchemaEdgeCases:
@@ -462,22 +462,24 @@ class TestSectionEdgeCases:
         """Effective-count helper returns zero when all weights are non-positive."""
         assert _effective_count_from_weights(np.array([0, -1])) == 0.0
 
-    def test_size_structure_without_children_csr(self) -> None:
-        """Size-structure computation has a no-graph path for component labels."""
-        df = pl.DataFrame({"mother": [-1, -1], "father": [-1, -1], "sex": [1, 0], "ped_depth": [0, 0]})
-        summary, labels = compute_size_structure(df, None)
+    def test_size_structure_without_parent_edges(self) -> None:
+        """Size-structure computation has a no-edge path for component labels."""
+        df = pl.DataFrame({"id": [1, 2], "mother": [-1, -1], "father": [-1, -1], "sex": [1, 0], "ped_depth": [0, 0]})
+        summary, labels = compute_size_structure(df, *parent_rows(df))
         assert summary["n_components"] == 2
         np.testing.assert_array_equal(labels, np.array([0, 1], dtype=np.int32))
 
     def test_mating_and_sibship_empty_and_nonempty_outputs(self) -> None:
         """Mating-pair and sibship sections cover no-child and child-present outputs."""
-        df = pl.DataFrame({"mother": [-1, -1], "father": [-1, -1]})
-        assert compute_mating_pair_summary(df) is None
-        assert compute_sibship_sizes(df) == {"empty": True}
+        df = pl.DataFrame({"id": [1, 2], "mother": [-1, -1], "father": [-1, -1]})
+        sizes = _group_mating_pairs(df, *parent_rows(df)).sizes
+        assert compute_mating_pair_summary(sizes) is None
+        assert compute_sibship_sizes(sizes) == {"empty": True}
 
-        with_children = pl.DataFrame({"mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
-        mating = compute_mating_pair_summary(with_children)
-        sibs = compute_sibship_sizes(with_children)
+        with_children = pl.DataFrame({"id": [1, 2, 3, 4], "mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
+        sizes = _group_mating_pairs(with_children, *parent_rows(with_children)).sizes
+        mating = compute_mating_pair_summary(sizes)
+        sibs = compute_sibship_sizes(sizes)
         assert mating is not None
         assert mating["n_pairs"] == 1
         assert sibs["n_sibships"] == 1
@@ -494,7 +496,7 @@ class TestSectionEdgeCases:
                 "is_founder": pl.Boolean,
             }
         )
-        summary, counts = compute_founder_summary(empty)
+        summary, counts = compute_founder_summary(empty, *parent_rows(empty))
         assert summary == {"computed": True, "by_depth": [], "bottleneck": None}
         assert counts.size == 0
 
@@ -507,12 +509,12 @@ class TestSectionEdgeCases:
                 "is_founder": [True, True, False],
             }
         )
-        skipped, skipped_counts = compute_founder_summary(idf, max_lineage_cells=1)
+        skipped, skipped_counts = compute_founder_summary(idf, *parent_rows(idf), max_lineage_cells=1)
         assert skipped["computed"] is False
         assert "exceeds" in skipped["skip_reason"]
         np.testing.assert_array_equal(skipped_counts, np.zeros(3, dtype=np.int32))
 
-        summary, n_anc = compute_founder_summary(idf)
+        summary, n_anc = compute_founder_summary(idf, *parent_rows(idf))
         assert summary["computed"] is True
         assert summary["bottleneck"] is not None
         np.testing.assert_array_equal(n_anc, np.array([1, 1, 2], dtype=np.int32))
@@ -555,9 +557,12 @@ class TestSectionEdgeCases:
                 "ped_depth": [0, 0, 0, 1, 1, 2, 2],
             }
         )
+        mother_rows, father_rows = parent_rows(df)
         idf = build_individual_df(
             df,
-            IdIndex(df["id"].to_numpy()),
+            mother_rows,
+            father_rows,
+            _group_mating_pairs(df, mother_rows, father_rows),
             F=np.zeros(len(df)),
             n_distinct_ancestors=np.arange(len(df)),
             n_descendant_paths=np.arange(len(df)),

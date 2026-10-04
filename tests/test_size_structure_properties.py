@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import polars as pl
 import pytest
+from conftest import parent_rows
 from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import IdIndex, _build_children_csr, _parent_rows
+from pedsum.pedigree_ops import _build_children_csr, _group_mating_pairs
 from pedsum.sections import _offspring_dist, compute_sibship_sizes, compute_size_structure
-
-if TYPE_CHECKING:
-    import scipy.sparse as sp
 
 
 @st.composite
@@ -46,18 +42,10 @@ def acyclic_pedigree_frames(draw: st.DrawFn, *, max_size: int = 30) -> pl.DataFr
     )
 
 
-def _children_csr(df: pl.DataFrame) -> sp.csr_matrix | None:
-    """Build the children CSR for ``df`` using the production row-mapping helper."""
-    id_index = IdIndex(df["id"].to_numpy())
-    m_row, mask_m = _parent_rows(df["mother"].to_numpy(), id_index)
-    f_row, mask_f = _parent_rows(df["father"].to_numpy(), id_index)
-    return _build_children_csr(m_row, mask_m, f_row, mask_f, len(df))
-
-
 @given(acyclic_pedigree_frames())
 def test_compute_size_structure_conserves_counts(df: pl.DataFrame) -> None:
     """Size-structure headline counts partition individuals and parent links."""
-    summary, labels = compute_size_structure(df, _children_csr(df))
+    summary, labels = compute_size_structure(df, *parent_rows(df))
     n = len(df)
     has_mom = df["mother"].to_numpy() != -1
     has_dad = df["father"].to_numpy() != -1
@@ -80,17 +68,17 @@ def test_compute_size_structure_conserves_counts(df: pl.DataFrame) -> None:
 @given(acyclic_pedigree_frames(), st.data())
 def test_compute_size_structure_is_row_order_invariant(df: pl.DataFrame, data: st.DataObject) -> None:
     """Permuting rows leaves structural summary counts unchanged."""
-    summary, _ = compute_size_structure(df, _children_csr(df))
+    summary, _ = compute_size_structure(df, *parent_rows(df))
     perm = data.draw(st.permutations(range(len(df))))
     shuffled = df[list(perm)]
-    shuffled_summary, _ = compute_size_structure(shuffled, _children_csr(shuffled))
+    shuffled_summary, _ = compute_size_structure(shuffled, *parent_rows(shuffled))
     assert shuffled_summary == summary
 
 
 @given(acyclic_pedigree_frames())
 def test_build_children_csr_matches_known_parent_links(df: pl.DataFrame) -> None:
     """The parent→child CSR contains exactly the known parent-child links."""
-    csr = _children_csr(df)
+    csr = _build_children_csr(*parent_rows(df))
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
     n_edges = int((mothers != -1).sum() + (fathers != -1).sum())
@@ -122,7 +110,7 @@ def test_offspring_distribution_is_a_pmf(counts: list[int]) -> None:
 @given(acyclic_pedigree_frames())
 def test_sibship_size_distribution_is_a_pmf(df: pl.DataFrame) -> None:
     """Non-empty sibship-size histograms conserve probability mass over Mating Pairs."""
-    summary = compute_sibship_sizes(df)
+    summary = compute_sibship_sizes(_group_mating_pairs(df, *parent_rows(df)).sizes)
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
     both_present = (mothers != -1) & (fathers != -1)

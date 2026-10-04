@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import _build_children_csr, _parent_rows
 
 if TYPE_CHECKING:
     from pedsum.pedigree_ops import IdIndex
@@ -318,22 +317,8 @@ def _summarize_findings(findings: list[Finding]) -> str:
     return f"{check}: {n} finding(s) — {sample_str}{extra}"
 
 
-def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, id_index: IdIndex) -> list[Finding]:
-    """Detect IDs in a cycle via Kahn's; one Finding per node that couldn't be resolved."""
-    n = len(ids)
-    m_row, mask_m = _parent_rows(mothers, id_index)
-    f_row, mask_f = _parent_rows(fathers, id_index)
-    children = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
-    indeg = mask_m.astype(np.int32) + mask_f.astype(np.int32)
-    frontier = np.where(indeg == 0)[0]
-    while len(frontier) > 0 and children is not None:
-        sub = children[frontier]
-        kids = sub.indices
-        if len(kids) == 0:
-            break
-        np.subtract.at(indeg, kids, 1)
-        unique_kids = np.unique(kids)
-        frontier = unique_kids[indeg[unique_kids] == 0]
+def _check_acyclic(ids: np.ndarray, depth: np.ndarray) -> list[Finding]:
+    """One Finding per row in or below a cycle (``depth == -1``; see ``_structural_depth``)."""
     return [
         Finding(
             check="acyclic",
@@ -341,7 +326,7 @@ def _check_acyclic(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, id
             row=int(i),
             detail=f"id={int(ids[i])} could not be topologically ordered (in a cycle)",
         )
-        for i in np.where(indeg > 0)[0]
+        for i in np.where(depth < 0)[0]
     ]
 
 

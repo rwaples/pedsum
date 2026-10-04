@@ -49,13 +49,11 @@ from pedsum.parse import (
     _maybe_warn_csv,
     _read_pedigree_table,
 )
-from pedsum.pedigree_ops import IdIndex, _build_children_csr, _compute_depth_unordered, _parent_rows
+from pedsum.pedigree_ops import IdIndex, _parent_rows, _structural_depth
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-
-    import scipy.sparse as sp
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +234,15 @@ class ValidationContext:
     def id_index(self) -> IdIndex:
         """Row lookup over the parsed IDs; built once (IDs are fixed after parse)."""
         return IdIndex(self.ids)
+
+    @cached_property
+    def depth(self) -> np.ndarray:
+        """Topological depth per parsed row, -1 in or below a cycle; built once."""
+        assert self.mothers is not None
+        assert self.fathers is not None
+        m_row, _ = _parent_rows(self.mothers, self.id_index)
+        f_row, _ = _parent_rows(self.fathers, self.id_index)
+        return _structural_depth(m_row, f_row)
 
     @cached_property
     def imputation(self) -> _SexImputation:
@@ -440,8 +447,8 @@ def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
-    ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(_check_acyclic(ids, mothers, fathers, ctx.id_index))
+    ids, _, _ = ctx.require_id_parents()
+    return _from_findings(_check_acyclic(ids, ctx.depth))
 
 
 def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
@@ -817,20 +824,17 @@ def load_and_validate(
     birth_year_max: int | None = None,
     sep: str = "auto",
     no_sex_check: bool = False,
-) -> tuple[pl.DataFrame, sp.csr_matrix | None]:
-    """Load TSV, run all QC fail-fast, return (df, children_csr).
+) -> pl.DataFrame:
+    """Load TSV, run all QC fail-fast, return the validated pedigree.
 
-    df has columns id, sex (int8), mother, father, sex_source, and
+    The frame has columns id, sex (int8), mother, father, sex_source,
     ``birth_year`` (int32, sentinel -1) when ``birth_year_col`` is set and
-    present. Missing parent encoded as -1. children_csr is the parent→child
-    sparse matrix (None if there are no parent edges), shared across the
-    generations / components / descendants / inbreeding passes. Raises
-    ``PedigreeError`` on the first failing Check.
+    present, and ``ped_depth`` (int32 topological depth, founders 0). Missing
+    parent encoded as -1. Raises ``PedigreeError`` on the first failing Check.
 
     Rows are topologically sorted (parents before children). pedigree-graph
     accepts rows in any order, so the sort is pedsum's own output contract, not
-    a construction precondition. ``ped_depth`` is populated by the caller from
-    ``pg.depth`` before any summary function runs.
+    a construction precondition.
     """
     t0 = time.perf_counter()
     ctx = _build_context(
@@ -875,48 +879,24 @@ def load_and_validate(
         if n_orphan > 0:
             logger.info("kept %d row(s) with sex=%d (--allow-missing-sex)", n_orphan, SEX_UNKNOWN)
 
-    # Map parent IDs to row indices, run a fixed-point depth sweep tolerant of
-    # arbitrary input row order, and sort by depth (parents before children).
-    birth_year = ctx.birth_year
-    id_index = ctx.id_index
-    m_row, mask_m = _parent_rows(mothers, id_index)
-    f_row, mask_f = _parent_rows(fathers, id_index)
-    depth = _compute_depth_unordered(m_row, f_row, n)
+    # Sort by the depth the acyclic Check computed (parents before children).
+    depth = ctx.depth
+    columns = {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source.astype(str)}
+    if ctx.birth_year is not None:
+        columns["birth_year"] = ctx.birth_year
+    columns["ped_depth"] = depth
     natural = np.arange(n)
     order = np.argsort(depth, kind="stable")
-    reordered = not np.array_equal(order, natural)
-
-    if reordered:
-        n_oo = int((order != natural).sum())
+    if not np.array_equal(order, natural):
         logger.info(
             "reordering %d/%d row(s) into topological order (parents before children)",
-            n_oo,
+            int((order != natural).sum()),
             n,
         )
-        out = pl.DataFrame(
-            {
-                "id": ids[order],
-                "sex": sex[order],
-                "mother": mothers[order],
-                "father": fathers[order],
-                "sex_source": imp.sex_source[order].astype(str),
-            },
-        )
-        if birth_year is not None:
-            out = out.with_columns(pl.Series("birth_year", birth_year[order]))
-        reordered_index = IdIndex(out["id"].to_numpy())
-        m_row, mask_m = _parent_rows(out["mother"].to_numpy(), reordered_index)
-        f_row, mask_f = _parent_rows(out["father"].to_numpy(), reordered_index)
-    else:
-        out = pl.DataFrame(
-            {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source.astype(str)},
-        )
-        if birth_year is not None:
-            out = out.with_columns(pl.Series("birth_year", birth_year))
-
-    children_csr = _build_children_csr(m_row, mask_m, f_row, mask_f, n)
+        columns = {name: values[order] for name, values in columns.items()}
+    out = pl.DataFrame(columns)
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
-    return out, children_csr
+    return out
 
 
 def validate_pedigree(
