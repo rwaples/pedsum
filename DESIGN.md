@@ -82,9 +82,13 @@ its Rust row-streaming engine, so neither builds a pair list:
 
 ## Performance thresholds
 
-- F kernel (Meuwissen-Luo): logs INFO above `N = 1,000,000` so naive
-  runs don't silently hang. See `_F_KERNEL_WARN_THRESHOLD` (`pedsum/base.py`)
-  and its use in `_run_summarize` (`pedsum/cli.py`).
+- F kernel (Meuwissen-Luo): logs a WARNING when rows times the largest
+  possible ancestor set, `min(2^(depth+1) - 2, rows)`, passes 4e9, so
+  large or deep runs don't silently hang. See `_F_WALK_WARN_VISITS`
+  (`pedsum/base.py`) and its use in `_run_summarize` (`pedsum/cli.py`).
+- Descendant path counts run right after the graph build: they cost one
+  pass, and an int64 overflow on a deep pedigree then exits 1 before any
+  expensive phase.
 - `--per-individual-burden`: O(N) output storage like the default; it
   builds no pair list.
 - `epimight-input --pairs`: the one path that still materialises pairs,

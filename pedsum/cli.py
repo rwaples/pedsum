@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 import polars as pl
-from pedigree_graph import configure_threads
+from pedigree_graph import ResourceError, configure_threads
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
-    _F_KERNEL_WARN_THRESHOLD,
+    _F_WALK_WARN_VISITS,
     SEX_FEMALE,
     SEX_MALE,
     SEX_UNKNOWN,
@@ -334,10 +334,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=True,
         help="compute per-individual F and the inbreeding summary section "
         "(default: on; pass --no-inbreeding to skip). F is the most expensive "
-        "single computation in pedsum (~minutes on 10M-row pedigrees); pedsum "
-        "logs an INFO line above N=1,000,000 so naive runs cannot silently "
-        "hang. When off, F and n_ancestors in the per-individual table are "
-        "zero-filled.",
+        "single computation in pedsum: its time grows with rows and steeply with "
+        "depth, and pedsum logs a WARNING first when the pedigree is large or "
+        "deep enough for that to take a while. When off, F and n_ancestors in "
+        "the per-individual table are zero-filled.",
     )
     p_sum.add_argument(
         "--effective-size",
@@ -834,6 +834,24 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
     mother_rows, father_rows = pg.mother_rows, pg.father_rows
+    n_indiv = len(df)
+    max_depth = int(df["ped_depth"].max()) if n_indiv else 0
+
+    # One cheap pass, but path counts can double with each level of a deep
+    # pedigree and overflow int64; counting first fails before the expensive
+    # phases rather than after them.
+    try:
+        with _timed("descendants"):
+            n_desc = pg.descendant_path_counts()
+    except ResourceError as e:
+        if e.code != "arithmetic_overflow":
+            raise
+        logger.error(
+            "descendant path counts overflow int64 at max depth %d, so summarize cannot "
+            "report n_descendant_paths for this pedigree; see README 'Deep pedigrees'",
+            max_depth,
+        )
+        return 1
 
     with _timed("size+structure"):
         size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
@@ -858,7 +876,6 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             timer=_timed,
         )
 
-    n_indiv = len(df)
     if args.per_individual_pairs:
         with _timed("relationship burden"):
             with relationship_progress("relationship_burden") as progress:
@@ -884,10 +901,12 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         }
 
     if args.inbreeding:
-        if n_indiv > _F_KERNEL_WARN_THRESHOLD:
-            logger.info(
-                "computing F on N=%s rows; may take several minutes — pass --no-inbreeding to skip",
+        if n_indiv * min(2 ** (max_depth + 1) - 2, n_indiv) > _F_WALK_WARN_VISITS:
+            logger.warning(
+                "computing F on %s rows at max depth %d; its time grows with rows and steeply "
+                "with depth (README 'Deep pedigrees') — pass --no-inbreeding to skip",
                 f"{n_indiv:,}",
+                max_depth,
             )
         with _timed("inbreeding (F + n_ancestors)"):
             F_vec = pg.inbreeding()
@@ -898,9 +917,6 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         inb_summary = None
         F_vec = np.zeros(n_indiv, dtype=np.float64)
         n_anc = np.zeros(n_indiv, dtype=np.int32)
-
-    with _timed("descendants"):
-        n_desc = pg.descendant_path_counts()
 
     out_dir = args.out_dir
 

@@ -81,6 +81,16 @@ whole command.
   6.65 s to 0.47 s. With rows out of topological order and
   `--max-degree 1`, wall time fell from 19.0 s to 10.6 s.
   `load_and_validate` now returns the frame alone, with `ped_depth`.
+- **`summarize` warns about deep pedigrees and fails fast when descendant
+  paths overflow** ([#8](https://github.com/rwaples/pedsum/issues/8)). The
+  F warning used to key on rows alone (INFO above 1M rows). It is now a
+  WARNING on rows times the largest possible ancestor set,
+  `min(2^(depth+1) - 2, rows)`, past 4e9, since F's time grows steeply with
+  **Depth**: on generated 1M-row pedigrees it took 3.7 s at max depth 7 and
+  13.4 min at depth 19. Descendant path counts now run right after the
+  graph build, so an int64 overflow (reached by depth 59 on those
+  pedigrees) exits 1 with one error line instead of a traceback after the
+  F phase. README "Deep pedigrees" gives the measurements.
 
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 

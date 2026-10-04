@@ -142,7 +142,8 @@ Flags:
 
 - `--inbreeding` / `--no-inbreeding` — compute per-individual `F` and
   the inbreeding summary section. On by default. F is the single most
-  expensive computation in pedsum (~minutes on 10M-row pedigrees).
+  expensive computation in pedsum, and its time grows with rows and
+  steeply with **Depth** (see [Deep pedigrees](#deep-pedigrees)).
 - `--max-degree N` — count relationship pairs up to degree `N` (1 to 5,
   default 5). Codes past `N`, and their `by_degree` entries, are null:
   not counted, which is different from zero. `structure.max_degree_enumerated`
@@ -621,8 +622,35 @@ python pedigree_summary.py summarize \
 On the 783,029-row horse pedigree, degree-2 counting takes 1.4 s where
 degree 5 takes about 30 minutes (see `--max-degree`). Once the first
 pass succeeds, raise `--max-degree` and drop `--no-inbreeding` as time
-allows. `effective-size` is a separate run; its default six estimators
-take under a second on the same pedigree.
+allows. `effective-size` is a separate run; its default eight estimators
+take about a second on the same pedigree.
+
+### Deep pedigrees
+
+Row count is a poor guide to F's cost; **Depth** matters more. F walks
+each individual's whole ancestor set, and that set can double with every
+level of depth until it covers most of the earlier population. Measured
+on generated 1M-row pedigrees (pedigree-graph 0.12.1, one thread):
+
+| max depth | F | distinct-ancestor counts |
+|---|---|---|
+| 7 | 3.7 s | 0.3 s, 267 MB |
+| 11 | 29 s | 2.3 s, 626 MB |
+| 15 | 3.6 min | 18 s, 4.1 GB |
+| 19 | 13.4 min | over 12 GiB, killed |
+
+`summarize` computes the distinct-ancestor counts (`n_distinct_ancestors`)
+together with F, so on pedigree-graph 0.12.1 a deep pedigree can run out
+of memory as well as time. Before F starts, pedsum logs a WARNING when
+rows times the largest possible ancestor set (`min(2^(depth+1) - 2,
+rows)`) passes 4e9, about 1M rows at depth 11. `--no-inbreeding` skips
+both.
+
+`n_descendant_paths` counts paths, not individuals, so it also grows
+with depth: on the same generated pedigrees it reaches 2e16 at depth 49
+and overflows int64 by depth 59. `summarize` counts descendant paths
+first and exits 1 with a one-line error when they overflow, before any
+expensive phase.
 
 ## Memory limit
 
