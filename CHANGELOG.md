@@ -56,6 +56,15 @@ whole command.
   depth), and the record gains `reference_column`. With it, the
   `ne_unrelated_founders` field reproduces purgeR's published Ne for the
   atlas, dama, arrui and dorcas studbooks (14.01, 11.10, 3.84, 39.32).
+- **Every `ne: null` in `effective_size.yaml` has a `reason`.** An
+  estimator that ran but found no estimate reports `reason: no_estimate`
+  and a `code` read from its own fields, for example `too_few_cohorts`
+  (`n_depths_used` below 2), `no_positive_rate`, or
+  `reference_not_inbred`; the README lists all twelve codes. Before, these
+  records had no reason, and a reader could not tell them from a bug. When
+  `ne_individual_delta_f` has no estimate but `ne_per_gen` has one at
+  another depth, a warning names the reference and its `n_reference` and
+  points to `--reference-col` (pedsum #10).
 - **A progress bar for relationship counting.** In a terminal,
   `summarize` (pair counts and `--per-individual-burden`) and
   `epimight-input` (relative counts and `--pairs`) draw a tqdm bar in rows

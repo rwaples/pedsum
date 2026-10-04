@@ -1112,6 +1112,22 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
         # One rebinding, so the breach callback sees every result or none.
         results = computed
 
+    delta_f = results["ne_individual_delta_f"]
+    if delta_f.get("reason") == "no_estimate" and any(ne is not None for ne in delta_f["ne_per_gen"]):
+        if "reference_column" in delta_f:
+            reference = f"the reference column {delta_f['reference_column']!r}"
+        elif delta_f["reference_generation"] is not None:
+            reference = f"the last observed depth (depth {delta_f['reference_generation']})"
+        else:
+            reference = "the last observed depth"
+        logger.warning(
+            "ne_individual_delta_f has no estimate (%s) over %s with n_reference=%d, though ne_per_gen has "
+            "one at another depth; pass --reference-col NAME to choose a different reference subpopulation",
+            delta_f["code"],
+            reference,
+            delta_f["n_reference"],
+        )
+
     with watchdog.disarm() as owns_output:
         if owns_output:
             data = _build_effective_size_data(args.in_path, cmd, len(df), "complete", requested, results)

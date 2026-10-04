@@ -417,12 +417,37 @@ every name carries its estimator. All eight run by default.
 | `ne_coancestry` | Ne_C |
 | `ne_group_coancestry` | Ne_GC |
 
-All eight records are always written. An estimator you did not select
-reports `{ne: null, reason: not_requested}`; one that cannot run for want
-of metadata reports its own `reason`, for example `missing_metadata`.
+All eight records are always written, and every `ne: null` carries a
+`reason`. An estimator you did not select reports `{ne: null, reason:
+not_requested}`; one that cannot run for want of metadata reports its own
+`reason`, for example `missing_metadata`.
 `ne_long_term_contributions` reports `missing_metadata` with `code:
 incomplete_parentage` for any pedigree with a half-founder; run `validate
 --fill-half-founders` first and pass it the written `validate.tsv.gz`.
+An estimator that ran but found no estimate in these data reports
+`reason: no_estimate` and a `code`. The rest of the record shows the
+evidence:
+
+| Estimator | `code` | Meaning |
+|---|---|---|
+| `ne_inbreeding`, `ne_coancestry`, `ne_group_coancestry` | `too_few_cohorts` | Fewer than 2 depths after the first have a usable mean (`n_depths_used`). |
+| | `no_positive_rate` | The mean does not rise over depth, so the fitted `slope` gives no rate. |
+| `ne_individual_delta_f` | `empty_reference` | No reference individual has a known parent (`n_reference: 0`). |
+| | `reference_not_inbred` | The reference individuals have mean ΔF 0, so none is inbred. |
+| `ne_variance_family_size` | `too_few_parents` | No depth has at least 2 males and 2 females, with offspring from each sex. |
+| | `no_family_size_variance` | At each such depth, all males have the same number of offspring, and so do all females, so ΔF is 0. |
+| `ne_sex_ratio` | `no_depth_with_both_sexes` | No depth holds both a male and a female. |
+| `ne_long_term_contributions` | `no_founders` | The pedigree has no founder. |
+| | `no_founder_contributions` | The last depth carries no founder contribution. |
+| `ne_hill_overlapping` | `no_estimable_transition` | Collapsed to `ne_variance_family_size`, which has no estimate. |
+| | `no_eligible_cohorts` | No birth-year cohort in the window has at least 2 of each sex. |
+| | `no_estimable_cohort` | Eligible cohorts exist, but none gives a finite Ne. |
+
+When `ne_individual_delta_f` has no estimate but its per-depth
+`ne_per_gen` has one, the command logs a warning that names the reference
+subpopulation and its `n_reference`. The default reference is the last
+observed depth, which can hold few individuals; `--reference-col` picks
+another.
 
 Flags:
 

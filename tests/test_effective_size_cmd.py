@@ -361,3 +361,150 @@ def test_ne_threads_flag_is_gone(tmp_path):
     assert res.returncode != 0
     assert "--ne-threads" in res.stderr
     assert not (out_dir / "summary.yaml").exists()
+
+
+def _row(id_, sex, mother=-1, father=-1, **extra):
+    return {"id": id_, "sex": sex, "mother": mother, "father": father, **extra}
+
+
+#: Tiny pedigrees whose estimators run and find no estimate, one per kind.
+#: ``trio``: depths 0 and 1 only. ``outbred``: three depths, every F = 0,
+#: mean kinship falling, and every parent with two offspring. ``two_males``:
+#: two founders and nothing else. ``late_inbred``: depth 2 is inbred, depth 3
+#: (the default reference) is not.
+_NO_ESTIMATE_PEDIGREES = {
+    "trio": [_row(1, "M"), _row(2, "F"), _row(3, "F", 2, 1)],
+    "trio_birth_year": [
+        _row(1, "M", birth_year=2000),
+        _row(2, "F", birth_year=2000),
+        _row(3, "F", 2, 1, birth_year=2020),
+    ],
+    "outbred": [
+        *(_row(i, s) for i, s in ((1, "M"), (2, "F"), (3, "F"), (4, "M"))),
+        _row(5, "M", 2, 1),
+        _row(6, "F", 2, 1),
+        _row(7, "M", 3, 5),
+        _row(8, "F", 3, 5),
+        _row(9, "M", 6, 4),
+        _row(10, "F", 6, 4),
+    ],
+    "two_males": [_row(1, "M"), _row(2, "M")],
+    "late_inbred": [
+        _row(1, "M"),
+        _row(2, "F"),
+        _row(3, "M", 2, 1),
+        _row(4, "F", 2, 1),
+        _row(5, "M", 4, 3),
+        _row(6, "F"),
+        _row(7, "F", 6, 5),
+    ],
+}
+
+
+def _run_tiny(tmp_path, name, *extra):
+    pedigree = write_ped(tmp_path / f"{name}.tsv", _NO_ESTIMATE_PEDIGREES[name])
+    if name.endswith("birth_year"):
+        extra = ("--birth-year-col", "birth_year", *extra)
+    res, path = _run_es(tmp_path / name, *extra, pedigree=pedigree)
+    assert res.returncode == 0, res.stderr
+    return res, _load(path)["effective_size"]
+
+
+_UNIFORM_SEX = pytest.mark.filterwarnings(r"ignore:.*pg\.sex is uniform:RuntimeWarning")
+
+
+@pytest.mark.parametrize(
+    ("pedigree", "estimator", "code"),
+    [
+        ("trio", "ne_inbreeding", "too_few_cohorts"),
+        ("trio", "ne_coancestry", "too_few_cohorts"),
+        ("trio", "ne_group_coancestry", "too_few_cohorts"),
+        ("outbred", "ne_inbreeding", "no_positive_rate"),
+        ("outbred", "ne_coancestry", "no_positive_rate"),
+        ("outbred", "ne_group_coancestry", "no_positive_rate"),
+        ("trio", "ne_individual_delta_f", "reference_not_inbred"),
+        ("two_males", "ne_individual_delta_f", "empty_reference"),
+        ("trio", "ne_variance_family_size", "too_few_parents"),
+        ("outbred", "ne_variance_family_size", "no_family_size_variance"),
+        ("two_males", "ne_sex_ratio", "no_depth_with_both_sexes"),
+        ("trio", "ne_hill_overlapping", "no_estimable_transition"),
+        ("trio_birth_year", "ne_hill_overlapping", "no_eligible_cohorts"),
+    ],
+)
+@_UNIFORM_SEX
+def test_no_estimate_carries_its_code(tmp_path, pedigree, estimator, code):
+    """An estimator that runs without an estimate says why in ``reason`` and ``code``."""
+    _, records = _run_tiny(tmp_path, pedigree)
+    record = records[estimator]
+    assert (record["ne"], record["reason"], record["code"]) == (None, "no_estimate", code)
+    assert "fields" not in record
+
+
+@_UNIFORM_SEX
+def test_every_null_ne_has_a_reason(tmp_path):
+    """Drift guard: a null ``ne`` always has a reason and code; an estimate has neither."""
+    runs = [_run_tiny(tmp_path, name)[1] for name in _NO_ESTIMATE_PEDIGREES]
+    for pedigree in (EXAMPLE, write_stripped_pedigree(tmp_path / "no_birth_year.tsv")):
+        res, path = _run_es(tmp_path / pedigree.stem, pedigree=pedigree)
+        assert res.returncode == 0, res.stderr
+        runs.append(_load(path)["effective_size"])
+    res, path = _run_es(tmp_path / "with_birth_year", "--birth-year-col", "birth_year")
+    assert res.returncode == 0, res.stderr
+    runs.append(_load(path)["effective_size"])
+    for records in runs:
+        assert list(records) == list(ALL_EFFECTIVE_SIZE_ESTIMATORS)
+        for name, record in records.items():
+            if record["ne"] is None:
+                assert record["reason"] == "no_estimate", (name, record)
+                assert isinstance(record["code"], str), (name, record)
+            else:
+                assert "reason" not in record, (name, record)
+                assert "code" not in record, (name, record)
+
+
+def _run_es_in_process(tmp_path, pedigree, *extra):
+    out_dir = tmp_path / "out"
+    args = cli._parse_args(["effective-size", "--in", str(pedigree), "--out", str(out_dir), *extra])
+    assert cli._run_effective_size(args, "cmd", MemoryWatchdog(None)) == 0
+    return _load(out_dir / "effective_size.yaml")["effective_size"]["ne_individual_delta_f"]
+
+
+def _reference_warnings(caplog) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.getMessage().startswith("ne_individual_delta_f has no estimate")
+    ]
+
+
+def test_null_reference_warns_when_another_depth_has_an_estimate(tmp_path, caplog):
+    """The default reference finds no estimate though an earlier depth has one: warn and name it."""
+    pedigree = write_ped(tmp_path / "late_inbred.tsv", _NO_ESTIMATE_PEDIGREES["late_inbred"])
+    with caplog.at_level(logging.WARNING):
+        record = _run_es_in_process(tmp_path, pedigree)
+    assert record["code"] == "reference_not_inbred"
+    assert any(ne is not None for ne in record["ne_per_gen"])
+    [message] = _reference_warnings(caplog)
+    assert "the last observed depth (depth 3)" in message
+    assert "n_reference=1" in message
+    assert "--reference-col" in message
+
+
+def test_null_reference_col_warning_names_the_column(tmp_path, caplog):
+    """With ``--reference-col`` the warning names the column instead of a depth."""
+    rows = [{**row, "ref": int(row["id"] == 7)} for row in _NO_ESTIMATE_PEDIGREES["late_inbred"]]
+    pedigree = write_ped(tmp_path / "late_inbred_ref.tsv", rows)
+    with caplog.at_level(logging.WARNING):
+        _run_es_in_process(tmp_path, pedigree, "--reference-col", "ref")
+    [message] = _reference_warnings(caplog)
+    assert "the reference column 'ref'" in message
+
+
+@pytest.mark.parametrize("pedigree", ["trio", "example"])
+def test_no_reference_warning_otherwise(tmp_path, caplog, pedigree):
+    """No warning when the headline has an estimate, or when no depth has one."""
+    path = EXAMPLE if pedigree == "example" else write_ped(tmp_path / "p.tsv", _NO_ESTIMATE_PEDIGREES[pedigree])
+    with caplog.at_level(logging.WARNING):
+        record = _run_es_in_process(tmp_path, path)
+    assert (record["ne"] is None) == (pedigree == "trio")
+    assert _reference_warnings(caplog) == []

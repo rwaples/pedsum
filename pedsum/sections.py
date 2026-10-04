@@ -11,7 +11,7 @@ import scipy.sparse.csgraph as csgraph
 from pedigree_graph import RELATIONSHIPS
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from pedigree_graph import PedigreeGraph, RelationshipBurden
 
@@ -532,16 +532,14 @@ def compute_effective_size(pg: PedigreeGraph, estimators: Iterable[str]) -> dict
     Thin wrapper around ``pedigree_graph.effective_size.estimate_effective_sizes``.
     An estimator outside ``estimators`` reports ``{ne: None, reason:
     "not_requested", ...}``; the same shape carries a genuine refusal (for
-    example ``missing_metadata``), so every record has an ``ne`` and the
-    reason is never lost.
+    example ``missing_metadata``), and an estimator that ran without an
+    estimate reports ``reason: "no_estimate"`` with a ``code`` saying why.
+    Every record has an ``ne``, and every null ``ne`` has a ``reason``.
     """
     from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS, estimate_effective_sizes
 
     raw = estimate_effective_sizes(pg, tuple(estimators))
-    return {
-        name: {"ne": None, **_normalise_effective_size_keys(raw[name].to_dict())}
-        for name in ALL_EFFECTIVE_SIZE_ESTIMATORS
-    }
+    return {name: _effective_size_record(name, raw[name].to_dict()) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
 
 
 def compute_individual_delta_f_for_reference(pg: PedigreeGraph, reference_rows: np.ndarray, column: str) -> dict:
@@ -556,7 +554,7 @@ def compute_individual_delta_f_for_reference(pg: PedigreeGraph, reference_rows: 
     from pedigree_graph.effective_size import ne_individual_delta_f
 
     result = ne_individual_delta_f(pg, reference=reference_rows)
-    return {"ne": None, **_normalise_effective_size_keys(result.to_dict()), "reference_column": column}
+    return {**_effective_size_record("ne_individual_delta_f", result.to_dict()), "reference_column": column}
 
 
 #: Upstream label / counter fields renamed on the way out. pedigree-graph
@@ -578,6 +576,47 @@ _EFFECTIVE_SIZE_KEY_RENAMES: dict[str, str] = {
 def _normalise_effective_size_keys(d: dict) -> dict:
     """Rename upstream generation-labelled keys to pedsum's depth terminology."""
     return {_EFFECTIVE_SIZE_KEY_RENAMES.get(k, k): v for k, v in d.items()}
+
+
+def _log_regression_code(record: dict) -> str:
+    return "too_few_cohorts" if record["n_depths_used"] < 2 else "no_positive_rate"
+
+
+def _variance_family_size_code(record: dict) -> str:
+    estimable = any(v is not None for v in record["v_mm"])
+    return "no_family_size_variance" if estimable else "too_few_parents"
+
+
+def _hill_code(record: dict) -> str:
+    # The collapsed record drops Ne_V's v_mm, so it cannot tell too_few_parents
+    # from no_family_size_variance.
+    if record["collapses_to_ne_v"]:
+        return "no_estimable_transition"
+    return "no_estimable_cohort" if record["n_eligible_cohorts"] else "no_eligible_cohorts"
+
+
+#: Why an estimator that ran wrote ``ne: null``, read off the depth-renamed
+#: record it wrote. Each rule restates pedigree-graph 0.12.1's no-estimate
+#: branches by elimination, and its last branch is the residual one, so every
+#: null record gets a code. Delete when pedigree-graph reports the reason.
+_NO_ESTIMATE_CODES: dict[str, Callable[[dict], str]] = {
+    "ne_inbreeding": _log_regression_code,
+    "ne_coancestry": _log_regression_code,
+    "ne_group_coancestry": _log_regression_code,
+    "ne_individual_delta_f": lambda r: "reference_not_inbred" if r["n_reference"] else "empty_reference",
+    "ne_variance_family_size": _variance_family_size_code,
+    "ne_sex_ratio": lambda _r: "no_depth_with_both_sexes",
+    "ne_long_term_contributions": lambda r: "no_founder_contributions" if r["n_cohorts"] else "no_founders",
+    "ne_hill_overlapping": _hill_code,
+}
+
+
+def _effective_size_record(name: str, raw: dict) -> dict:
+    """One YAML-ready record: depth-renamed, with ``ne`` always present and a null ``ne`` explained."""
+    record = {"ne": None, **_normalise_effective_size_keys(raw)}
+    if record["ne"] is not None or "reason" in record:
+        return record
+    return {"ne": None, "reason": "no_estimate", "code": _NO_ESTIMATE_CODES[name](record), **record}
 
 
 def _build_inbreeding_summary(F: np.ndarray) -> dict:
