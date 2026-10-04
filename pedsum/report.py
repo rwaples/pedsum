@@ -46,6 +46,7 @@ _NUMERIC_COLS = (
     "n_first_cousins",
     "n_founder_ancestors",
     "n_distinct_ancestors",
+    "ecg",
     "n_descendant_paths",
 )
 

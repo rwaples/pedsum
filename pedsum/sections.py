@@ -544,6 +544,21 @@ def compute_effective_size(pg: PedigreeGraph, estimators: Iterable[str]) -> dict
     }
 
 
+def compute_individual_delta_f_for_reference(pg: PedigreeGraph, reference_rows: np.ndarray, column: str) -> dict:
+    """``ne_individual_delta_f`` averaged over a caller-chosen reference subpopulation.
+
+    Gutiérrez et al. 2008 average the individual increase in inbreeding over a
+    **reference subpopulation**; ``compute_effective_size`` uses
+    pedigree-graph's default, the last observed depth. ``reference_rows`` are
+    graph rows (``pg`` was built from the same frame, so frame rows). The record
+    has the same keys as the default one, plus ``reference_column``.
+    """
+    from pedigree_graph.effective_size import ne_individual_delta_f
+
+    result = ne_individual_delta_f(pg, reference=reference_rows)
+    return {"ne": None, **_normalise_effective_size_keys(result.to_dict()), "reference_column": column}
+
+
 #: Upstream label / counter fields renamed on the way out. pedigree-graph
 #: indexes its Ne records by *observed* label and calls that label a
 #: generation; pedsum's CONTEXT.md reserves "generation" for a temporal
@@ -596,6 +611,37 @@ def _build_inbreeding_summary(F: np.ndarray) -> dict:
         "max_F": float(F.max()) if n else 0.0,
         "hist": hist,
     }
+
+
+def equivalent_complete_generations(df: pl.DataFrame, mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
+    """Per-individual **Equivalent Complete Generations** (ECG), float64.
+
+    Maignel, Boichard & Verrier 1996: the sum over every known ancestor of
+    ``(1/2)^n``, where ``n`` is the number of generations separating it from the
+    individual. An ancestor reached by several paths counts once per path. The
+    sum satisfies the parent recurrence
+
+        ECG_i = Σ over known parents p of (1 + ECG_p) / 2,
+
+    so a founder has 0, a child of two founders has 1, and a child with one known
+    founder parent has 0.5. The recurrence runs one depth at a time over
+    ``ped_depth``: every parent sits at a lower depth than its child, so each
+    depth's parents are final before that depth is computed.
+    """
+    m_row, f_row = mother_rows, father_rows
+    has_mom, has_dad = m_row >= 0, f_row >= 0
+    depth = df["ped_depth"].to_numpy()
+    ecg = np.zeros(len(df), dtype=np.float64)
+    order = np.argsort(depth, kind="stable")
+    bounds = np.searchsorted(depth[order], np.arange(1, int(depth.max(initial=0)) + 2))
+    for lo, hi in pairwise(bounds):
+        rows = order[lo:hi]
+        mom, dad = has_mom[rows], has_dad[rows]
+        ecg[rows] = 0.5 * (
+            np.where(mom, 1.0 + ecg[np.where(mom, m_row[rows], 0)], 0.0)
+            + np.where(dad, 1.0 + ecg[np.where(dad, f_row[rows], 0)], 0.0)
+        )
+    return ecg
 
 
 def build_individual_df(

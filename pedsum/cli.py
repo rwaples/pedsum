@@ -36,7 +36,7 @@ from pedsum.epimight import (
 )
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
-from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
+from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, read_reference_mask
 from pedsum.pedigree_ops import _group_mating_pairs
 from pedsum.progress import relationship_progress
 from pedsum.report import (
@@ -63,10 +63,12 @@ from pedsum.sections import (
     compute_aggregate_sections,
     compute_effective_size,
     compute_founder_summary,
+    compute_individual_delta_f_for_reference,
     compute_mating_pair_summary,
     compute_relationship_summary_from_burden,
     compute_sibship_sizes,
     compute_size_structure,
+    equivalent_complete_generations,
 )
 from pedsum.sex_concordance import compute_offspring_sex_concordance
 from pedsum.validate import (
@@ -653,6 +655,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Default: all. Every estimator appears in the output; one not selected "
         "reports reason: not_requested.",
     )
+    p_es.add_argument(
+        "--reference-col",
+        default=None,
+        metavar="NAME",
+        help="column marking the reference subpopulation (1/0 or true/false; "
+        "missing counts as 0) over which ne_individual_delta_f averages the "
+        "individual increase in inbreeding (Gutiérrez et al. 2008). Default: "
+        "the last observed depth. The record gains reference_column.",
+    )
     _add_format_args(p_es)
     _add_threads_args(p_es)
     _add_memory_args(p_es)
@@ -934,7 +945,10 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
             sex_source,
         )
         founder_summary, n_founder_anc = compute_founder_summary(idf, mother_rows, father_rows)
-        idf = idf.with_columns(pl.Series("n_founder_ancestors", n_founder_anc))
+        idf = idf.with_columns(
+            pl.Series("n_founder_ancestors", n_founder_anc),
+            pl.Series("ecg", equivalent_complete_generations(df, mother_rows, father_rows)),
+        )
 
     with _timed("aggregate pedigree sections"):
         aggregates = compute_aggregate_sections(
@@ -999,6 +1013,12 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     return 0
 
 
+#: Estimators that need every row's sex resolved (pedigree-graph raises
+#: ``MissingMetadataError`` for them otherwise). The others run on a pedigree
+#: with unknown sex, so ``effective-size`` refuses only when one is selected.
+_SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping"})
+
+
 def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:
     """``effective-size``: run the selected Ne estimators and write ``effective_size.yaml``.
 
@@ -1045,20 +1065,41 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
         logger.error("file error: %s", e)
         return 2
 
-    if (df["sex"].to_numpy() == SEX_UNKNOWN).any():
+    needs_sex = [name for name in requested if name in _SEX_DEPENDENT_ESTIMATORS]
+    if needs_sex and (df["sex"].to_numpy() == SEX_UNKNOWN).any():
         logger.error(
-            "effective size needs resolved sex for every row (ne_sex_ratio and the "
-            "sex-decomposed ne_variance_family_size use it); remove --allow-missing-sex "
-            "or supply sex for the offending rows",
+            "effective size needs resolved sex for every row to run %s; remove "
+            "--allow-missing-sex, supply sex for the offending rows, or select "
+            "only estimators that do not use sex",
+            ", ".join(needs_sex),
         )
         return 1
+
+    reference_rows = None
+    if args.reference_col is not None:
+        try:
+            mask = read_reference_mask(args.in_path, args.sep, args.id_col, args.reference_col, df["id"].to_numpy())
+        except PedigreeError as e:
+            logger.error("%s", e)
+            return 1
+        reference_rows = np.flatnonzero(mask)
+        if reference_rows.size == 0:
+            logger.error("reference column %r marks no row", args.reference_col)
+            return 1
+        if "ne_individual_delta_f" not in requested:
+            logger.warning("--reference-col only affects ne_individual_delta_f, which was not requested")
 
     with _timed("built PedigreeGraph"):
         pg = _build_pedigree_graph(df)
     n_total = len(df)
     with _timed(f"effective size ({', '.join(requested)})"):
+        computed = compute_effective_size(pg, requested)
+        if reference_rows is not None and "ne_individual_delta_f" in requested:
+            computed["ne_individual_delta_f"] = compute_individual_delta_f_for_reference(
+                pg, reference_rows, args.reference_col
+            )
         # One rebinding, so the breach callback sees every result or none.
-        results = compute_effective_size(pg, requested)
+        results = computed
 
     with watchdog.disarm() as owns_output:
         if owns_output:

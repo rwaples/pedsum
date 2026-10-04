@@ -72,6 +72,10 @@ _Avoid_: lineage (now dropped — see Flagged ambiguities)
 For one individual, the number of distinct opposite-sex partners with whom that individual shares at least one offspring in the pedigree (`0` for unmated individuals). Per-individual column is `n_mates`; aggregated under **Reproduction** as `mate_count` (summary stats over **all** individuals) and the sex-stratified `mate_count_male` / `mate_count_female` (over all males / all females respectively, zero-included).
 _Avoid_: "mates" as a noun for the count; "partners"
 
+**Equivalent Complete Generations (ECG)**:
+For one individual, the sum over every known ancestor of `(1/2)^n`, where `n` is the number of generations separating them, counting an ancestor once per path (Maignel, Boichard & Verrier 1996). Per-individual column `ecg`. Measures how much of an individual's pedigree is known; unlike **Depth** it rewards complete ancestries rather than one long line.
+_Avoid_: "generations" or "depth" unqualified; "equiGen" or "t" (other tools' names)
+
 **Founder**:
 An individual whose mother and father are both missing in the input pedigree (in-degree 0). Counted by `n_founders`. Founder is a structural property of the pedigree; it does not imply genetic, reproductive, or temporal status.
 _Avoid_: "ancestor" (unqualified), "progenitor", "root"

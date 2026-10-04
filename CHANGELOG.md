@@ -46,6 +46,16 @@ whole command.
   and degree 5 took 1,833 s. Codes past `N` and their `by_degree` rollup
   entries are null, and `structure.max_degree_enumerated` records `N`.
   With `--per-individual-burden`, a `--max-degree` below 5 exits 2.
+- **`ecg` per individual.** `summarize` adds equivalent complete
+  generations (Maignel, Boichard & Verrier 1996) to `annotated.tsv.gz`,
+  with its distribution in `summary.extra.yaml`. It matches purgeR
+  (`pop_t`, atlas sum 5500.627) and visPedigree (`ECG`) exactly on their
+  bundled pedigrees.
+- **`effective-size --reference-col NAME`** sets the reference
+  subpopulation of `ne_individual_delta_f` (default: the last observed
+  depth), and the record gains `reference_column`. With it, the
+  `ne_unrelated_founders` field reproduces purgeR's published Ne for the
+  atlas, dama, arrui and dorcas studbooks (14.01, 11.10, 3.84, 39.32).
 - **A progress bar for relationship counting.** In a terminal,
   `summarize` (pair counts and `--per-individual-burden`) and
   `epimight-input` (relative counts and `--pairs`) draw a tqdm bar in rows
@@ -64,6 +74,11 @@ whole command.
   `.<name>.partial-<pid>` beside the target and rename it into place, so
   an interrupted run never leaves a truncated file. A stop mid-write can
   leave the `.partial-<pid>` file behind.
+- **`effective-size` refuses unknown sex only for the estimators that
+  use it** (`ne_sex_ratio`, `ne_variance_family_size`,
+  `ne_hill_overlapping`). The other five now run under
+  `--allow-missing-sex`; studbooks routinely carry unsexed animals that
+  never bred.
 - **`summarize --allow-missing-sex` no longer needs `--no-inbreeding`.**
   F never read sex; the refusal moved to `effective-size`, where
   `ne_sex_ratio` and the sex-decomposed `ne_variance_family_size` need it.

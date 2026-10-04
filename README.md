@@ -196,8 +196,9 @@ Flags:
   with unknown sex (role-ambiguous). Such rows are auto-fixed to
   `sex=-1` in the validate-fixed output. Without this flag, either
   case hard-blocks. `summarize` runs normally on such rows, F included.
-  `effective-size` refuses them, because `ne_sex_ratio` and the
-  sex-decomposed `ne_variance_family_size` need every sex resolved.
+  `effective-size` refuses them only when `ne_sex_ratio`,
+  `ne_variance_family_size` or `ne_hill_overlapping` is selected, since
+  those need every sex resolved; the other five estimators run.
 - `--no-override-asserted-sex` — disable the default behavior of
   overriding asserted sex when topology unambiguously implies the
   opposite (asserted M used only as mother → F; asserted F used only
@@ -414,6 +415,14 @@ Flags:
   window and sex-decomposed `Ne_m` / `Ne_f`. Without it,
   `ne_hill_overlapping` collapses to `ne_variance_family_size`
   (`collapses_to_ne_v: true`).
+- `--reference-col NAME` — a column flagging the **reference
+  subpopulation** (`1`/`0` or `true`/`false`; missing counts as `0`) over
+  which `ne_individual_delta_f` averages the individual increase in
+  inbreeding, as Gutiérrez et al. (2008) prescribe. Without it the
+  reference is the last observed depth. The record gains
+  `reference_column`; the other seven estimators are unchanged. Its
+  `ne_unrelated_founders` field divides by `t − 1` and is the value purgeR
+  (`pop_Ne`) reports.
 - The column, `--sep`, `--sex-encoding`, `--threads` and `--max-memory`
   flags work as in `summarize`.
 
@@ -711,6 +720,17 @@ You do not need to supply a depth column. If your input already has
 a column named `ped_depth`, it is treated as a *user-supplied extra*
 (see Column preservation below) — it is **not** trusted as ground
 truth and the script computes its own depth.
+
+### Equivalent complete generations (`ecg`)
+
+`annotated.tsv.gz` carries `ecg`, each individual's **equivalent
+complete generations** (Maignel, Boichard & Verrier 1996): the sum over
+every known ancestor of `(1/2)^n`, `n` generations back, counting an
+ancestor once per path. A founder has 0, a child of two founders 1, and
+a child with one known founder parent 0.5. It measures pedigree depth
+the way ENDOG, optiSel (`equiGen`), purgeR (`pop_t`) and visPedigree
+(`ECG`) do, and its distribution is under
+`individual.distributions.ecg` in `summary.extra.yaml`.
 
 ### Column preservation
 

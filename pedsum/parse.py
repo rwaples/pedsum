@@ -430,3 +430,29 @@ _BIRTH_YEAR_DEFAULT_MIN = 1800
 def _birth_year_default_max() -> int:
     """Default upper bound for birth-year sanity (current calendar year + 1)."""
     return datetime.now(tz=UTC).year + 1
+
+
+_REFERENCE_TRUE = frozenset({"1", "true", "t", "yes", "y"})
+_REFERENCE_FALSE = frozenset({"0", "false", "f", "no", "n"})
+
+
+def read_reference_mask(path: Path, sep: str, id_col: str, column: str, ids: np.ndarray) -> np.ndarray:
+    """Boolean reference-subpopulation mask from ``column`` of the input, aligned to ``ids``.
+
+    True tokens are ``1/true/t/yes/y`` and false tokens ``0/false/f/no/n``
+    (any case); missing tokens are false. Rows are matched by id, because
+    loading may reorder them, and ids absent from the file (founders that
+    ``validate`` added) are false.
+    """
+    raw = _read_pedigree_table(path, sep=sep, dtype=str)
+    if column not in raw.columns:
+        raise PedigreeError(f"reference column {column!r} not in input; file has {list(raw.columns)}")
+    tokens = raw[column].str.strip_chars().str.to_lowercase()
+    missing = tokens.is_null() | tokens.is_in([t.lower() for t in _READER_NULL_TOKENS])
+    is_true = tokens.is_in(sorted(_REFERENCE_TRUE)) & ~missing
+    bad = ~(is_true | tokens.is_in(sorted(_REFERENCE_FALSE)) | missing)
+    if bad.any():
+        samples = raw[column].filter(bad).head(3).to_list()
+        raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
+    raw_ids = _as_int_col(raw[id_col], id_col)
+    return np.isin(ids, raw_ids[is_true.to_numpy()])
