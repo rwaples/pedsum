@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 
 import pedigree_summary as ps
+from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.pedigree_ops import IdIndex
 
 
@@ -19,7 +20,7 @@ def test_mother_only_missing_synthesises_female():
     fathers = np.array([-1, -1, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
     out = ps._build_added_founders(mothers, fathers, id_index, no_sex_check=False)
-    assert out == [{"id": 99, "sex": "F", "reason": "referenced as mother in row(s) [0]"}]
+    assert out == [{"id": 99, "sex": SEX_FEMALE, "reason": "referenced as mother in row(s) [0]"}]
 
 
 def test_father_only_missing_synthesises_male():
@@ -28,7 +29,7 @@ def test_father_only_missing_synthesises_male():
     fathers = np.array([88, -1, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
     out = ps._build_added_founders(mothers, fathers, id_index, no_sex_check=False)
-    assert out == [{"id": 88, "sex": "M", "reason": "referenced as father in row(s) [0]"}]
+    assert out == [{"id": 88, "sex": SEX_MALE, "reason": "referenced as father in row(s) [0]"}]
 
 
 def test_both_roles_missing_blocked_without_no_sex_check():
@@ -53,7 +54,7 @@ def test_both_roles_missing_with_no_sex_check_synthesises_female():
     assert len(out) == 1
     row = out[0]
     assert row["id"] == 99
-    assert row["sex"] == "F"
+    assert row["sex"] == SEX_FEMALE
     assert row["reason"].startswith("--no-sex-check; conflicting roles")
     assert "mother row(s) [0]" in row["reason"]
     assert "father row(s) [1]" in row["reason"]

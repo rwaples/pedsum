@@ -15,7 +15,7 @@ import numpy as np
 import polars as pl
 import yaml
 
-from pedsum.base import VERSION, PedigreeError, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, VERSION, PedigreeError, logger
 from pedsum.parse import _as_int_col, _read_pedigree_table
 from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
@@ -796,10 +796,10 @@ def _build_added_founders(
     out: list[dict] = []
     for mid in sorted(moms_only):
         rows = np.where(mothers == mid)[0]
-        out.append({"id": int(mid), "sex": "F", "reason": f"referenced as mother in {_rows_listing(rows)}"})
+        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {_rows_listing(rows)}"})
     for did in sorted(dads_only):
         rows = np.where(fathers == did)[0]
-        out.append({"id": int(did), "sex": "M", "reason": f"referenced as father in {_rows_listing(rows)}"})
+        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {_rows_listing(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
             rows_m = np.where(mothers == cid)[0]
@@ -807,7 +807,7 @@ def _build_added_founders(
             out.append(
                 {
                     "id": int(cid),
-                    "sex": "F",
+                    "sex": SEX_FEMALE,
                     "reason": (
                         f"--no-sex-check; conflicting roles "
                         f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
@@ -834,7 +834,7 @@ def _write_validate_tsv_gz(
         # fields; polars quotes explicit empty strings as "".
         data: dict[str, list[str | None]] = {col: [None] * n_new for col in df_raw.columns}
         data[id_col] = [str(f["id"]) for f in added_founders]
-        data[sex_col] = [f["sex"] for f in added_founders]
+        data[sex_col] = [str(f["sex"]) for f in added_founders]
         data[mother_col] = ["-1"] * n_new
         data[father_col] = ["-1"] * n_new
         new_rows = pl.DataFrame(data, schema=dict.fromkeys(df_raw.columns, pl.String))

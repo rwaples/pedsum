@@ -6,6 +6,7 @@ import numpy as np
 from hypothesis import given
 from hypothesis import strategies as st
 
+from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.pedigree_ops import IdIndex
 from pedsum.report import _build_added_founders
 
@@ -72,11 +73,11 @@ def test_added_founder_sex_follows_unambiguous_parent_role(generated: FounderRef
     by_id = {row["id"]: row for row in founders}
 
     for mid in moms_only:
-        assert by_id[mid]["sex"] == "F"
+        assert by_id[mid]["sex"] == SEX_FEMALE
     for did in dads_only:
-        assert by_id[did]["sex"] == "M"
+        assert by_id[did]["sex"] == SEX_MALE
     for cid in conflicts:
-        assert by_id[cid]["sex"] == "F"
+        assert by_id[cid]["sex"] == SEX_FEMALE
         assert "--no-sex-check" in by_id[cid]["reason"]
 
 

@@ -18,8 +18,6 @@ from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
     _F_WALK_WARN_VISITS,
-    SEX_FEMALE,
-    SEX_MALE,
     SEX_UNKNOWN,
     VERSION,
     PedigreeError,
@@ -1122,48 +1120,23 @@ def _write_fixed_pedigree(ctx: ValidationContext, args: argparse.Namespace, out_
     df_out = ctx.df_raw
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
         added_founders = _build_added_founders(ctx.mothers, ctx.fathers, ctx.id_index, args.no_sex_check)
-        # Fold sex imputation into the fixed output so the user's "fixed"
-        # file reflects the auto-fix instead of the original blanks.
+        # Write every row's resolved sex (after imputation and role overrides)
+        # in pedsum's canonical encoding, 0=female, 1=male, -1=unknown,
+        # whatever encoding the input used, so the column holds one encoding.
+        # sex_source records which rows pedsum changed.
         sex_imp = ctx.get_imputation()
         if sex_imp is not None:
-            imputed = sex_imp.imputed_sex
-            original_unknown = sex_imp.original_unknown_mask
-            overridden = sex_imp.overridden_mask
-            # Rewrite the sex column wherever pedsum changed it: missing→F/M
-            # imputation (0.8) and asserted→role overrides (0.9). Rows still
-            # SEX_UNKNOWN after both passes — orphan or role-ambiguous —
-            # normalise to "-1" so the fixed TSV is self-consistent.
-            modified = original_unknown | overridden
-            unresolved_mask = imputed == SEX_UNKNOWN
-            # Priority mirrors the historical sequential assignment (F, then M,
-            # then unresolved last): the first matching branch wins, so
-            # unresolved is checked first.
-            df_out = (
-                df_out.with_columns(
-                    pl.Series("__to_f", modified & (imputed == SEX_FEMALE)),
-                    pl.Series("__to_m", modified & (imputed == SEX_MALE)),
-                    pl.Series("__unres", unresolved_mask),
-                )
-                .with_columns(
-                    pl.when(pl.col("__unres"))
-                    .then(pl.lit("-1"))
-                    .when(pl.col("__to_m"))
-                    .then(pl.lit("M"))
-                    .when(pl.col("__to_f"))
-                    .then(pl.lit("F"))
-                    .otherwise(pl.col(args.sex_col))
-                    .alias(args.sex_col)
-                )
-                .drop("__to_f", "__to_m", "__unres")
-            )
             if sex_imp.n_imputed > 0:
                 logger.info("validate: imputed sex for %d row(s) from parent role", int(sex_imp.n_imputed))
-            n_normalised = int(unresolved_mask.sum())
-            if n_normalised > 0:
-                logger.info("validate: normalised %d unresolved-sex row(s) to -1 in fixed output", n_normalised)
-            # Stamp sex_source BEFORE the topological reorder so the column is
-            # reordered along with the rest.
-            df_out = df_out.with_columns(pl.Series("sex_source", sex_imp.sex_source.astype(str)))
+            n_unresolved = int((sex_imp.imputed_sex == SEX_UNKNOWN).sum())
+            if n_unresolved > 0:
+                logger.info("validate: wrote %d unresolved-sex row(s) as -1 in fixed output", n_unresolved)
+            # Stamp sex and sex_source BEFORE the topological reorder so they
+            # are reordered along with the rest.
+            df_out = df_out.with_columns(
+                pl.Series(args.sex_col, sex_imp.imputed_sex).cast(pl.String),
+                pl.Series("sex_source", sex_imp.sex_source.astype(str)),
+            )
         # Reorder so the fixed file is parents-before-children and feeds back
         # into pedsum without further auto-fixes.
         depth = ctx.depth
@@ -1215,9 +1188,13 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
     _write_fixed_pedigree(result.ctx_final, args, out_dir)
 
     # Self-verify the written artifact passes under the invoked flags. The
-    # output is always tab-separated regardless of the input --sep, so sniff it.
+    # output is always tab-separated regardless of the input --sep, so sniff it,
+    # and always writes sex as 0=female, 1=male whatever the input encoding.
     out_path = out_dir / "validate.tsv.gz"
-    _n, vresults, _vf, _vctx = validate_pedigree(out_path, **{**_validation_kwargs(args), "sep": "auto"})  # ty: ignore[invalid-argument-type]
+    _n, vresults, _vf, _vctx = validate_pedigree(
+        out_path,
+        **{**_validation_kwargs(args), "sep": "auto", "sex_encoding": "default"},  # ty: ignore[invalid-argument-type]
+    )
     failed = sorted(r.name for r in vresults if r.status == "FAIL")
     if failed:
         raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {failed}")

@@ -249,4 +249,4 @@ def test_validate_writes_imputed_sex_in_fixed_output(tmp_path):
     with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rb") as fh:
         fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     row2 = fixed.filter(pl.col("id").cast(pl.Int64) == 2).row(0, named=True)
-    assert row2["sex"] == "F"
+    assert row2["sex"] == "0"

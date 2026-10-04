@@ -81,7 +81,7 @@ individuals, …) and writes:
 | File | Contents |
 |---|---|
 | `DIR/validate.log` | per-finding TSV (one row per issue) |
-| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied (omitted on hard-block findings) |
+| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 
 When `--birth-year-col NAME` is passed, validate also runs three
@@ -96,6 +96,11 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
 - Sex imputed from parent role (F if used as a mother, M if used as
   a father) for any row whose original sex was missing.
+- The sex column written in one encoding, `0` = female, `1` = male,
+  `-1` = unknown, whatever encoding the input used. `sex_source` says
+  where each row's sex came from: `input`, `imputed_from_missing`,
+  `imputed_from_role` or `unresolved`. To re-run pedsum on the file,
+  leave `--sex-encoding` at `auto` or set it to `default`.
 - Rows reordered so parents always precede children (topological
   order), if the input was not already ordered.
 

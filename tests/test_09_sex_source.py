@@ -12,6 +12,7 @@ from __future__ import annotations
 import gzip
 
 import polars as pl
+import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
@@ -88,9 +89,9 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
     assert by_id[5] == "imputed_from_missing"
     assert by_id[6] == "imputed_from_role"
     assert by_id[8] == "unresolved"
-    # Row 6 in the fixed file has its sex normalised to F.
+    # Row 6 in the fixed file has its sex overridden to 0 (female).
     row6 = fixed.filter(pl.col("id").cast(pl.Int64) == 6).row(0, named=True)
-    assert row6["sex"] == "F"
+    assert row6["sex"] == "0"
 
 
 def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
@@ -138,3 +139,64 @@ def test_override_count_in_grouped_summary(tmp_path):
     assert lines, "expected sex_role_consistency line in grouped summary"
     assert "PASS" in lines[0]
     assert "1 overridden from role" in lines[0]
+
+
+# Sex tokens per input encoding: (female, male, unknown).
+_SEX_TOKENS = {
+    "words": ("F", "M", ""),
+    "default": ("0", "1", "-1"),
+    "plink": ("2", "1", "0"),
+}
+
+
+@pytest.mark.parametrize("encoding", sorted(_SEX_TOKENS))
+def test_validate_tsv_writes_one_sex_encoding(tmp_path, encoding):
+    """validate.tsv.gz writes every row's sex as 0=female, 1=male, -1=unknown.
+
+    Rows kept from the input, imputed rows, unresolved rows and added founders
+    share the one encoding, whatever the input used, so a reader that infers
+    types sees an integer column (issue #11).
+    """
+    f, m, u = _SEX_TOKENS[encoding]
+    ped = _write_ped(
+        tmp_path / "ped.tsv",
+        [
+            {"id": 1, "sex": m, "mother": -1, "father": -1},
+            {"id": 2, "sex": f, "mother": -1, "father": -1},
+            {"id": 5, "sex": u, "mother": -1, "father": -1},  # mother -> imputed female
+            {"id": 6, "sex": u, "mother": -1, "father": -1},  # father -> imputed male
+            {"id": 8, "sex": u, "mother": -1, "father": -1},  # orphan -> unresolved
+            {"id": 3, "sex": m, "mother": 5, "father": 6},
+            {"id": 7, "sex": f, "mother": 2, "father": 1},
+            {"id": 9, "sex": f, "mother": 100, "father": 1},  # 100 -> added female founder
+        ],
+    )
+    out_dir = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--allow-missing-sex"])
+    assert r.returncode == 1, r.stderr  # the missing parent is a finding
+    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
+        fixed = pl.read_csv(fh.read(), separator="\t")
+    assert fixed["sex"].dtype.is_integer()
+    by_id = dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True))
+    assert by_id == {1: 1, 2: 0, 5: 0, 6: 1, 8: -1, 3: 1, 7: 0, 9: 0, 100: 0}
+
+
+def test_drop_offending_self_verifies_plink_input(tmp_path):
+    """--drop-offending re-reads its 0/1 output as 0/1 even under --sex-encoding plink."""
+    ped = _write_ped(
+        tmp_path / "ped.tsv",
+        [
+            {"id": 1, "sex": "2", "mother": -1, "father": -1},
+            {"id": 2, "sex": "1", "mother": -1, "father": -1},
+            {"id": 3, "sex": "2", "mother": -1, "father": -1},  # mother and father -> dropped
+            {"id": 4, "sex": "2", "mother": 3, "father": 2},
+            {"id": 5, "sex": "1", "mother": 1, "father": 3},
+        ],
+    )
+    out_dir = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--sex-encoding", "plink", "--drop-offending"])
+    assert r.returncode == 1, r.stderr  # exit 1 because something was dropped
+    assert "self-verify failed" not in r.stderr
+    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
+        fixed = pl.read_csv(fh.read(), separator="\t")
+    assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 0, 2: 1, 4: 0, 5: 1}
