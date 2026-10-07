@@ -10,7 +10,7 @@ import numpy as np
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 
 if TYPE_CHECKING:
-    from pedsum.pedigree_ops import IdIndex
+    from pedsum.pedigree_ops import IdIndex, ParentRefs
 
 
 @dataclass
@@ -81,14 +81,9 @@ def _check_parent_token_range(arr: np.ndarray, role: str) -> list[Finding]:
     ]
 
 
-def _check_parent_refs_present(arr: np.ndarray, role: str, id_index: IdIndex) -> list[Finding]:
+def _check_parent_refs_present(arr: np.ndarray, role: str, refs: ParentRefs, id_index: IdIndex) -> list[Finding]:
     """Detect parent IDs that don't have their own row; one Finding per missing ID."""
-    present = arr != -1
-    if not present.any():
-        return []
-    unique_parents = np.unique(arr[present])
-    mapped = id_index.get_indexer(unique_parents)
-    missing = unique_parents[mapped == -1]
+    missing = refs.ids[refs.rows == -1]
     if len(missing) == 0:
         return []
     findings = []
@@ -153,13 +148,12 @@ def _check_self_loops(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray)
 def _check_parent_refs_sex_conflict(
     mothers: np.ndarray,
     fathers: np.ndarray,
-    id_index: IdIndex,
+    mother_refs: ParentRefs,
+    father_refs: ParentRefs,
 ) -> list[Finding]:
     """Detect missing parent IDs referenced as both mother AND father; one Finding per ID."""
-    moms = np.unique(mothers[mothers != -1])
-    dads = np.unique(fathers[fathers != -1])
-    moms_missing = moms[id_index.get_indexer(moms) == -1]
-    dads_missing = dads[id_index.get_indexer(dads) == -1]
+    moms_missing = mother_refs.ids[mother_refs.rows == -1]
+    dads_missing = father_refs.ids[father_refs.rows == -1]
     conflicts = np.intersect1d(moms_missing, dads_missing)
     return [
         Finding(
@@ -205,7 +199,8 @@ def _check_sex_role_consistency(
     mothers: np.ndarray,
     fathers: np.ndarray,
     sex: np.ndarray,
-    id_index: IdIndex,
+    mother_refs: ParentRefs,
+    father_refs: ParentRefs,
     *,
     skip_mask: np.ndarray | None = None,
 ) -> list[Finding]:
@@ -215,10 +210,8 @@ def _check_sex_role_consistency(
     from both role tests. This is used to bypass rows whose sex started as
     unknown (already covered by ``sex_role_ambiguity`` and ``unknown_sex``).
     """
-    used_as_mother = np.unique(mothers[mothers != -1])
-    used_as_father = np.unique(fathers[fathers != -1])
-    rows_um = id_index.get_indexer(used_as_mother)
-    rows_uf = id_index.get_indexer(used_as_father)
+    used_as_mother, rows_um = mother_refs.ids, mother_refs.rows
+    used_as_father, rows_uf = father_refs.ids, father_refs.rows
 
     keep_m = rows_um != -1
     keep_f = rows_uf != -1

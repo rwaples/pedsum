@@ -29,7 +29,7 @@ from pedsum.parse import (
     _read_pedigree_table,
     _sniff_delimiter,
 )
-from pedsum.pedigree_ops import IdIndex, _group_mating_pairs, _id_list, _structural_depth
+from pedsum.pedigree_ops import IdIndex, ParentRefs, _group_mating_pairs, _id_list, _structural_depth
 from pedsum.report import (
     _apply_safe_attempt,
     _build_individual_data,
@@ -138,9 +138,13 @@ class TestCheckEdgeCases:
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
         """Missing-parent detection distinguishes no refs, all-present refs, and the zero-token hint."""
         id_index = IdIndex([1, 2, 3])
-        assert _check_parent_refs_present(np.array([-1, -1]), "mother", id_index) == []
-        assert _check_parent_refs_present(np.array([1, -1, 2]), "mother", id_index) == []
-        findings = _check_parent_refs_present(np.array([0, 99, 99]), "father", id_index)
+
+        def check(parents: np.ndarray, role: str) -> list[Finding]:
+            return _check_parent_refs_present(parents, role, ParentRefs.of(parents, id_index), id_index)
+
+        assert check(np.array([-1, -1]), "mother") == []
+        assert check(np.array([1, -1, 2]), "mother") == []
+        findings = check(np.array([0, 99, 99]), "father")
         assert [f.id for f in findings] == [0, 99]
         assert "convert to -1" in findings[0].detail
 
@@ -155,7 +159,10 @@ class TestCheckEdgeCases:
         mothers = np.array([-1, -1, 2], dtype=np.int64)
         fathers = np.array([-1, -1, 1], dtype=np.int64)
         sex = np.array([1, 1, 0], dtype=np.int8)  # id=2 is male but used as mother.
-        findings = _check_sex_role_consistency(mothers, fathers, sex, IdIndex(ids))
+        id_index = IdIndex(ids)
+        findings = _check_sex_role_consistency(
+            mothers, fathers, sex, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index)
+        )
         assert len(findings) == 1
         assert findings[0].id == 2
         assert "used as mother" in findings[0].detail

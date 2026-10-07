@@ -49,7 +49,7 @@ from pedsum.parse import (
     _maybe_warn_csv,
     _read_pedigree_table,
 )
-from pedsum.pedigree_ops import IdIndex, _parent_rows, _structural_depth
+from pedsum.pedigree_ops import IdIndex, ParentRefs, _parent_rows, _structural_depth
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -76,8 +76,8 @@ class _SexImputation:
 def _impute_sex_from_roles(
     sex: np.ndarray,
     ids: np.ndarray,
-    mothers: np.ndarray,
-    fathers: np.ndarray,
+    mother_ids: np.ndarray,
+    father_ids: np.ndarray,
     *,
     override_asserted_sex: bool = True,
 ) -> _SexImputation:
@@ -103,6 +103,9 @@ def _impute_sex_from_roles(
                                             consistency`` still hard-blocks
          - asserted used as neither       → leave alone
 
+    ``mother_ids`` / ``father_ids`` are the distinct ids referenced as mother
+    / father (``ParentRefs.ids``).
+
     Returns a `_SexImputation` whose `sex_source` is a per-row `dtype=object`
     array tagging each row's provenance: ``"input"`` / ``"imputed_from_missing"``
     / ``"imputed_from_role"`` / ``"unresolved"``.
@@ -111,15 +114,10 @@ def _impute_sex_from_roles(
     imputed = sex.copy()
     sex_source = np.full(len(sex), "input", dtype=object)
 
-    # The distinct parent IDs drive the as_mother / as_father role masks every
-    # row needs. (The first-occurrence row of each ambiguous parent is computed
-    # on demand in _check_sex_role_ambiguity, which only runs on the rare
-    # ambiguous rows — so no id→row table is materialised here.)
-    unique_mids = np.unique(mothers[mothers != -1])
-    unique_fids = np.unique(fathers[fathers != -1])
-
-    as_mother = np.isin(ids, unique_mids)
-    as_father = np.isin(ids, unique_fids)
+    # Membership by id, not by ParentRefs.rows: with duplicate ids every copy
+    # of a referenced id takes the role, not just the first row.
+    as_mother = np.isin(ids, mother_ids)
+    as_father = np.isin(ids, father_ids)
 
     # Pass 1: missing → role.
     impute_f = original_unknown_mask & as_mother & ~as_father
@@ -236,6 +234,18 @@ class ValidationContext:
         return IdIndex(self.ids)
 
     @cached_property
+    def mother_refs(self) -> ParentRefs:
+        """Distinct mother ids and their rows; built once, shared by the parent and sex checks."""
+        assert self.mothers is not None
+        return ParentRefs.of(self.mothers, self.id_index)
+
+    @cached_property
+    def father_refs(self) -> ParentRefs:
+        """Distinct father ids and their rows; built once, shared by the parent and sex checks."""
+        assert self.fathers is not None
+        return ParentRefs.of(self.fathers, self.id_index)
+
+    @cached_property
     def depth(self) -> np.ndarray:
         """Topological depth per parsed row, -1 in or below a cycle; built once."""
         assert self.mothers is not None
@@ -249,13 +259,11 @@ class ValidationContext:
         """Sex imputation from parent-role usage; computed once, shared by the sex checks."""
         assert self.sex is not None
         assert self.ids is not None
-        assert self.mothers is not None
-        assert self.fathers is not None
         return _impute_sex_from_roles(
             self.sex,
             self.ids,
-            self.mothers,
-            self.fathers,
+            self.mother_refs.ids,
+            self.father_refs.ids,
             override_asserted_sex=self.override_asserted_sex,
         )
 
@@ -373,12 +381,12 @@ def _ck_parent_token_range_father(ctx: ValidationContext) -> CheckOutcome:
 
 def _ck_parent_refs_present_mother(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.mothers is not None
-    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.id_index))
+    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.mother_refs, ctx.id_index))
 
 
 def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.fathers is not None
-    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.id_index))
+    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.father_refs, ctx.id_index))
 
 
 def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
@@ -386,7 +394,7 @@ def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
         return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
     assert ctx.mothers is not None
     assert ctx.fathers is not None
-    return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index))
+    return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.mother_refs, ctx.father_refs))
 
 
 def _ck_self_loops(ctx: ValidationContext) -> CheckOutcome:
@@ -426,7 +434,8 @@ def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
         ctx.mothers,
         ctx.fathers,
         imp.imputed_sex,
-        ctx.id_index,
+        ctx.mother_refs,
+        ctx.father_refs,
         skip_mask=imp.original_unknown_mask,
     )
     if findings:
@@ -881,7 +890,7 @@ def load_and_validate(
 
     # Sort by the depth the acyclic Check computed (parents before children).
     depth = ctx.depth
-    columns = {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source.astype(str)}
+    columns = {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source}
     if ctx.birth_year is not None:
         columns["birth_year"] = ctx.birth_year
     columns["ped_depth"] = depth
@@ -894,7 +903,8 @@ def load_and_validate(
             n,
         )
         columns = {name: values[order] for name, values in columns.items()}
-    out = pl.DataFrame(columns)
+    # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
+    out = pl.DataFrame(columns, schema_overrides={"sex_source": pl.String})
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
     return out
 

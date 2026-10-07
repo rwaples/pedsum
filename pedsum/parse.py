@@ -11,6 +11,7 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
+from pedsum.pedigree_ops import IdIndex
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,7 +40,7 @@ _SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
 
 
 def _detect_sex_encoding(
-    upper_non_missing: np.ndarray,
+    upper_non_missing: list[str],
     zero_as_missing: bool,
 ) -> tuple[str, str]:
     """Resolve the sex-column encoding from the observed tokens.
@@ -48,7 +49,7 @@ def _detect_sex_encoding(
     (0=F, 1=M) or ``"plink"`` (1=M, 2=F), and ambiguity_class is one of
     ``"confident"``, ``"word_only"``, or ``"ones_only"``.
     """
-    numeric = {t for t in np.unique(upper_non_missing).tolist() if t.isdigit() or t.lstrip("-").isdigit()}
+    numeric = {t for t in upper_non_missing if t.isdigit() or t.lstrip("-").isdigit()}
     if "2" in numeric:
         return "plink", "confident"
     if "0" in numeric and not zero_as_missing:
@@ -74,12 +75,6 @@ def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
     rng = np.random.default_rng(0)
     indices = np.sort(rng.choice(n, size=sample_size, replace=False))
     return ", ".join(str(int(x)) for x in ids[indices])
-
-
-def _stripped_str_array(series: pl.Series) -> np.ndarray:
-    """Series → object array of stripped strings, nulls collapsed to ``""``."""
-    cleaned = series.cast(pl.String).fill_null("").str.strip_chars()
-    return cleaned.to_numpy().astype(object)
 
 
 def _decode_sex(
@@ -109,13 +104,12 @@ def _decode_sex(
     """
     # Null cells (polars' representation for empty fields) collapse into the
     # missing-token set rather than leaking into the unique-token scan.
-    str_vals = _stripped_str_array(series)
-    upper = np.array([v.upper() for v in str_vals], dtype=object)
-    missing_mask = np.isin(upper, list(_SEX_MISSING_TOKENS))
-    non_missing = upper[~missing_mask]
+    str_vals = series.cast(pl.String).fill_null("").str.strip_chars()
+    upper = str_vals.str.to_uppercase()
+    missing_mask = upper.is_in(sorted(_SEX_MISSING_TOKENS))
 
     if encoding == "auto":
-        resolved, ambiguity = _detect_sex_encoding(non_missing, zero_as_missing)
+        resolved, ambiguity = _detect_sex_encoding(upper.filter(~missing_mask).unique().to_list(), zero_as_missing)
         if ambiguity == "ones_only":
             logger.warning(
                 "sex auto-detect: only '1' tokens present; defaulting to "
@@ -131,28 +125,25 @@ def _decode_sex(
 
     # Under PLINK, "0" is always missing (fam-file spec); fold it into the
     # missing mask before decoding numeric tokens.
+    female_token, male_token = ("2", "1") if resolved == "plink" else ("0", "1")
     if resolved == "plink":
         missing_mask = missing_mask | (str_vals == "0")
-
-    out = np.full(len(str_vals), SEX_UNKNOWN, dtype=np.int8)
-    female_words = (upper == "F") | (upper == "FEMALE")
-    male_words = (upper == "M") | (upper == "MALE")
-    if resolved == "plink":
-        out[female_words | (str_vals == "2")] = SEX_FEMALE
-        out[male_words | (str_vals == "1")] = SEX_MALE
         allowed = "M/F (any case), Male/Female, or 1/2 (1=male, 2=female; PLINK convention)."
     else:
-        out[female_words | (str_vals == "0")] = SEX_FEMALE
-        out[male_words | (str_vals == "1")] = SEX_MALE
         allowed = (
             "M/F (any case), Male/Female, or 0/1 (0=female, 1=male). "
             "Pass --sex-encoding=plink if your file uses 1=male, 2=female."
         )
+    is_female = (upper.is_in(["F", "FEMALE"]) | (str_vals == female_token)).to_numpy()
+    is_male = (upper.is_in(["M", "MALE"]) | (str_vals == male_token)).to_numpy()
+    out = np.full(len(str_vals), SEX_UNKNOWN, dtype=np.int8)
+    out[is_female] = SEX_FEMALE
+    out[is_male] = SEX_MALE
 
-    bad = (out == SEX_UNKNOWN) & ~missing_mask
+    bad = (out == SEX_UNKNOWN) & ~missing_mask.to_numpy()
     if bad.any():
         bad_rows = np.where(bad)[0][:5]
-        bad_vals = str_vals[bad_rows].tolist()
+        bad_vals = str_vals.gather(bad_rows).to_list()
         raise PedigreeError(
             f"sex column has {int(bad.sum())} invalid value(s); "
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
@@ -161,8 +152,8 @@ def _decode_sex(
     # Surface the literal tokens that mapped to each sex (case preserved) so
     # collaborators can verify sex was handled correctly without re-reading
     # the file. ADR-0001 collaborator-facing transparency.
-    tokens_female = sorted(set(str_vals[out == SEX_FEMALE].tolist()))
-    tokens_male = sorted(set(str_vals[out == SEX_MALE].tolist()))
+    tokens_female = sorted(str_vals.filter(out == SEX_FEMALE).unique().to_list())
+    tokens_male = sorted(str_vals.filter(out == SEX_MALE).unique().to_list())
     logger.info(
         "sex parsed: encoding=%s, female={%s} (n=%d), male={%s} (n=%d), unknown=%d",
         resolved,
@@ -320,7 +311,7 @@ def _sniff_delimiter(path: Path) -> str:
     return "\t"
 
 
-def _read_whitespace_table(path: Path, *, as_str: bool) -> pl.DataFrame:
+def _read_whitespace_table(path: Path, *, as_str: bool, columns: list[str] | None) -> pl.DataFrame:
     r"""Read a whitespace-delimited (PLINK fam-style) table.
 
     polars has no regex separator, so ``\s+`` inputs are split manually.
@@ -343,8 +334,8 @@ def _read_whitespace_table(path: Path, *, as_str: bool) -> pl.DataFrame:
     # string / inference semantics.
     buf = io.BytesIO("\n".join("\t".join(row) for row in rows).encode("utf-8"))
     if as_str:
-        return pl.read_csv(buf, separator="\t", infer_schema=False, null_values=_NULL_TOKENS)
-    return pl.read_csv(buf, separator="\t", null_values=_NULL_TOKENS, infer_schema_length=None)
+        return pl.read_csv(buf, separator="\t", infer_schema=False, null_values=_NULL_TOKENS, columns=columns)
+    return pl.read_csv(buf, separator="\t", null_values=_NULL_TOKENS, infer_schema_length=None, columns=columns)
 
 
 def _read_pedigree_table(
@@ -352,6 +343,7 @@ def _read_pedigree_table(
     sep: str = "auto",
     *,
     dtype: object | None = None,
+    columns: list[str] | None = None,
 ) -> pl.DataFrame:
     r"""Read a pedigree table, sniffing the delimiter when ``sep == 'auto'``.
 
@@ -362,6 +354,8 @@ def _read_pedigree_table(
 
     ``dtype=str`` reads every column as string (no inference), the mode
     used by validation; the default infers dtypes (the annotated re-read).
+    ``columns`` reads only those columns; an absent one raises polars'
+    ``ColumnNotFoundError``.
     """
     if not path.exists():
         raise PedigreeError(f"input file not found: {path}")
@@ -373,10 +367,10 @@ def _read_pedigree_table(
         chosen = _SEP_MAP.get(sep, sep)
     as_str = dtype is str
     if chosen == r"\s+":
-        return _read_whitespace_table(path, as_str=as_str)
+        return _read_whitespace_table(path, as_str=as_str, columns=columns)
     if as_str:
-        return pl.read_csv(path, separator=chosen, infer_schema=False, null_values=_NULL_TOKENS)
-    return pl.read_csv(path, separator=chosen, null_values=_NULL_TOKENS, infer_schema_length=None)
+        return pl.read_csv(path, separator=chosen, infer_schema=False, null_values=_NULL_TOKENS, columns=columns)
+    return pl.read_csv(path, separator=chosen, null_values=_NULL_TOKENS, infer_schema_length=None, columns=columns)
 
 
 def _as_parent_int_col(
@@ -456,3 +450,43 @@ def read_reference_mask(path: Path, sep: str, id_col: str, column: str, ids: np.
         raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
     raw_ids = _as_int_col(raw[id_col], id_col)
     return np.isin(ids, raw_ids[is_true.to_numpy()])
+
+
+def read_trait_columns(
+    path: Path,
+    sep: str,
+    id_col: str,
+    columns: list[str],
+    ids: np.ndarray,
+    missing: list[str] | tuple[str, ...] = (),
+) -> dict[str, np.ndarray]:
+    """Raw trait tokens from ``columns`` of the input, aligned to ``ids``, ``None`` where missing.
+
+    Missing is a reader null token (exact), a parent missing token after strip
+    in any case, or one of ``missing`` after strip. Rows are matched by id,
+    because loading may reorder them, and ids absent from the file (founders
+    that ``validate`` added) are missing.
+    """
+    try:
+        raw = _read_pedigree_table(path, sep=sep, dtype=str, columns=list(dict.fromkeys([id_col, *columns])))
+    except pl.exceptions.ColumnNotFoundError:
+        header = _read_pedigree_table(path, sep=sep, dtype=str).columns
+        absent = [column for column in columns if column not in header]
+        if not absent:
+            raise
+        raise PedigreeError(f"trait column(s) {absent} not in input; file has {header}") from None
+    raw_ids = _as_int_col(raw[id_col], id_col)
+    extra = sorted({token.strip() for token in missing})
+    upper_missing = sorted(_PARENT_MISSING_TOKENS)
+
+    def masked(column: str) -> pl.Expr:
+        tokens = pl.col(column).str.strip_chars()
+        is_missing = tokens.is_null() | tokens.str.to_uppercase().is_in(upper_missing) | tokens.is_in(extra)
+        return pl.when(is_missing).then(None).otherwise(tokens).alias(column)
+
+    frame = raw.select(masked(column) for column in dict.fromkeys(columns))
+    if not np.array_equal(raw_ids, ids):
+        # A null gather index (an id absent from the file) yields a null token.
+        rows = pl.Series(IdIndex(raw_ids).get_indexer(ids)).replace(-1, None)
+        frame = frame.select(pl.all().gather(rows))
+    return {column: frame[column].to_numpy() for column in columns}

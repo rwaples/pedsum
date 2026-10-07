@@ -13,6 +13,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
+from pedsum.pedigree_ops import unique_ints
 from pedsum.validate import _impute_sex_from_roles
 
 _CATEGORIES = {"input", "imputed_from_missing", "imputed_from_role", "unresolved"}
@@ -36,7 +37,13 @@ def _impute_inputs(draw: st.DrawFn) -> tuple[np.ndarray, np.ndarray, np.ndarray,
 def test_impute_partition_and_invariants(data: tuple) -> None:
     """sex_source partitions rows; unresolved iff still unknown; input/override rules hold."""
     ids, mothers, fathers, sex, override = data
-    res = _impute_sex_from_roles(sex, ids, mothers, fathers, override_asserted_sex=override)
+    res = _impute_sex_from_roles(
+        sex,
+        ids,
+        unique_ints(mothers[mothers != -1]),
+        unique_ints(fathers[fathers != -1]),
+        override_asserted_sex=override,
+    )
     src = res.sex_source
     imp = res.imputed_sex
     n = len(ids)
@@ -62,7 +69,7 @@ def test_impute_role_directions() -> None:
     sex = np.array([SEX_UNKNOWN, SEX_UNKNOWN, SEX_FEMALE, SEX_MALE], dtype=np.int8)
     mothers = np.array([-1, -1, 0, -1], dtype=np.int64)  # id 0 used only as mother
     fathers = np.array([-1, -1, -1, 1], dtype=np.int64)  # id 1 used only as father
-    res = _impute_sex_from_roles(sex, ids, mothers, fathers)
+    res = _impute_sex_from_roles(sex, ids, unique_ints(mothers[mothers != -1]), unique_ints(fathers[fathers != -1]))
     assert res.imputed_sex[0] == SEX_FEMALE
     assert res.imputed_sex[1] == SEX_MALE
 
@@ -73,7 +80,7 @@ def test_impute_ambiguous_role_stays_unresolved() -> None:
     sex = np.array([SEX_UNKNOWN, SEX_UNKNOWN, SEX_UNKNOWN], dtype=np.int8)
     mothers = np.array([-1, 0, -1], dtype=np.int64)  # id 0 used as mother
     fathers = np.array([-1, -1, 0], dtype=np.int64)  # id 0 also used as father
-    res = _impute_sex_from_roles(sex, ids, mothers, fathers)
+    res = _impute_sex_from_roles(sex, ids, unique_ints(mothers[mothers != -1]), unique_ints(fathers[fathers != -1]))
     assert res.imputed_sex[0] == SEX_UNKNOWN
     assert res.sex_source[0] == "unresolved"
     assert res.ambiguous_mask[0]

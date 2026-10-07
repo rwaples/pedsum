@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pedsum.pedigree_ops import MatingPairs
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import _build_children_csr
+from pedsum.pedigree_ops import _build_children_csr, unique_ints
 
 
 def compute_size_structure(
@@ -225,7 +225,7 @@ def compute_founder_summary(
     )
 
     by_depth: list[_DepthRow] = []
-    for depth in np.unique(depth_arr):
+    for depth in unique_ints(depth_arr):
         rows = np.where(depth_arr == depth)[0]
         active: set[int] = set()
         counts = np.zeros(n_founders, dtype=np.int64)
@@ -408,7 +408,7 @@ def compute_aggregate_sections(
     n_distinct_anc_arr = idf["n_distinct_ancestors"].to_numpy() if "n_distinct_ancestors" in idf.columns else None
 
     depth_summary = []
-    for depth in np.unique(depth_col):
+    for depth in unique_ints(depth_col):
         mask = depth_col == depth
         n_sub = int(mask.sum())
         sub_off = n_offspring_arr[mask]

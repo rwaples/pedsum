@@ -19,6 +19,19 @@ def _id_list(ids, max_show: int = 5) -> str:
     return ", ".join(str(i) for i in ids[:max_show]) + f", ... ({len(ids)} total)"
 
 
+def unique_ints(values: np.ndarray) -> np.ndarray:
+    """Sorted distinct values of a 1-D integer array, identical to ``np.unique(values)``."""
+    # A flagless np.unique takes numpy's hash-table path (numpy 2.5.2), ~30x
+    # slower than sorting on high-cardinality int64 and superlinear in n.
+    ordered = np.sort(values)
+    if ordered.size == 0:
+        return ordered
+    keep = np.empty(ordered.size, dtype=bool)
+    keep[0] = True
+    np.not_equal(ordered[1:], ordered[:-1], out=keep[1:])
+    return ordered[keep]
+
+
 class IdIndex:
     """ID → row-position lookup over an int array (argsort + searchsorted).
 
@@ -56,6 +69,20 @@ class IdIndex:
         match = ok & (self._sorted[cand] == vals)
         out[match] = self._order[cand[match]]
         return out
+
+
+@dataclass(frozen=True)
+class ParentRefs:
+    """The distinct ids one parent column references (sorted) and each one's own row, -1 when it has none."""
+
+    ids: np.ndarray
+    rows: np.ndarray
+
+    @classmethod
+    def of(cls, parents: np.ndarray, id_index: IdIndex) -> ParentRefs:
+        """Collect the references in ``parents`` (``-1`` is no parent) and look up their rows."""
+        ids = unique_ints(parents[parents != -1])
+        return cls(ids, id_index.get_indexer(ids))
 
 
 def _parent_rows(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:

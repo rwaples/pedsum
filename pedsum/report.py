@@ -17,7 +17,7 @@ import yaml
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, VERSION, PedigreeError, logger
 from pedsum.parse import _as_int_col, _read_pedigree_table
-from pedsum.pedigree_ops import IdIndex
+from pedsum.pedigree_ops import IdIndex, unique_ints
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
 from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
@@ -780,8 +780,8 @@ def _build_added_founders(
     no_sex_check: bool,
 ) -> list[dict]:
     """Synthesize founder rows for missing parent IDs, sorted by ID."""
-    moms_ref = np.unique(mothers[mothers != -1])
-    dads_ref = np.unique(fathers[fathers != -1])
+    moms_ref = unique_ints(mothers[mothers != -1])
+    dads_ref = unique_ints(fathers[fathers != -1])
     moms_missing = set(moms_ref[id_index.get_indexer(moms_ref) == -1].tolist())
     dads_missing = set(dads_ref[id_index.get_indexer(dads_ref) == -1].tolist())
     conflicts = moms_missing & dads_missing
