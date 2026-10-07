@@ -20,6 +20,20 @@ merged before its before/after peak-RSS delta is recorded in
   aggregate RSS across the whole pytest process tree.
 - `memory_results.md` — the recorded baseline / before-after table.
 
+The `assortative-mating` subcommand has its own tooling:
+
+- `generate_assortative_mating.py` writes a synthetic pedigree with a
+  known Mate Correlation (`--pairs N --seed S`, `--r-mf` for the mother ×
+  father block), with remating and birth-decade strata.
+- `bench_assortative_mating.py` runs the CLI repeatedly under
+  `/usr/bin/time` and records the median wall time and peak RSS per point.
+  `results/assortative_mating_cost.md` holds the measurements and the
+  README "Cost" table.
+- `validate_assortative_mating.py` cross-checks the command against
+  simACE on simACE's own pedigrees. It is manual and needs a simACE
+  checkout with built replicates. It writes
+  `results/assortative_mating_simace.md` and exits 1 when a check fails.
+
 Run the pytest sweep from the repo root:
 
 ```bash

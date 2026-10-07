@@ -304,14 +304,12 @@ permutations**; pedsum warns when you are about to make one without.
 
 Permutations use the same fixed-margin null and the same two-sided
 deviation from `E[C]`, report `(b+1)/(B+1)` (never zero), and run on
-the headline analysis only. They are drawn with numba when it is
-importable and NumPy otherwise — `backend` is recorded in the output,
-so reproducibility is guaranteed given *(seed, backend)*, not seed
-alone. 1,000 permutations is a reasonable starting point; cost scales
+the headline analysis only. They are drawn with numba, a pedsum
+dependency since 0.15, and the same seed gives the same p-values.
+1,000 permutations is a reasonable starting point; cost scales
 linearly in permutations × groups. Measured on a 10M-row pedigree with
-2M groups: ~80 ms per draw with numba and ~224 ms with the NumPy
-fallback, i.e. ~4 min resp. ~11 min for 1,000 permutations across all
-three groupings. A guideline, not a runtime promise — scale it to your
+2M groups: ~80 ms per draw, i.e. ~4 min for 1,000 permutations across
+all three groupings. A guideline, not a runtime promise — scale it to your
 own pedigree. Memory is `O(groups)`: the same run's peak RSS rose by
 8 MB over the analysis-free baseline.
 
@@ -379,7 +377,7 @@ grouping — `computed`, `skip_reason`, `n_groups_eligible`,
 provenance counts, `conditioning_male_fraction`,
 `n_within_group_pairs`, observed/expected concordance, `z`, raw and
 Holm-adjusted analytical p-values, the permutation block
-(`requested`, `completed`, `seed`, `backend`, `p_raw`, `p_holm`), the
+(`requested`, `completed`, `seed`, `p_raw`, `p_holm`), the
 whole `all_resolved` sensitivity, the unweighted
 `male_proportion_distribution`, and descriptive `by_group_size` rows.
 No per-parent, per-Mating-Pair or per-Sibship record is ever emitted.
@@ -388,7 +386,7 @@ Under `--safe-attempt`, a grouping resting on fewer than five eligible
 groups keeps its eligibility metadata but has concordance, direction,
 inference and distributions nulled; counts of one through four are
 nulled; `by_group_size` rows get small-cell redaction; permutation
-count, seed and backend may remain.
+count and seed may remain.
 
 ### Estimate effective population size
 
@@ -485,6 +483,387 @@ If the run crosses the memory limit, `effective_size.yaml` is still
 written: the estimators that were running report
 `{ne: null, reason: memory_limit, rss_gib, limit_gib}`, and the command
 exits 3.
+
+### Estimate the Mate Correlation
+
+```bash
+python pedigree_summary.py assortative-mating --in PED.tsv --out DIR --trait COL [COL2] [options]
+```
+
+`--out DIR` is a directory (created if needed). The command writes one
+file, `DIR/assortative_mating.yaml`, with the run metadata and an
+`assortative_mating:` block. It never runs as part of `summarize`.
+
+The command reports the **Mate Correlation**, the correlation between the
+mother's and the father's values of a trait, one observation per
+**Mating Pair** ([CONTEXT.md](CONTEXT.md) defines both terms). One trait
+gives one cell. Two traits give four cells, `R_mf[i][j] = corr(mother
+trait i, father trait j)`, so rows are the mother's trait and columns the
+father's. The two off-diagonal cells are estimated separately and need
+not be equal. Two traits also add the **Within-Person Cross-Trait
+Correlation** under `within_person`, once for mothers and once for
+fathers. It counts each individual once who has both traits and at least
+one analysed Mating Pair, uses the primary estimator of the cell with
+the same trait types, and has no SE, CI or p-value.
+
+**Trait types.** Each `--trait` column is typed from its non-missing
+tokens:
+
+| Non-missing tokens | Type |
+|---|---|
+| two distinct numbers, or `false`/`true`, or `no`/`yes` in any case | binary |
+| more than 20 distinct numbers | continuous |
+| 3 to 20 distinct numbers | error until `--trait-type` states the type |
+| a token that is not a number | error |
+
+Ordinal is never inferred; pass `--trait-type COL=ordinal`. An ordinal
+trait must be numeric, and `--trait-type COL=binary` needs exactly two
+levels. `traits[].levels` records the levels of a binary or ordinal
+trait in order. Numbers sort numerically (`10` after `9`), and the first
+level is the reference, coded 0. `type_source` records whether the type
+was `inferred` or `stated`. A trait column that is absent, all missing or
+constant, or that holds `inf` or a non-numeric token in a numeric trait,
+makes the command log the error and exit 1 without writing the YAML.
+
+**Missing values.** A token is missing when, after stripping whitespace,
+it is blank, `.`, `?`, or `NA`, `NaN`, `N/A`, `None` or `NULL` in any
+case. The reader's other null tokens, such as `#N/A` and `<NA>`, also
+count. `--trait-missing TOK` adds a token, matched exactly after
+stripping whitespace. There is no default numeric sentinel, so a code
+such as `-9` must be passed. A founder that `validate` adds has no row in
+the file, so its traits are missing. Each cell uses the pairs where both
+of its values are present and counts the rest under
+`n_dropped.mother_missing`, `father_missing` and `both_missing`.
+
+**Estimators.** Each cell reports the estimators for its mother × father
+trait types. The primary estimator, listed first, is the only one with a
+permutation p-value and the only one with a stratified form.
+
+| Mother × father | Primary | Also reported |
+|---|---|---|
+| continuous × continuous | `pearson` | `spearman` |
+| binary × binary | `tetrachoric` | `table` (the 2×2 counts), `odds_ratio`, `phi` |
+| binary × ordinal, ordinal × binary, ordinal × ordinal | `polychoric` | |
+| continuous × binary, binary × continuous | `biserial` | `point_biserial` |
+| continuous × ordinal, ordinal × continuous | `polyserial` | |
+
+`phi` and `point_biserial` are Pearson's r with each binary side coded
+0/1. `odds_ratio` is `ad / bc` on the 2×2 table, and `.inf` when
+`bc = 0`. `spearman` uses average ranks for ties.
+
+`tetrachoric` and `polychoric` are two-step maximum likelihood (Olsson
+1979). Thresholds come from each sex's margins in closed form, then one
+ρ maximises the likelihood of the pair table. `biserial` and
+`polyserial` are the two-step estimator of Olsson, Drasgow & Dorans
+(1982). The continuous side is standardised, the discrete side gets
+thresholds from its margins, then ρ is fitted. Newton's method on the
+analytic score finds ρ̂. It starts at 0 for `tetrachoric` and
+`polychoric`, and at the ad hoc estimate of Olsson, Drasgow & Dorans
+(1982, eq 38) for `biserial` and `polyserial`. If the curvature is not
+positive, a step leaves (−0.9999, 0.9999), or 12 steps do not converge,
+a bounded Brent search over that interval takes over, so every fit
+reaches the optimum Brent would. The bivariate normal CDF comes from
+Owen's T function (Owen 1956), and the thresholds from the AS 241 normal
+quantile (Wichura 1988). Each latent record carries `boundary`, which is
+`true` when the fit ends at a bound;
+[DESIGN.md](DESIGN.md#assortative-mating) gives the rule. Means, SDs,
+thresholds and the 2×2 table count each Mating Pair once, so a father
+with three mates counts three times.
+
+**Phi or tetrachoric.** For a binary trait, read `tetrachoric`, unless
+you want a statement about the observed 0/1 values. Phi depends on
+prevalence. Under a bivariate-normal liability with correlation 0.3 and
+the same prevalence in both sexes, phi is 0.194 at 50% prevalence, 0.129
+at 10% and 0.046 at 1%, so phi from rare diagnoses does not compare
+across traits or cohorts. The same holds for `point_biserial` against
+`biserial`. `tetrachoric`, `polychoric`, `biserial` and `polyserial`
+estimate the correlation of a latent liability and assume that it is
+bivariate normal, cut by thresholds into the observed levels. The other
+estimators describe the observed values. Every estimate is phenotypic;
+none is a genetic correlation.
+On simACE pedigrees whose mate liabilities are bivariate normal by
+construction, the tetrachoric recovers the liability correlation and phi
+does not. With a liability Mate Correlation of 0.3506 over 3.5 million
+Mating Pairs, cutting both liabilities at 10% prevalence gives a
+tetrachoric of 0.3510 and a phi of 0.1567; at 30% the two are 0.3519 and
+0.2154. When the liability is not bivariate normal, the tetrachoric
+misses too. On a simACE scenario that pairs mates by matching
+correlations rather than by a normal model, the 10% cut gives 0.4112
+against a liability correlation of 0.3494.
+[benchmarks/results/assortative_mating_simace.md](benchmarks/results/assortative_mating_simace.md)
+lists every cell.
+
+**Stratification.** `--stratify-by depth` puts each mate in the stratum
+of their own **Depth**. `--stratify-by birth_year` uses their birth-year
+bin, `--birth-year-bin` years wide (default 10). Bins start at multiples
+of the width, so 1950 to 1959 is bin `1950`. A mother and her mate can
+be in different strata. Continuous values are standardised to mean 0 and
+SD 1 within each sex × stratum. Binary and ordinal sides get thresholds
+per sex × stratum and share one ρ. Each cell then gains a `stratified`
+block with the primary estimator, its SE, CI and p-value,
+`n_strata_mothers` and `n_strata_fathers`.
+
+With `--stratify-by`, pairs with a mate of unknown stratum (a birth year
+of `-1`) are dropped before any cell and counted under
+`mating_pairs.n_dropped.unknown_stratum`. Each cell then drops every
+sex × stratum whose pairs come from fewer than `--min-stratum-networks`
+**Mate Networks** (default 10, an arbitrary choice) or whose values are
+constant. Dropping one stratum can thin another, so both rules repeat
+until no pair is dropped. The cell counts the dropped pairs under
+`n_dropped.small_stratum` and `n_dropped.degenerate_stratum`. `crude`
+and `stratified` both use the pairs that are left, so their difference
+shows only the adjustment.
+
+**Inference.** Each estimate gets a standard error and a CI, and each
+primary estimate also gets a permutation p-value. The YAML states the
+assumptions under `inference:`.
+
+- *Standard error.* `se` is a cluster-robust sandwich over the cell's
+  Mate Networks of the stacked two-step estimating equations: the
+  thresholds, stratum means and 1/N variances of the first step, then
+  the ρ score. The uncertainty of the first step therefore reaches ρ̂.
+  Influences are summed within each network, squared, summed over
+  networks and scaled by `G/(G−1)` for `G` networks. Clustering by
+  network keeps the dependence between pairs that share a remating
+  parent. Networks are assumed independent; dependence between them
+  through shared ancestry or siblings is not modelled. `se` is on the
+  scale of the estimate (r or ρ), except for `odds_ratio`, where it is
+  the SE of `log OR`. Spearman has no sandwich.
+- *CI.* By default (`--bootstrap 0`) the CI is the Wald interval from
+  `se`: `tanh(atanh(ρ̂) ± 1.96 · se / (1 − ρ̂²))` on the Fisher-z scale for
+  correlations, and `exp(log OR ± 1.96 · se)` for the odds ratio, so the
+  bounds stay in range (`ci_level: 0.95`, `ci_method: sandwich`).
+- *Bootstrap.* With `--bootstrap N`, each of the N draws resamples the
+  cell's Mate Networks with replacement. Pearson, Spearman, phi,
+  point-biserial and the odds ratio are recomputed exactly on the draw.
+  A latent correlation refits its thresholds and stratum moments on the
+  draw, then takes one Newton step from ρ̂ with the draw's score and the
+  full-sample Hessian. A draw whose Hessian at ρ̂ is not positive is
+  refit in full. On 2,500 remated pairs the one-step CI bounds came
+  within 0.0012 of a full refit on the same draws, and the gap shrinks
+  about as 1/n. The CI runs from the 2.5th to the 97.5th percentile of
+  the valid draws (`ci_method: bootstrap`); `se` is still the sandwich.
+- *Permutation.* Each permutation shuffles the father trait vectors,
+  both traits together, among distinct fathers in the same block, and
+  leaves mothers in place. A block is father stratum × which traits the
+  father has, so a father keeps one vector across all his mates, and
+  each cell keeps its pairs. The null hypothesis is that, given the
+  Mating Pair structure, father trait vectors are exchangeable within
+  each block. That null is stronger than zero correlation. It also
+  excludes non-linear association and any link between a father's values
+  and his number of mates.
+- *Permutation under stratification.* With `--stratify-by`, a father
+  swaps only with fathers of his own stratum, for the crude estimate as
+  well as the stratified one. Every `p_perm` then tests within-stratum
+  exchangeability, while the crude estimate and its CI describe the
+  pooled correlation. A cohort trend shared by both mates, with no
+  assortment within a stratum, can give a crude CI that excludes 0 and a
+  crude `p_perm` that does not reject. Without `--stratify-by` there is
+  one stratum, and the crude `p_perm` tests the pooled correlation.
+- *Permutation statistic.* For a latent primary
+  (`permutation_statistic: score_at_zero`), each side's value is replaced
+  by its latent score: the conditional mean of the liability given the
+  level, under that side's thresholds, or the standardised value of a
+  continuous side. `T` is the Pearson r of the mother and father scores
+  over the cell's pairs, which is the score of the likelihood at ρ = 0
+  scaled to a correlation. The father side's thresholds, means and SDs
+  are refit on every permuted sample, because pair-weighted margins move
+  when remating fathers swap. For two continuous traits `T` is the
+  Pearson r itself (`permutation_statistic: pearson`), of the
+  within-stratum standardised values for the stratified form. No
+  optimiser runs per permutation.
+- *Sequential p-value.* The p-value is two-sided by magnitude and
+  sequential (Besag & Clifford 1991, closed scheme, `h = 20`). The draws
+  are read in order. At the 20th valid draw with `|T*| ≥ |T_obs|`, ties
+  included, the cell stops with `p_perm = 20 / l`, where `l` counts the
+  valid draws so far. A cell that never reaches 20 runs all `N`
+  permutations and reports `p_perm = (b + 1) / (B + 1)`, where `B`
+  counts the valid permutations and `b` those at least as extreme. The
+  sequential p is exact under the null at every sample size. A null cell
+  stops after about 98 draws on average at `N = 999`; a cell with a
+  strong signal never collects 20 exceedances and runs every
+  permutation.
+
+**Seeds, threads and the first run.** Each permutation and bootstrap
+draw has its own random stream, SplitMix64 keyed by `--seed` and the
+draw number, with separate streams for permutations and the bootstrap.
+The stopping rule batches draws by draw count, never by thread count, and
+every parallel sum adds fixed blocks in a fixed order. The same input and
+`--seed` therefore give the same YAML, apart from `generated_at`, under
+any `--threads`. The kernels are compiled by numba the first time they
+run after an install, which took about 11 to 12 s on the benchmark
+machine below. numba caches the compiled kernels on disk
+(`NUMBA_CACHE_DIR` sets where), so later runs skip the compile.
+
+**Output.** The `assortative_mating:` block holds:
+
+| Field | Contents |
+|---|---|
+| `traits` | per trait: `name`, `type`, `type_source`, `levels` (binary and ordinal), `n_values`, `n_missing` |
+| `settings` | `permutations`, `bootstrap`, `seed`, `threads` (the numba thread count used), `ci_level`, `ci_method`, `stratify_by`, `birth_year_bin`, `min_stratum_networks` (the last two null when unused) |
+| `inference` | `se_method`, `ci_scale`, `bootstrap_unit`, `bootstrap_assumption`, `bootstrap_method`, `permutation_null`, `permutation_blocks`, `permutation_statistic`, `permutation_stopping` (`besag_clifford_closed`) and `permutation_stop_h` (20), as fixed strings |
+| `mating_pairs` | `n_total`, `n_dropped.unknown_stratum`, `n_mate_networks`, `largest_mate_network_share`, `n_mothers_multiple_mates`, `n_fathers_multiple_mates` |
+| `mate_correlation` | one record per cell, named by its `mother` and `father` trait, in `R_mf` row order |
+| `within_person` | two traits only: per sex, `estimator`, `n`, and the estimate |
+| `notes` | the fixed caveats below |
+
+Floats are rounded to 4 decimal places, or to 4 significant digits below
+0.1, so a small p-value, SE or share is not written as 0.
+
+A cell record holds `n`, `n_dropped` (`mother_missing`, `father_missing`,
+`both_missing`, `small_stratum`, `degenerate_stratum`), the cell's own
+`n_mate_networks` and `largest_mate_network_share`, and its `crude` and
+`stratified` estimators. A sparse cell can rest on few networks even
+when the whole pedigree does not. Each estimator record holds:
+
+- the estimate, under `r`, `rho` (with `boundary`) or `value`
+  (`odds_ratio`). An estimate the full cell cannot support is `null`
+  with a `reason`, for example `constant_margin`.
+- `se`, or `se: null` when the sandwich does not exist.
+- `ci` with `ci_method` (`sandwich` or `bootstrap`), or `ci: null` with
+  `ci_unavailable_reason`. Without `--bootstrap` the reasons are
+  `single_mate_network` (the cell's pairs form one network, so no
+  zero-width interval is published), `boundary` (a latent fit at a bound
+  or a correlation of exactly ±1), `infinite_odds_ratio` (a zero cell),
+  `sandwich_undefined` (the ρ equation is not concave at ρ̂), and
+  `bootstrap_not_requested` (Spearman). With `--bootstrap`, they are
+  `single_mate_network` and `too_many_failed_draws` (fewer than 95% of
+  draws are valid).
+- under `--bootstrap N` only, `bootstrap: {requested, valid, failed,
+  failure_reasons}`. A draw fails when the estimate is undefined in it:
+  `no_complete_pairs`, `constant_margin`, `degenerate_stratum`, or
+  `empty_category` (a level that a stratum shows in the cell is absent
+  from that stratum in the draw; levels are never merged). A ρ̂ at a
+  bound and an infinite odds ratio are valid draws, so an odds-ratio CI
+  can reach `.inf`.
+- for the primary estimator only, `p_perm`, or `p_perm: null` with
+  `p_perm_unavailable_reason` (`not_requested`,
+  `no_informative_permutations`, or `no_valid_permutations`), its
+  `permutation_statistic`, and `permutations: {requested, valid, failed,
+  failure_reasons, seed, n_fixed_fathers, stopped_early, draws_used,
+  sequential_h}`. `draws_used` is the number of draws read (`l` plus the
+  failed draws among them; `valid`, `failed` and `failure_reasons` count
+  those draws only), and `stopped_early` says whether it is below
+  `requested`. `n_fixed_fathers` counts the cell's fathers who are alone
+  in their block, so no permutation moves them. When all of them are,
+  the reason is `no_informative_permutations`.
+
+**Caveats.** `notes` repeats these in every file:
+
+- Mating Pairs are seen only through offspring. A partnership with no
+  recorded child is absent, so the Mate Correlation describes
+  reproducing pairs.
+- The estimates are phenotypic correlations. The latent estimators
+  assume a bivariate-normal liability.
+- Censored age-dependent diagnoses are not corrected. A mate who has not
+  yet been diagnosed counts as unaffected.
+
+Flags:
+
+- `--trait COL [COL2]` names one or two trait columns, each once
+  (required).
+- `--trait-type COL=TYPE` states the type of a trait column, one of
+  `continuous`, `binary` or `ordinal`. Repeat it for the second trait.
+- `--trait-missing TOK` adds a token that means missing. Repeat it for
+  more tokens.
+- `--stratify-by {depth,birth_year}` turns on stratification.
+  `birth_year` needs `--birth-year-col`.
+- `--birth-year-bin YEARS` sets the bin width for `--stratify-by
+  birth_year` (default 10).
+- `--min-stratum-networks N` sets the Mate Network minimum per sex ×
+  stratum (default 10). Without `--stratify-by` it has no effect, and
+  `settings` records it as null.
+- `--permutations N` (default 999) sets the most permutations a cell
+  runs. A cell stops after about `20 / p_perm` of them; `0` turns the
+  p-value off, and the records say `not_requested`.
+- `--bootstrap N` (default 0) replaces the sandwich CI with a percentile
+  CI from N one-step draws.
+- `--seed INT` (default 0) keys every permutation and bootstrap draw.
+  It takes any integer from -2^63 to 2^63-1.
+- `--threads N` sets the threads of the numba kernels (the fits, the
+  sandwich, the bootstrap and the permutations). The default is the
+  physical cores the process may run on, with SMT siblings counted once:
+  the permutation pass is memory-bound, and hyperthreads do not speed it
+  up (see [Cost](#cost)). A `NUMBA_NUM_THREADS` below the request caps
+  it. Results are identical under any value. The pedigree-graph engine
+  keeps one thread unless `--threads` is given.
+- The column, `--sep`, `--sex-encoding` and `--max-memory` flags work as
+  in `summarize`.
+
+Usage errors exit 2: more than two `--trait` columns, a column named
+twice in `--trait` or in `--trait-type`, a `--trait-type` that is not
+`COL=TYPE` or names a column that is not a trait, and `--stratify-by
+birth_year` without `--birth-year-col`.
+
+Examples:
+
+```bash
+# one binary diagnosis, with the default inference
+python pedigree_summary.py assortative-mating --in PED.tsv --out DIR --trait dx
+
+# two traits, -9 as missing, stratified by birth decade
+python pedigree_summary.py assortative-mating --in PED.tsv --out DIR \
+    --trait liability dx --trait-missing -9 \
+    --stratify-by birth_year --birth-year-col birth_year
+```
+
+#### Cost
+
+The figures below are from one workstation: an Intel i7-9750H with 6
+cores, 12 threads and 31 GiB of RAM, shared with other jobs, so single
+runs carry roughly 10 to 20% noise. The input came from
+`benchmarks/generate_assortative_mating.py --pairs N --seed 0`: 2.76 rows
+per Mating Pair, 8 birth-decade strata, remating, and no missing values.
+The command ran `--trait liab dx --stratify-by birth_year
+--birth-year-col birth_year`, so all four cell types, with the default
+inference and threads (6). The generator's latent `R_mf` is 0.30, 0.15,
+0.05 and 0.25 (row-major); the "R_mf = 0" input has no assortment.
+[benchmarks/results/assortative_mating_cost.md](benchmarks/results/assortative_mating_cost.md)
+has the method and per-stage tables.
+
+| Mating Pairs | Wall time | R_mf = 0 input | Peak memory |
+|---|---|---|---|
+| 10^5 | 2.51 s (median of 8) | 2.24 s (median of 6) | 343 MiB |
+| 10^6 | 11.48 s (median of 8) | 7.89 s (median of 6) | 1,112 MiB |
+| 3 × 10^6 | 34.90 s (one run) | | 3,273 MiB |
+| 10^7 | 168.3 s (one run) | | 8,315 MiB |
+
+- At 10^5 and 10^6 the wall time is the CLI's, and the peak is the
+  median `ru_maxrss` of 3 other runs. At 3 × 10^6 and 10^7 both are the
+  stage driver's totals for the CLI code path at 3 × 10^6 (peak `VmHWM`).
+  The 10^7 row is the final gate: the CLI under `/usr/bin/time` in its own
+  cgroup, peak = cgroup `memory.peak` (`ru_maxrss` 8,379 MiB), load + validate
+  22.6 s of the 168.3 s. pedsum's default memory watchdog sets its limit to
+  80% of the memory available at start (12.9 GiB in that run); pass
+  `--max-memory` on a machine with less free memory.
+- The permutation pass costs the most (88.9 s of an earlier 196.2 s run at
+  10^7, under memory pressure). It is memory-bound, so at 3 × 10^6 the kernel took 14.0 s on 6 threads
+  and 14.2 s on 12 (one run each). Sequential stopping cuts it on null cells: with
+  R_mf = 0 every cell stops after about 98 draws, and the 10^6 run fell
+  from 11.64 s to 7.89 s (medians of 6). A strong signal runs all 999.
+- `--bootstrap 1000` took 7.5 s at 10^5, against 2.4 s without it
+  (medians of 3), and 101.9 s at 10^6 (one run). Both runs predate a fix
+  to the Spearman pass of the draws that cut the 10^6 `fit_cell` stage
+  under `--bootstrap 200` from 19.2 s to 13.9 s.
+- The first run after install adds 11 to 12 s of numba compilation (at
+  10^4 pairs: 13.46 s and 12.62 s cold against 1.43 s and 1.80 s warm).
+
+#### References
+
+- Besag, J. & Clifford, P. (1991). Sequential Monte Carlo p-values.
+  *Biometrika*, 78(2), 301–304. <https://doi.org/10.1093/biomet/78.2.301>
+- Olsson, U. (1979). Maximum likelihood estimation of the polychoric
+  correlation coefficient. *Psychometrika*, 44(4), 443–460.
+  <https://doi.org/10.1007/BF02296207>
+- Olsson, U., Drasgow, F. & Dorans, N. J. (1982). The polyserial
+  correlation coefficient. *Psychometrika*, 47(3), 337–347.
+  <https://doi.org/10.1007/BF02294164>
+- Owen, D. B. (1956). Tables for computing bivariate normal
+  probabilities. *Annals of Mathematical Statistics*, 27(4), 1075–1090.
+  <https://doi.org/10.1214/aoms/1177728074>
+- Wichura, M. J. (1988). Algorithm AS 241: The percentage points of the
+  normal distribution. *Applied Statistics*, 37, 477.
+  <https://doi.org/10.2307/2347330>
 
 ### Emit EPIMIGHT input
 

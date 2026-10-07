@@ -104,6 +104,25 @@ _Avoid_: bare "Ne", "the effective size"
 A maximal connected subgraph of the pedigree, treated as an undirected graph over parent-child edges and Mating-Pair partnerships. Counted by `n_components`. A *Singleton* is a Component of size 1.
 _Avoid_: "cluster", "family" (lay use)
 
+**Mate Network**:
+A maximal set of individuals connected through **Mating Pairs** alone, ignoring parent-child edges: if A and B are a Mating Pair and B and C are a Mating Pair, A, B and C share one Mate Network. Every Mating Pair belongs to exactly one Mate Network. A Mating Pair whose two members have no other mates is a Mate Network of two.
+_Avoid_: "cluster", "family", **Component** (a Component also follows parent-child edges, so it is coarser)
+
+**Mate Correlation**:
+The correlation between the mother's and the father's values of an input trait across **Mating Pairs**, one observation per Mating Pair. With two traits it is a 2×2 matrix whose rows are the mother's trait and columns the father's (`R_mf[i][j] = corr(mother trait i, father trait j)`). Its off-diagonal cells are distinct and need not be equal. It is phenotypic: it describes observed values of reproducing pairs, not a genetic or liability-scale correlation unless the estimator says so (`tetrachoric`, `polychoric`, `biserial` and `polyserial` assume a bivariate-normal liability). Reported by the `assortative-mating` subcommand.
+_Avoid_: "spousal correlation", "assortment coefficient", bare "assortative mating" for the number (assortative mating is the process; the Mate Correlation is the statistic)
+
+**Within-Person Cross-Trait Correlation**:
+The correlation between an individual's two trait values, computed separately for mothers and for fathers among individuals in the Mating Pairs used. Reported beside a two-trait **Mate Correlation** because a cross-trait Mate Correlation partly follows from the within-trait Mate Correlations combined with this correlation.
+_Avoid_: "rho_w" in output (simACE's name for the simulated quantity), "genetic correlation"
+
+**Stratum**:
+The group an individual falls in under `assortative-mating --stratify-by`: their **Depth** or their birth-year bin, taken per sex, so a mother and her mate can be in different strata. In one **Mate Correlation** cell, a *small stratum* is one whose Mating Pairs come from fewer than `--min-stratum-networks` **Mate Networks**, and a *degenerate stratum* holds a single trait value; both are dropped from that cell.
+_Avoid_: "thin stratum" in output (the keys are `small_stratum` and `degenerate_stratum`), "cohort" (a Depth stratum is not a birth cohort)
+
+**Primary Estimator**:
+The one estimator of a **Mate Correlation** cell that gets a permutation p-value and a stratified form: `pearson`, `tetrachoric`, `polychoric`, `biserial` or `polyserial`, depending on the cell's trait types. The others (`spearman`, `phi`, `odds_ratio`, `point_biserial`) are reported crude, without a p-value or a stratified form; `spearman` has no sandwich SE and gets a CI only under `--bootstrap`.
+
 **F (Inbreeding Coefficient)**:
 For one individual, the pedigree-based probability that the two alleles at a locus are identical-by-descent given the pedigree. Per-individual column is `F`; computed via Meuwissen-Luo recursion. Range [0, 1].
 _Avoid_: "inbreeding" as a noun standing alone
