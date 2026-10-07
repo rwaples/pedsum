@@ -42,6 +42,7 @@ permutations.
 
 from __future__ import annotations
 
+import functools
 import math
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ import numpy as np
 from pedsum.base import SEX_MALE, logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
     import polars as pl
@@ -81,16 +83,10 @@ ALL_RESOLVED_SEX_SOURCES: tuple[str, ...] = (
 #: Analytical p below this needs permutations before it may be claimed.
 ANALYTICAL_P_WARN = 0.01
 
-# Sampler size bounds, per backend. These are *different* limits with different
-# causes, and neither is the ``P``-based overflow bound guarded in
-# ``_pairs_and_triples`` — do not merge them.
-#
-# NumPy: ``Generator.multivariate_hypergeometric`` with the default "marginals"
-# method documents ``sum(colors) < 10**9`` to avoid loss of precision.
-_NUMPY_SAMPLER_MAX_N = 10**9
-# Numba: its ``np.random.hypergeometric`` routes through float64 internally and
-# starts returning zeros above the 2**53 exact-integer ceiling (measured: fine
-# at 1e15, broken at 1e16). No 10**9 restriction.
+# Sampler size bound. It is not the ``P``-based overflow bound guarded in
+# ``_pairs_and_triples`` — do not merge them. Numba's ``np.random.hypergeometric``
+# routes through float64 internally and starts returning zeros above the 2**53
+# exact-integer ceiling (measured: fine at 1e15, broken at 1e16).
 _NUMBA_SAMPLER_MAX_N = 2**53
 
 _SEX_SOURCE_ORDER: tuple[str, ...] = (
@@ -258,45 +254,8 @@ def holm_adjust(pvalues: dict[str, float]) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
-# Permutation samplers (NumPy fallback + optional compiled sampler)
+# Permutation sampler
 # ---------------------------------------------------------------------------
-
-
-def sample_concordance_numpy(
-    sizes: np.ndarray,
-    n_male: int,
-    n_permutations: int,
-    seed: int,
-) -> np.ndarray:
-    """Draw ``n_permutations`` values of ``C`` under the fixed-margin null.
-
-    Production fallback *and* the oracle the compiled sampler is tested
-    against. ``multivariate_hypergeometric(colors=sizes, nsample=M)`` is
-    exactly the fixed-margin allocation: draw the ``M`` males from an urn whose
-    colors are the groups, ``n_g`` balls each. Its default "marginals" method
-    is the sequential conditional-hypergeometric chain, run in C.
-
-    Draws are taken one at a time. Batching into ``B x G`` blocks buys nothing
-    — the cost is real ``O(B*G)`` sampling work, not call overhead (measured
-    0.97x at ``B=100, G=200k``) — while allocating 160 MB there.
-
-    Args:
-        sizes: Eligible group sizes, in canonical group order.
-        n_male: ``M``, held fixed across permutations.
-        n_permutations: ``B``, the number of draws.
-        seed: Seed for a fresh :class:`numpy.random.Generator`.
-
-    Returns:
-        ``(B,)`` int64 array of permuted ``C`` values.
-    """
-    rng = np.random.default_rng(seed)
-    colors = sizes.astype(np.int64, copy=False)
-    out = np.empty(n_permutations, dtype=np.int64)
-    for b in range(n_permutations):
-        male = rng.multivariate_hypergeometric(colors, n_male)
-        female = colors - male
-        out[b] = ((male * (male - 1) + female * (female - 1)) >> 1).sum()
-    return out
 
 
 def _sequential_concordance(
@@ -310,7 +269,8 @@ def _sequential_concordance(
 
     Walks the groups in canonical order, drawing each group's male count from
     the hypergeometric conditional on what the earlier groups took. Equivalent
-    to permuting individual labels, in ``O(G)`` memory.
+    to permuting individual labels, in ``O(G)`` memory. The tests check it
+    against an independent NumPy sampler (``tests/sex_concordance_oracles.py``).
 
     Do **not** call this uncompiled outside tests: it seeds NumPy's legacy
     *global* RNG, which is what makes it jittable in the first place.
@@ -333,39 +293,12 @@ def _sequential_concordance(
     return out
 
 
-_NUMBA_SAMPLER: object | None = None
-_NUMBA_PROBED = False
+@functools.cache
+def load_numba_sampler() -> Callable[..., np.ndarray]:
+    """Return the compiled sequential sampler, compiled on first use so a run without permutations never pays for it."""
+    import numba
 
-
-def load_numba_sampler():
-    """Return the compiled sequential sampler, or ``None`` when unavailable.
-
-    Numba is a **soft import**, deliberately absent from ``pyproject.toml``.
-    It measures 1.8x over the NumPy sampler at ``G=200k`` and 2.8x at ``G=2M``
-    (79.5 ms vs 224.2 ms per draw) — real, but not enough to justify pinning a
-    compiled dependency, and constraining NumPy resolution for every pedsum
-    user, for an opt-in path inside an opt-in feature. The NumPy sampler has to
-    exist anyway as the test oracle, so the fallback is free, and numba arrives
-    transitively via pedigree-graph for most installs.
-
-    The probe result is memoised, so a missing numba costs one failed import.
-    """
-    global _NUMBA_SAMPLER, _NUMBA_PROBED  # noqa: PLW0603 - one-shot import probe cache
-    if _NUMBA_PROBED:
-        return _NUMBA_SAMPLER
-    _NUMBA_PROBED = True
-    try:
-        import numba
-    except ImportError:
-        logger.debug("numba unavailable; sex-concordance permutations use the NumPy sampler")
-        return None
-    _NUMBA_SAMPLER = numba.njit(cache=True)(_sequential_concordance)
-    return _NUMBA_SAMPLER
-
-
-def _sampler_bound(backend: str) -> int:
-    """Return the maximum eligible ``N`` the named backend can sample."""
-    return _NUMBA_SAMPLER_MAX_N if backend == "numba" else _NUMPY_SAMPLER_MAX_N
+    return numba.njit(cache=True)(_sequential_concordance)
 
 
 def _run_permutations(
@@ -380,38 +313,28 @@ def _run_permutations(
 
     Two-sided by absolute deviation from ``E[C]``, matching the analytical
     test, with the finite-Monte-Carlo p-value ``(b+1)/(B+1)`` so it is never
-    zero. Records the backend: with a soft-imported numba the same seed gives a
-    different p depending on whether numba is installed, so the reproducibility
-    guarantee is "given (seed, backend)", not seed alone. The difference is
-    well inside Monte Carlo error (se ~= 0.007 at p ~= 0.05, B = 1000).
+    zero.
     """
-    sampler = load_numba_sampler()
-    backend = "numba" if sampler is not None else "numpy"
     n_total = int(sizes.sum())
     block: dict = {
         "requested": int(n_permutations),
         "completed": 0,
         "seed": int(seed),
-        "backend": backend,
         "p_raw": None,
         "skip_reason": None,
     }
-    bound = _sampler_bound(backend)
-    if n_total >= bound:
-        block["skip_reason"] = f"sampler_size_limit_{backend}"
+    if n_total >= _NUMBA_SAMPLER_MAX_N:
+        block["skip_reason"] = "sampler_size_limit_numba"
         logger.warning(
-            "sex-concordance permutations skipped: %s eligible offspring reaches the %s sampler's "
+            "sex-concordance permutations skipped: %s eligible offspring reaches the numba sampler's "
             "documented bound (%s); analytical results are still reported",
             f"{n_total:,}",
-            backend,
-            f"{bound:,}",
+            f"{_NUMBA_SAMPLER_MAX_N:,}",
         )
         return block
 
-    if sampler is not None:
-        draws = sampler(sizes.astype(np.int64, copy=False), int(n_male), int(n_total), int(n_permutations), int(seed))
-    else:
-        draws = sample_concordance_numpy(sizes, int(n_male), int(n_permutations), int(seed))
+    sampler = load_numba_sampler()
+    draws = sampler(sizes.astype(np.int64, copy=False), int(n_male), int(n_total), int(n_permutations), int(seed))
 
     # Relax the threshold by a relative epsilon so a draw that mirrors the
     # observation across E[C] counts as extreme even when float rounding puts

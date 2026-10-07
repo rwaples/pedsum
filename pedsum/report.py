@@ -325,7 +325,7 @@ def _redact_concordance_block(block: dict, min_cell: int) -> None:
 
     Recurses once into the ``all_resolved`` sensitivity block, which carries
     the same eligibility/statistic keys and none of the outer wrappers.
-    Permutation count, seed, and backend survive — they describe the procedure,
+    Permutation count and seed survive — they describe the procedure,
     not the pedigree.
     """
     if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import itertools
 import math
-import sys
 from fractions import Fraction
 
 import numpy as np
@@ -31,6 +30,7 @@ from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from sex_concordance_oracles import sample_concordance_numpy
 
 from pedsum import sex_concordance as sc
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
@@ -367,7 +367,7 @@ def test_far_tail_is_liberal_for_a_dominant_group():
     n_total = int(sizes.sum())
     n_male = n_total // 2
     moments = sc.analytical_moments(sizes, n_male, n_total - n_male)
-    draws = sc.sample_concordance_numpy(sizes, n_male, 20_000, 1)
+    draws = sample_concordance_numpy(sizes, n_male, 20_000, 1)
     z = (draws - float(moments.expected)) / math.sqrt(float(moments.variance))
 
     assert 0.04 <= np.mean(np.abs(z) > 1.96) <= 0.07, "should stay sound at the 5% level"
@@ -562,12 +562,9 @@ def test_sampler_reproduces_the_exact_fixed_margin_distribution(backend):
     sizes = np.array([3, 3], dtype=np.int64)
     n_male, n_total, n_draws = 3, 6, 40_000
     if backend == "numba":
-        sampler = sc.load_numba_sampler()
-        if sampler is None:
-            pytest.skip("numba is not installed")
-        draws = sampler(sizes, n_male, n_total, n_draws, 11)
+        draws = sc.load_numba_sampler()(sizes, n_male, n_total, n_draws, 11)
     else:
-        draws = sc.sample_concordance_numpy(sizes, n_male, n_draws, 11)
+        draws = sample_concordance_numpy(sizes, n_male, n_draws, 11)
 
     pmf = _pmf_of_c([3, 3], n_male)
     assert set(np.unique(draws)) <= set(pmf)
@@ -581,7 +578,7 @@ def test_permutation_moments_match_the_analytical_moments():
     n_total = int(sizes.sum())
     n_male = n_total // 2
     moments = sc.analytical_moments(sizes, n_male, n_total - n_male)
-    draws = sc.sample_concordance_numpy(sizes, n_male, 8_000, 99).astype(np.float64)
+    draws = sample_concordance_numpy(sizes, n_male, 8_000, 99).astype(np.float64)
     assert draws.mean() == pytest.approx(float(moments.expected), rel=0.01)
     assert draws.var(ddof=1) == pytest.approx(float(moments.variance), rel=0.10)
 
@@ -592,41 +589,23 @@ def test_sampler_is_deterministic_per_backend(backend):
     sizes = np.full(50, 4, dtype=np.int64)
     if backend == "numba":
         sampler = sc.load_numba_sampler()
-        if sampler is None:
-            pytest.skip("numba is not installed")
         first = sampler(sizes, 100, 200, 64, 5)
         second = sampler(sizes, 100, 200, 64, 5)
     else:
-        first = sc.sample_concordance_numpy(sizes, 100, 64, 5)
-        second = sc.sample_concordance_numpy(sizes, 100, 64, 5)
+        first = sample_concordance_numpy(sizes, 100, 64, 5)
+        second = sample_concordance_numpy(sizes, 100, 64, 5)
     assert np.array_equal(first, second)
 
 
-def _force_numpy_backend(monkeypatch) -> None:
-    """Make ``import numba`` fail and clear the memoised probe."""
-    monkeypatch.setitem(sys.modules, "numba", None)
-    monkeypatch.setattr(sc, "_NUMBA_PROBED", False)
-    monkeypatch.setattr(sc, "_NUMBA_SAMPLER", None)
-
-
-def test_numpy_fallback_when_numba_is_unimportable(monkeypatch):
-    """A missing numba degrades to the NumPy sampler, and says so in ``backend``."""
-    _force_numpy_backend(monkeypatch)
-    assert sc.load_numba_sampler() is None
-
+def test_permutations_always_use_the_compiled_sampler():
+    """With numba a dependency, production has one sampler: the block names no backend and holds the compiled draws' p."""
+    assert not hasattr(sc, "sample_concordance_numpy")
     sizes = np.full(20, 4, dtype=np.int64)
     block = sc._run_permutations(sizes, 40, 30, 28.0, 50, 3)
-    assert block["backend"] == "numpy"
-    assert block["completed"] == 50
-    assert block["p_raw"] is not None
-
-
-def test_backend_is_recorded_for_the_compiled_path():
-    """With numba importable the compiled sampler is used and recorded."""
-    if sc.load_numba_sampler() is None:
-        pytest.skip("numba is not installed")
-    sizes = np.full(20, 4, dtype=np.int64)
-    assert sc._run_permutations(sizes, 40, 30, 28.0, 50, 3)["backend"] == "numba"
+    assert "backend" not in block
+    draws = sc.load_numba_sampler()(sizes, 40, 80, 50, 3)
+    n_extreme = int((np.abs(draws - 28.0) >= 2.0 * (1.0 - 1e-12)).sum())
+    assert block["p_raw"] == (n_extreme + 1) / 51
 
 
 def test_permutation_p_uses_the_finite_monte_carlo_form():
@@ -652,15 +631,14 @@ def test_permutation_two_sided_extremeness_counts_both_tails():
 
 
 def test_sampler_size_limit_refuses_cleanly():
-    """Beyond the backend's bound, permutations are skipped — analytics survive."""
-    backend = "numba" if sc.load_numba_sampler() is not None else "numpy"
-    bound = sc._sampler_bound(backend)
+    """Beyond the sampler's bound, permutations are skipped — analytics survive."""
+    bound = sc._NUMBA_SAMPLER_MAX_N
     # Two enormous group sizes reach the bound without allocating a big array.
     sizes = np.array([bound // 2, bound - bound // 2], dtype=np.int64)
     block = sc._run_permutations(sizes, 4, 3, 2.0, 10, 0)
     assert block["completed"] == 0
     assert block["p_raw"] is None
-    assert block["skip_reason"] == f"sampler_size_limit_{backend}"
+    assert block["skip_reason"] == "sampler_size_limit_numba"
     assert block["requested"] == 10
 
 
@@ -814,7 +792,7 @@ def test_permutations_flag_implies_enable(tmp_path):
     assert perms["requested"] == 50
     assert perms["completed"] == 50
     assert perms["seed"] == 3
-    assert perms["backend"] in {"numba", "numpy"}
+    assert "backend" not in perms
 
 
 def test_seed_without_permutations_warns(tmp_path):

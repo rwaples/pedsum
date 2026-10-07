@@ -8,14 +8,10 @@ dependencies:
   - polars>=1.43.2,<2
   - pyyaml
   - tqdm
-  # pedsum imports numba *optionally*, for the sex-concordance permutation
-  # sampler only (`--sex-concordance-permutations`), and falls back to a NumPy
-  # sampler when it is unimportable. It is also pedigree-graph's compiled
-  # dependency, and is listed here so conda-forge supplies it rather than pip
-  # pulling a wheel in behind the install below. Deliberately absent from
-  # pyproject.toml: a soft import must not constrain NumPy resolution for every
-  # pedsum user.
-  - numba
+  # The assortative-mating kernels are numba-compiled, so numba is a hard
+  # dependency (pyproject.toml); listed here so conda-forge supplies it rather
+  # than pip pulling a wheel in behind the install below.
+  - numba>=0.68,<1
   # - pigz  # optional: ~3× faster .tsv.gz writes; pedsum falls back to gzip if missing
   - pytest
   - hypothesis

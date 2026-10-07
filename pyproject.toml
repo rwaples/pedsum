@@ -12,7 +12,11 @@ requires-python = ">=3.14"
 dynamic = ["version"]
 dependencies = [
     "numpy>=2.2,<3",
-    "scipy>=1.14,<2",
+    # 1.16.0-1.16.2 compute the 2-D normal CDF by randomized QMC (scipy PR
+    # #23815 restored the deterministic path in 1.16.3). pedsum's own Φ2 uses
+    # owens_t, but the 1e-12 test oracle calls multivariate_normal.cdf, and
+    # Python 3.14 has no wheels before 1.16.1 anyway.
+    "scipy>=1.16.3,<2",
     "polars>=1.43.2,<2",
     "pyyaml>=6,<7",
     "tqdm>=4.66,<5",
@@ -21,6 +25,10 @@ dependencies = [
     # documents the editable-checkout override for ad-hoc work.  The floor is
     # 0.11.1 because epimight-input reads relatives_per_person.
     "pedigree-graph>=0.12.1,<0.13",
+    # The assortative-mating kernels are numba-compiled (one production path).
+    # 0.68 is the version surveyed for cp314 wheels; numba pins numpy (<2.6 for
+    # 0.68), tighter than the numpy floor above.
+    "numba>=0.68,<1",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +61,7 @@ include = ["pedsum*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["error::DeprecationWarning"]
+markers = ["slow: median call time of 5 s or more under `pixi run test`"]
 
 # Lint and type-check config deliberately stay in the standalone ruff.toml and
 # ty.toml. ty.toml in particular carries an `extra-paths` entry pointing at the
