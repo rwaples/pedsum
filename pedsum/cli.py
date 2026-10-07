@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import tempfile
 import time
@@ -18,7 +19,9 @@ from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
     _F_WALK_WARN_VISITS,
+    MIN_STRATUM_NETWORKS,
     SEX_UNKNOWN,
+    TRAIT_KINDS,
     VERSION,
     PedigreeError,
     logger,
@@ -34,13 +37,15 @@ from pedsum.epimight import (
 )
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
-from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, read_reference_mask
+from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, read_reference_mask, read_trait_columns
 from pedsum.pedigree_ops import _group_mating_pairs
 from pedsum.progress import relationship_progress
 from pedsum.report import (
+    ASSORTATIVE_MATING_FIGURES,
     SAFE_MIN_CELL,
     _apply_safe_attempt,
     _build_added_founders,
+    _build_assortative_mating_data,
     _build_effective_size_data,
     _build_individual_data,
     _build_pedigree_data,
@@ -137,15 +142,58 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_threads_args(p: argparse.ArgumentParser) -> None:
+def _add_threads_args(p: argparse.ArgumentParser, *, numba_default_cores: bool = False) -> None:
+    if numba_default_cores:
+        default = None
+        purpose = (
+            "threads for the numba kernels (default: the physical cores the process may run on; "
+            "the pedigree-graph engine keeps 1 unless this is given)"
+        )
+    else:
+        default = 1
+        purpose = "worker threads for the pedigree-graph engine (default 1)"
     p.add_argument(
         "--threads",
         type=_positive_int,
-        default=1,
-        help="worker threads for the pedigree-graph engine (default 1). "
-        "Counts and pair lists are identical under any value; only wall "
+        default=default,
+        help=f"{purpose}. Results are identical under any value; only wall "
         "time changes. Set once per process, before the first computation.",
     )
+
+
+def _parse_cpu_list(text: str) -> set[int]:
+    """CPU numbers of a sysfs list such as ``0,6`` or ``0-3,8``."""
+    cpus: set[int] = set()
+    for part in text.strip().split(","):
+        if part:
+            lo, _, hi = part.partition("-")
+            cpus.update(range(int(lo), int(hi or lo) + 1))
+    return cpus
+
+
+def physical_cores(sysfs: Path = Path("/sys/devices/system/cpu")) -> int:
+    """Physical cores among the CPUs this process may run on: its affinity set, with SMT siblings counted once.
+
+    A CPU's siblings come from ``topology/core_cpus_list`` (``thread_siblings_list``
+    on older kernels); a CPU without either counts as a core of its own. Without
+    ``sched_getaffinity`` (not Linux) the answer is ``os.cpu_count()``.
+    """
+    try:
+        cpus = os.sched_getaffinity(0)
+    except AttributeError:
+        return os.cpu_count() or 1
+    cores: set[frozenset[int]] = set()
+    for cpu in cpus:
+        topology = sysfs / f"cpu{cpu}" / "topology"
+        for name in ("core_cpus_list", "thread_siblings_list"):
+            try:
+                cores.add(frozenset(_parse_cpu_list((topology / name).read_text())))
+                break
+            except OSError, ValueError:
+                continue
+        else:
+            cores.add(frozenset([cpu]))
+    return max(1, len(cores))
 
 
 def _add_memory_args(p: argparse.ArgumentParser) -> None:
@@ -283,6 +331,25 @@ def _estimator_list(v: str) -> list[str]:
     return list(ALL_EFFECTIVE_SIZE_ESTIMATORS) if "all" in names else names
 
 
+def _trait_type(v: str) -> tuple[str, str]:
+    """Argparse type for ``--trait-type``: ``COL=TYPE`` with TYPE one of the trait kinds."""
+    column, sep, kind = v.rpartition("=")
+    if not sep or not column or kind not in TRAIT_KINDS:
+        raise argparse.ArgumentTypeError(f"expected COL={'|'.join(TRAIT_KINDS)}, got {v!r}")
+    return column, kind
+
+
+def _int64(v: str) -> int:
+    """Argparse type guard for the int64 range the numba kernels take a seed in."""
+    try:
+        n = int(v)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected integer, got {v!r}") from exc
+    if not -(2**63) <= n < 2**63:
+        raise argparse.ArgumentTypeError(f"expected an integer from -2^63 to 2^63-1, got {v!r}")
+    return n
+
+
 def _positive_int(v: str) -> int:
     """Argparse type guard for ints >= 1."""
     n = _nonnegative_int(v)
@@ -393,7 +460,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "p-value is asymptotic and screening-only: any claim at p < 0.01 "
         "needs permutations. 1,000 is a reasonable starting point; cost "
         "scales linearly in N and in the number of eligible groups (~80ms "
-        "per draw at 2M groups with numba, ~224ms with the NumPy fallback).",
+        "per draw at 2M groups).",
     )
     p_sum.add_argument(
         "--sex-concordance-seed",
@@ -401,9 +468,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="INT",
         help="seed for the sex-concordance permutation sampler (default: 0). "
-        "No effect without `--sex-concordance-permutations`. Results are "
-        "reproducible given (seed, backend) — the backend is recorded in the "
-        "output because numba is a soft import.",
+        "No effect without `--sex-concordance-permutations`. The same seed "
+        "reproduces the same p-values.",
     )
     p_sum.add_argument(
         "--tsv",
@@ -680,6 +746,93 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_memory_args(p_es)
     _add_logging_args(p_es)
 
+    p_am = sub.add_parser(
+        "assortative-mating",
+        help="estimate the Mate Correlation of one or two trait columns over Mating Pairs",
+    )
+    _add_input_args(
+        p_am,
+        out_help="output directory (created if needed); writes assortative_mating.yaml.",
+        birth_year_help="optional column name for birth year (integer or float "
+        "calendar year; -1/NA/blank for unknown). Required by --stratify-by birth_year.",
+    )
+    p_am.add_argument(
+        "--trait",
+        nargs="+",
+        required=True,
+        metavar="COL",
+        help="one or two trait columns. With two, every mother trait x father trait cell is reported.",
+    )
+    p_am.add_argument(
+        "--trait-type",
+        type=_trait_type,
+        action="append",
+        default=[],
+        metavar="COL=TYPE",
+        help=f"state a trait's type ({', '.join(TRAIT_KINDS)}); repeatable. Unstated, two levels "
+        "are binary, more than 20 numeric values continuous, and 3-20 values an error. Ordinal "
+        "must always be stated.",
+    )
+    p_am.add_argument(
+        "--trait-missing",
+        action="append",
+        default=[],
+        metavar="TOK",
+        help="an extra trait token that means missing, matched after stripping whitespace; "
+        "repeatable. Blank, NA, NaN, null, '.' and '?' are always missing.",
+    )
+    p_am.add_argument(
+        "--stratify-by",
+        choices=("depth", "birth_year"),
+        default=None,
+        help="stratify by each individual's Depth or birth-year bin. Mating Pairs with a mate of "
+        "unknown stratum are dropped from every estimate.",
+    )
+    p_am.add_argument(
+        "--birth-year-bin",
+        type=_positive_int,
+        default=10,
+        metavar="YEARS",
+        help="birth-year bin width for --stratify-by birth_year (default: %(default)s).",
+    )
+    p_am.add_argument(
+        "--min-stratum-networks",
+        type=_positive_int,
+        default=MIN_STRATUM_NETWORKS,
+        metavar="N",
+        help="with --stratify-by, a sex x stratum is kept only when the cell's pairs in it span at least N "
+        "Mate Networks; smaller strata are dropped from both the crude and the stratified estimates of "
+        "that cell (default: %(default)s).",
+    )
+    p_am.add_argument(
+        "--permutations",
+        type=_nonnegative_int,
+        default=999,
+        metavar="N",
+        help="father permutations for each cell's p-value (default: %(default)s; 0 turns them off).",
+    )
+    p_am.add_argument(
+        "--bootstrap",
+        type=_nonnegative_int,
+        default=0,
+        metavar="N",
+        help="Mate Network bootstrap draws. 0 (default) gives each estimate a Wald CI from its cluster-robust "
+        "sandwich SE over Mate Networks; N > 0 replaces the CI with the percentile CI of N one-step draws "
+        "(the sandwich SE is still reported).",
+    )
+    p_am.add_argument(
+        "--seed",
+        type=_int64,
+        default=0,
+        metavar="INT",
+        help="seed for the permutations and the bootstrap draws, an integer from -2^63 to 2^63-1 "
+        "(default: %(default)s).",
+    )
+    _add_format_args(p_am)
+    _add_threads_args(p_am, numba_default_cores=True)
+    _add_memory_args(p_am)
+    _add_logging_args(p_am)
+
     args = parser.parse_args(argv)
     if args.subcommand is None:
         parser.print_help(sys.stderr)
@@ -690,10 +843,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.sex_concordance = True
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
+    if args.subcommand == "assortative-mating":
+        _check_assortative_mating_args(p_am, args)
     if args.subcommand == "effective-size":
         selected = set(args.estimators or ALL_EFFECTIVE_SIZE_ESTIMATORS)
         args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
     return args
+
+
+def _check_assortative_mating_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Usage errors (exit 2) of ``assortative-mating``; turns ``--trait-type`` into a column -> type map."""
+    if len(args.trait) > 2:
+        parser.error(f"--trait takes one or two columns, got {len(args.trait)}")
+    if len(set(args.trait)) != len(args.trait):
+        parser.error(f"--trait names the same column twice: {' '.join(args.trait)}")
+    stated: dict[str, str] = {}
+    for column, kind in args.trait_type:
+        if column not in args.trait:
+            parser.error(f"--trait-type names {column!r}, which is not a --trait column")
+        if column in stated:
+            parser.error(f"--trait-type names {column!r} twice")
+        stated[column] = kind
+    args.trait_type = stated
+    if args.stratify_by == "birth_year" and args.birth_year_col is None:
+        parser.error("--stratify-by birth_year needs --birth-year-col")
 
 
 def _commit_thread_budget(args: argparse.Namespace) -> None:
@@ -703,13 +876,27 @@ def _commit_thread_budget(args: argparse.Namespace) -> None:
     so this runs before any graph is built. Its results do not depend on the
     value; only wall time does.
     """
-    threads = getattr(args, "threads", 1)
+    threads = getattr(args, "threads", None) or 1
     try:
         configure_threads(threads)
     except RuntimeError:
         # Already committed by an earlier call in this process (the test
         # suite drives several runs in-process); the budget stands.
         logger.debug("pedigree-graph thread budget already committed; --threads=%s ignored", threads)
+
+
+def _set_numba_threads(threads: int) -> None:
+    """Hand ``--threads`` to numba's parallel kernels.
+
+    numba caps a process at ``NUMBA_NUM_THREADS`` (the test task pins it to 1)
+    and refuses more; the cap then stands.
+    """
+    import numba
+
+    try:
+        numba.set_num_threads(threads)
+    except ValueError:
+        logger.debug("numba allows fewer than --threads=%d thread(s) in this process; keeping its maximum", threads)
 
 
 def _init_logging(verbose: bool, quiet: bool) -> None:
@@ -1136,6 +1323,64 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     return 0
 
 
+def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
+    """``assortative-mating``: type the trait columns and write ``assortative_mating.yaml``."""
+    # numba and SciPy's optimisers cost ~0.2 s to import; only this subcommand needs them.
+    from pedsum.assortative_mating import FIT_OUTCOMES, classify_trait, compute_assortative_mating
+
+    if _prepare_out_dir(args.out_dir) != 0:
+        return 1
+    _commit_thread_budget(args)
+    _set_numba_threads(physical_cores() if args.threads is None else args.threads)
+    try:
+        with _timed("load+validate"):
+            df = load_and_validate(args.in_path, **_validation_kwargs(args))
+    except PedigreeError as e:
+        logger.error("validation failed: %s", e)
+        _write_validation_failure_log(args)
+        return 1
+    except (FileNotFoundError, OSError) as e:
+        logger.error("file error: %s", e)
+        return 2
+
+    try:
+        tokens = read_trait_columns(
+            args.in_path, args.sep, args.id_col, args.trait, df["id"].to_numpy(), args.trait_missing
+        )
+        traits = [classify_trait(name, tokens[name], args.trait_type.get(name)) for name in args.trait]
+    except PedigreeError as e:
+        logger.error("%s", e)
+        return 1
+    del tokens  # per-row Python str objects: ~2 GiB at 10^7 pairs, unused after typing
+    for trait in traits:
+        logger.info(
+            "trait %s: %s (%s), %d missing of %d",
+            trait.name,
+            trait.kind,
+            trait.type_source,
+            trait.n_missing,
+            len(df),
+        )
+
+    with _timed("assortative mating"):
+        payload = compute_assortative_mating(
+            df,
+            traits,
+            permutations=args.permutations,
+            bootstrap=args.bootstrap,
+            seed=args.seed,
+            stratify_by=args.stratify_by,
+            birth_year_bin=args.birth_year_bin,
+            min_stratum_networks=args.min_stratum_networks,
+        )
+    logger.debug("latent fits by outcome: %s", dict(FIT_OUTCOMES))
+    out_path = args.out_dir / "assortative_mating.yaml"
+    data = _build_assortative_mating_data(args.in_path, cmd, len(df), payload)
+    _write_yaml(data, out_path, figures=ASSORTATIVE_MATING_FIGURES)
+    logger.info("wrote %s", out_path)
+    return 0
+
+
 def _write_fixed_pedigree(
     ctx: ValidationContext, args: argparse.Namespace, out_dir: Path, *, next_id: int | None = None
 ) -> int:
@@ -1449,4 +1694,6 @@ def main(argv: list[str] | None = None) -> int:
             return _run_validate(args, cmd)
         if args.subcommand == "epimight-input":
             return _run_epimight_input(args)
+        if args.subcommand == "assortative-mating":
+            return _run_assortative_mating(args, cmd)
     return 1

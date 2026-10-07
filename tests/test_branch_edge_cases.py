@@ -371,6 +371,8 @@ class TestReportEdgeCases:
         rows = list(_flatten_long({"a": {"b": [1.23456]}}))
         assert rows == [("a", "b", "0", 1.23456)]
         assert _round_floats({"x": [1.23456, {"y": 2.34567}]}, ndigits=2) == {"x": [1.23, {"y": 2.35}]}
+        values = [0.123456, 0.0123456, 4.00001e-5, -3.14159e-9, 123.456789, 0.0, float("inf")]
+        assert _round_floats(values, figures=4) == [0.1235, 0.01235, 4e-05, -3.142e-09, 123.4568, 0.0, float("inf")]
         obj = [{"mean": 1, "q1": 1, "median": 1, "q3": 1, "min": 0, "max": 2}, {"nested": {"min": 0}}]
         _drop_distribution_extrema(obj)
         assert "min" not in obj[0]

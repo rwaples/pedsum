@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 #: Warn before F when rows times the largest ancestor set a row could have
 #: passes this. Each row's Meuwissen-Luo walk visits its whole ancestor set,
@@ -19,6 +20,12 @@ SEX_MALE = 1
 SEX_UNKNOWN = -1
 
 INBRED_TOL = 1e-9
+
+TraitKind = Literal["continuous", "binary", "ordinal"]
+TRAIT_KINDS: tuple[TraitKind, ...] = ("continuous", "binary", "ordinal")
+
+#: A sex x stratum whose pairs span fewer Mate Networks than this is dropped from its assortative-mating cell.
+MIN_STRATUM_NETWORKS = 10
 
 logger = logging.getLogger("pedigree_summary")
 

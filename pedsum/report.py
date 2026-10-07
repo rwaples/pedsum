@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import math
 import os
 import shutil
 import subprocess
@@ -129,6 +130,23 @@ def _build_effective_size_data(
         "status": status,
         "estimators_requested": requested,
         "effective_size": effective_size,
+    }
+
+
+#: ``assortative_mating.yaml`` keeps this many significant digits below 0.1, where 4 dp would zero a small
+#: p-value, SE or share.
+ASSORTATIVE_MATING_FIGURES = 4
+
+
+def _build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
+    """The ``assortative_mating.yaml`` payload: the summary's meta block, then the Mate Correlation section."""
+    return {
+        "input": str(path),
+        "command": cmd,
+        "version": VERSION,
+        "generated_at": _now_iso(),
+        "n_total": n_total,
+        "assortative_mating": assortative_mating,
     }
 
 
@@ -530,21 +548,23 @@ def _flatten_long(
         yield section, key, subkey, obj
 
 
-def _round_floats(obj: object, ndigits: int = 4) -> object:
-    """Recursively round floats in nested dicts/lists to ``ndigits``."""
+def _round_floats(obj: object, ndigits: int = 4, figures: int = 0) -> object:
+    """Recursively round floats in nested dicts/lists to ``ndigits`` decimals, or to ``figures`` significant digits when that keeps more."""
     if isinstance(obj, float):
+        if figures and obj and math.isfinite(obj):
+            return round(obj, max(ndigits, figures - 1 - math.floor(math.log10(abs(obj)))))
         return round(obj, ndigits)
     if isinstance(obj, dict):
-        return {k: _round_floats(v, ndigits) for k, v in obj.items()}
+        return {k: _round_floats(v, ndigits, figures) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_round_floats(x, ndigits) for x in obj]
+        return [_round_floats(x, ndigits, figures) for x in obj]
     return obj
 
 
-def _write_yaml(data: dict, path: Path) -> None:
-    """Write data as YAML to path (creates parent dirs); floats rounded to 4dp."""
+def _write_yaml(data: dict, path: Path, figures: int = 0) -> None:
+    """Write data as YAML to path (creates parent dirs); floats rounded as ``_round_floats`` does."""
     with atomic_output(path) as tmp, tmp.open("w") as fh:
-        yaml.safe_dump(_round_floats(data), fh, sort_keys=False, default_flow_style=False)
+        yaml.safe_dump(_round_floats(data, figures=figures), fh, sort_keys=False, default_flow_style=False)
 
 
 def _render_cell(value: object) -> str | None:
