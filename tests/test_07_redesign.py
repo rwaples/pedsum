@@ -223,7 +223,7 @@ def test_summarize_missing_sex_keeps_unsexed_rows(tmp_path):
         ann = pl.read_csv(fh.read(), separator="\t")
     for orig_id in (7, 8):
         row = ann.filter(pl.col("id") == orig_id).row(0, named=True)
-        assert int(row["sex"]) == -1, f"id={orig_id} sex={row['sex']}"
+        assert int(row["sex"]) == 0, f"id={orig_id} sex={row['sex']}"  # PLINK unknown
 
 
 def _inbred_pedigree(path, unknown_sex: str):

@@ -7,8 +7,12 @@ under the invoked flags. See docs/adr/0003-drop-offending-reduction.md.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import polars as pl
-from conftest import load_validate_tsv_gz, run_pedsum
+from conftest import REPO, SCRIPT, load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -130,7 +134,7 @@ def test_drop_composes_with_allow_missing_sex(tmp_path):
         [
             {"id": 1, "sex": "F", "mother": -1, "father": -1},
             {"id": 2, "sex": "M", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": -1, "father": -1},  # orphan unsexed: tolerated, kept as -1
+            {"id": 3, "sex": "", "mother": -1, "father": -1},  # orphan unsexed: tolerated, kept as unknown
             {"id": 5, "sex": "F", "mother": -1, "father": -1},  # both-role offender
             {"id": 6, "sex": "F", "mother": 5, "father": 2},  # 5 used as mother
             {"id": 7, "sex": "M", "mother": 1, "father": 5},  # ...and father
@@ -142,10 +146,10 @@ def test_drop_composes_with_allow_missing_sex(tmp_path):
     dropped = set(_read_manifest(out)["id"])
     assert 5 in dropped  # offender dropped
     assert 3 not in dropped  # tolerated orphan kept
-    # The reduced output keeps id 3 as -1; that it re-validated clean during
+    # The reduced output keeps id 3 as unknown (0); that it re-validated clean during
     # self-verify proves the verify ran under --allow-missing-sex (plain
     # validate would FAIL on the unresolved-sex row).
-    assert load_validate_tsv_gz(out).filter(pl.col("id") == "3")["sex"][0] == "-1"
+    assert load_validate_tsv_gz(out).filter(pl.col("id") == "3")["sex"][0] == "0"
 
 
 def test_drop_no_sex_check_does_not_drop_missing_parent_conflict(tmp_path):
@@ -235,3 +239,36 @@ def test_drop_off_by_default_unchanged(tmp_path):
     assert r.returncode == 1, r.stderr
     assert not (out / "validate.dropped.tsv").exists()
     assert "3" in load_validate_tsv_gz(out)["id"].to_list()  # offender NOT dropped
+
+
+def _many_offenders_pedigree(path):
+    """Ten ids used as both mother and father, plus a duplicated id: eleven round-1 drops over two checks."""
+    rows = [{"id": i, "sex": "F", "mother": -1, "father": -1} for i in range(1, 11)]
+    rows += [{"id": 100 + i, "sex": "M", "mother": i, "father": -1} for i in range(1, 11)]
+    rows += [{"id": 200 + i, "sex": "M", "mother": -1, "father": i} for i in range(1, 11)]
+    rows += [{"id": 50, "sex": "F", "mother": -1, "father": -1}, {"id": 50, "sex": "M", "mother": -1, "father": -1}]
+    return _write_ped(path, rows)
+
+
+def test_drop_manifest_is_ordered_and_independent_of_hash_seed(tmp_path):
+    """The manifest lists (round, id, check) in sorted order, byte-identical across PYTHONHASHSEED values."""
+    ped = _many_offenders_pedigree(tmp_path / "p.tsv")
+    manifests = []
+    for seed in ("1", "2", "3"):
+        out = tmp_path / f"out{seed}"
+        res = subprocess.run(
+            [sys.executable, str(SCRIPT), "validate", "--in", str(ped), "--out", str(out), "--drop-offending"],
+            cwd=REPO,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert res.returncode == 1, res.stderr
+        manifests.append((out / "validate.dropped.tsv").read_bytes())
+    assert manifests[0] == manifests[1] == manifests[2]
+    m = _read_manifest(tmp_path / "out1")
+    assert m.height == 11
+    rows = list(zip(m["round"], m["id"], m["check"], strict=True))
+    assert rows == sorted(rows)

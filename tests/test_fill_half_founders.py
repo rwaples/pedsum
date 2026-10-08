@@ -90,7 +90,7 @@ def test_fill_leaves_only_full_founders(tmp_path):
     assert by_id[7]["father"] == "101"
     assert by_id[8]["mother"] == "102"
     assert by_id[10]["father"] == "103"
-    assert [by_id[p]["sex"] for p in (101, 102, 103)] == ["1", "0", "1"]
+    assert [by_id[p]["sex"] for p in (101, 102, 103)] == ["1", "2", "1"]
     for p in (100, 101, 102, 103):
         assert (by_id[p]["mother"], by_id[p]["father"]) == ("-1", "-1")
     # Parents precede children, so the file feeds back into validate cleanly.
@@ -165,4 +165,4 @@ def test_fill_applies_to_reduced_pedigree(tmp_path):
     assert sorted(fixed["id"].cast(int).to_list()) == [3, 4, 10]
     by_id = {int(r["id"]): r for r in fixed.iter_rows(named=True)}
     assert (by_id[3]["mother"], by_id[3]["father"]) == ("10", "4")
-    assert by_id[10]["sex"] == "0"
+    assert by_id[10]["sex"] == "2"

@@ -11,7 +11,7 @@ import pytest
 from conftest import parent_rows
 from relationship_summary_oracle import compute_relationship_summary
 
-from pedsum.base import PedigreeError
+from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError
 from pedsum.checks import (
     Finding,
     _check_birth_year_topology,
@@ -21,8 +21,8 @@ from pedsum.checks import (
     _check_sex_role_consistency,
     _summarize_findings,
 )
+from pedsum.ids import IdLabels, parse_ids
 from pedsum.parse import (
-    _as_parent_int_col,
     _decode_sex,
     _format_id_sample,
     _maybe_warn_csv,
@@ -68,17 +68,15 @@ class TestParseEdgeCases:
 
     def test_id_sample_empty_and_deterministic_subset(self) -> None:
         """ID samples handle empty inputs and return deterministic bounded samples."""
-        assert _format_id_sample(np.array([], dtype=np.int64)) == ""
-        assert _format_id_sample(np.arange(10), k=3) == "5, 6, 9"
+        assert _format_id_sample(np.array([], dtype=np.int64), str) == ""
+        assert _format_id_sample(np.arange(10), str, k=3) == "5, 6, 9"
 
-    def test_decode_sex_explicit_default_plink_and_bad_encoding(self) -> None:
-        """Explicit sex encodings and invalid encoding names are handled distinctly."""
-        default = _decode_sex(pl.Series(["0", "1", ""], dtype=pl.String), encoding="default")
-        plink = _decode_sex(pl.Series(["2", "1", "0"], dtype=pl.String), encoding="plink")
-        np.testing.assert_array_equal(default, np.array([0, 1, -1], dtype=np.int8))
-        np.testing.assert_array_equal(plink, np.array([0, 1, -1], dtype=np.int8))
-        with pytest.raises(PedigreeError, match="unknown sex encoding"):
-            _decode_sex(pl.Series(["F"], dtype=pl.String), encoding="mystery")
+    def test_decode_sex_reads_plink_and_rejects_other_numbers(self) -> None:
+        """1/2/0 decode as PLINK and -1 as unknown; any other number is an error."""
+        plink = _decode_sex(pl.Series(["2", "1", "0", "-1"], dtype=pl.String))
+        np.testing.assert_array_equal(plink, np.array([0, 1, -1, -1], dtype=np.int8))
+        with pytest.raises(PedigreeError, match="PLINK 1=male, 2=female, 0=unknown"):
+            _decode_sex(pl.Series(["F", "3"], dtype=pl.String))
 
     def test_maybe_warn_csv_allows_normal_input_and_rejects_csv_shape(self) -> None:
         """The friendly CSV warning distinguishes split tables from one-column CSV-looking input."""
@@ -120,10 +118,11 @@ class TestParseEdgeCases:
         auto = _read_pedigree_table(comma, dtype=str)
         assert auto.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
-    def test_parent_int_col_zero_as_missing(self) -> None:
+    def test_parent_ids_zero_as_missing(self) -> None:
         """PLINK-style zero parent IDs are normalised to -1 when requested."""
-        arr = _as_parent_int_col(pl.Series(["0", "2", "NA"], dtype=pl.String), "mother", zero_as_missing=True)
-        np.testing.assert_array_equal(arr, np.array([-1, 2, -1], dtype=np.int64))
+        ids = pl.Series(["1", "2", "3"])
+        _, mothers, _, _ = parse_ids(ids, pl.Series(["0", "2", "NA"]), pl.Series(["-1"] * 3), zero_as_missing=True)
+        np.testing.assert_array_equal(mothers, np.array([-1, 2, -1], dtype=np.int64))
 
 
 class TestCheckEdgeCases:
@@ -131,8 +130,8 @@ class TestCheckEdgeCases:
 
     def test_duplicate_ids_clean_and_offending(self) -> None:
         """Duplicate-ID checking returns no findings for unique IDs and one per duplicate value."""
-        assert _check_duplicate_ids(np.array([1, 2, 3], dtype=np.int64)) == []
-        findings = _check_duplicate_ids(np.array([2, 1, 2, 3, 1], dtype=np.int64))
+        assert _check_duplicate_ids(np.array([1, 2, 3], dtype=np.int64), label=str) == []
+        findings = _check_duplicate_ids(np.array([2, 1, 2, 3, 1], dtype=np.int64), label=str)
         assert [f.id for f in findings] == [1, 2]
 
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
@@ -140,7 +139,7 @@ class TestCheckEdgeCases:
         id_index = IdIndex([1, 2, 3])
 
         def check(parents: np.ndarray, role: str) -> list[Finding]:
-            return _check_parent_refs_present(parents, role, ParentRefs.of(parents, id_index), id_index)
+            return _check_parent_refs_present(parents, role, ParentRefs.of(parents, id_index), label=str)
 
         assert check(np.array([-1, -1]), "mother") == []
         assert check(np.array([1, -1, 2]), "mother") == []
@@ -161,7 +160,7 @@ class TestCheckEdgeCases:
         sex = np.array([1, 1, 0], dtype=np.int8)  # id=2 is male but used as mother.
         id_index = IdIndex(ids)
         findings = _check_sex_role_consistency(
-            mothers, fathers, sex, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index)
+            mothers, fathers, sex, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), label=str
         )
         assert len(findings) == 1
         assert findings[0].id == 2
@@ -169,21 +168,21 @@ class TestCheckEdgeCases:
 
     def test_summarize_findings_variants(self) -> None:
         """Finding summaries render empty, id-only, row-only, and overflow samples."""
-        assert _summarize_findings([]) == ""
-        assert "id=7" in _summarize_findings([Finding(check="c", id=7)])
-        assert "row 4" in _summarize_findings([Finding(check="c", row=4)])
+        assert _summarize_findings([], str) == ""
+        assert "id=7" in _summarize_findings([Finding(check="c", id=7)], str)
+        assert "row 4" in _summarize_findings([Finding(check="c", row=4)], str)
         many = [Finding(check="c", id=i, row=i) for i in range(7)]
-        assert "and 2 more" in _summarize_findings(many)
+        assert "and 2 more" in _summarize_findings(many, str)
 
     def test_birth_year_topology_no_edges_and_bad_edge(self) -> None:
         """Birth-year topology skips no-edge pedigrees and flags child-before-parent years."""
         ids = np.array([1, 2], dtype=np.int64)
         no_edges = _check_birth_year_topology(
-            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids)
+            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids), label=str
         )
         assert no_edges == []
         bad = _check_birth_year_topology(
-            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids)
+            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids), label=str
         )
         assert len(bad) == 1
         assert bad[0].check == "birth_year_topology"
@@ -429,7 +428,7 @@ class TestReportEdgeCases:
     def test_write_dropped_manifest_deduplicates_rows(self, tmp_path) -> None:
         """Dropped manifests emit distinct id/check/round rows only once."""
         path = tmp_path / "dropped.tsv"
-        _write_dropped_manifest([(1, "self_loops", 1), (1, "self_loops", 1), (2, "negative_ids", 2)], path)
+        _write_dropped_manifest([("1", "self_loops", 1), ("1", "self_loops", 1), ("2", "negative_ids", 2)], path)
         df = pl.read_csv(path, separator="\t")
         assert df.to_dicts() == [
             {"id": 1, "check": "self_loops", "round": 1},
@@ -442,17 +441,19 @@ class TestReportEdgeCases:
         out = tmp_path / "validate.tsv.gz"
         _write_validate_tsv_gz(
             df_raw,
-            [{"id": 1, "sex": "F"}, {"id": 2, "sex": "M"}],
+            [{"id": 1, "sex": SEX_FEMALE}, {"id": 2, "sex": SEX_MALE}],
             "id",
             "sex",
             "mother",
             "father",
             out,
+            IdLabels(),
         )
         with gzip.open(out, "rt") as fh:
             fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
         assert fixed["id"].to_list() == ["1", "2", "3"]
         assert fixed["mother"].to_list() == ["-1", "-1", "1"]
+        assert fixed["sex"].to_list() == ["2", "1", "M"]  # founders in PLINK coding
 
     def test_write_annotated_tsv_detects_true_row_mismatch(self, tmp_path) -> None:
         """Annotated TSV writing raises when the input rows cannot realign to the individual table."""
@@ -461,7 +462,7 @@ class TestReportEdgeCases:
         idf = pl.DataFrame({"id": [2], "sex": [0], "mother": [-1], "father": [-1]})
         args = SimpleNamespace(id_col="id", sex_col="sex", mother_col="mother", father_col="father", sep="tab")
         with pytest.raises(PedigreeError, match="row order mismatch"):
-            _write_annotated_tsv(in_path, args, idf, tmp_path / "annotated.tsv.gz")
+            _write_annotated_tsv(in_path, args, idf, tmp_path / "annotated.tsv.gz", IdLabels())
 
 
 class TestSectionEdgeCases:

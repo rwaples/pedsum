@@ -140,7 +140,7 @@ def test_quiet_keeps_default_logging(info_logging):
 
 def test_counts_unchanged_under_the_bar(info_logging, monkeypatch):
     """Real reports through the bar leave the counts as they are without it."""
-    df = ps.load_and_validate(EXAMPLE)
+    df, _labels = ps.load_and_validate(EXAMPLE)
     pg = ps._build_pedigree_graph(df)
     expected = pg.relationship_counts(max_degree=5)
     # A tick far below the call's length, so the bar sees real reports.

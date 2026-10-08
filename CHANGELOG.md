@@ -22,6 +22,10 @@ whole command.
 - **`--effective-size`, `--no-effective-size` and `--ne-coancestry` exit
   2** on `summarize`, with a message naming `pedsum effective-size`. There
   is no deprecation release, as in ADR 0001.
+- **`--sex-encoding` and `--plink-sex` exit 2** on every command
+  ([#12](https://github.com/rwaples/pedsum/issues/12)): PLINK's coding is
+  the only numeric one left, so there is nothing to choose
+  ([ADR 0001](docs/adr/0001-collaborator-cli-redesign.md), 0.15 follow-up).
 
 ### Added
 
@@ -131,6 +135,25 @@ whole command.
 
 ### Changed
 
+- **IDs are strings** ([#16](https://github.com/rwaples/pedsum/issues/16)).
+  Two tokens are the same ID only if they are the same string, and every
+  output writes IDs as the input wrote them. Before, `validate` and
+  `summarize` parsed each token to an integer, truncating `2.9` to `2`
+  and reading `001` and `1.0` as `1`, while `validate.tsv.gz` wrote the
+  original tokens back. A file could pass `validate` with parent links
+  that broke when read with string IDs, and alphanumeric IDs such as
+  `A1` were rejected. A file whose tokens are all plain integers runs on
+  the integers as before, with byte-identical outputs. Any other token
+  puts the file in string mode, with a WARNING: outputs order IDs by
+  string, and `--fill-half-founders` names phantom parents
+  `_pedsum_phantom_1`, `_pedsum_phantom_2`, … `--drop-offending` keeps
+  the input's mode through every round. The `mother_dtype` and
+  `father_dtype` Checks are gone, since a parent token can no longer
+  fail to parse; `id_dtype` now fails only on a row without an id, or
+  with an id that is a missing-parent token (`.`, `?`, …).
+  `validate.dropped.tsv` writes its `id` column as text. In the Python
+  API, `load_and_validate` returns `(frame, IdLabels)`: the frame's id
+  columns hold int64 codes, and `IdLabels` prints them as the input's IDs.
 - **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
   needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
   longer run the kinship DP.
@@ -197,16 +220,29 @@ whole command.
   graph build, so an int64 overflow (reached by depth 59 on those
   pedigrees) exits 1 with one error line instead of a traceback after the
   F phase. README "Deep pedigrees" gives the measurements.
-- **`validate.tsv.gz` writes sex as `0` = female, `1` = male, `-1` =
-  unknown on every row** ([#11](https://github.com/rwaples/pedsum/issues/11)).
-  Before, only the rows pedsum changed were rewritten, to `M`, `F` or
-  `-1`, and every other row kept its input token, so a `0`/`1` or PLINK
-  `1`/`2` input came out with two encodings in one column and broke type
-  inference in other readers. Synthesized founders now get `0`/`1` instead
-  of `F`/`M`. `sex_source` still records which rows pedsum changed.
-  `--drop-offending` re-reads the file as `0`/`1` whatever
-  `--sex-encoding` was given. To re-run pedsum on the file, leave
-  `--sex-encoding` at `auto` or set it to `default`, not `plink`.
+- **pedsum reads and writes sex in PLINK's coding: `1` = male, `2` =
+  female, `0` = unknown** ([#12](https://github.com/rwaples/pedsum/issues/12)).
+  The `0` = female, `1` = male coding is gone, for input and output.
+  `M`/`F`/`Male`/`Female` and the missing tokens still read as before; any
+  other number is an error. `annotated.tsv.gz` writes `1`/`2`/`0` where it
+  wrote `1`/`0`/`-1`. A file pedsum wrote before 0.15.0 now reads its
+  females as unknown: recode `0` → `2` first. A sex column with `0` tokens
+  and no `2` gets a WARNING saying so.
+- **`validate.tsv.gz` writes every row's sex as `1`/`2`/`0`**
+  ([#11](https://github.com/rwaples/pedsum/issues/11)). Before, only the
+  rows pedsum changed were rewritten, to `M`, `F` or `-1`, and every other
+  row kept its input token, so a `0`/`1` or PLINK `1`/`2` input came out
+  with two encodings in one column and broke type inference in other
+  readers. Synthesized founders now get `2`/`1` instead of `F`/`M`.
+  `sex_source` still records which rows pedsum changed.
+
+### Fixed
+
+- **`validate.dropped.tsv` rows come in one order on every run**
+  ([#15](https://github.com/rwaples/pedsum/issues/15)): by round, then
+  id, then check. Each round's reasons were collected in a set of
+  `(id, check)` tuples, so the row order followed Python's per-process
+  string hashing and differed between runs of the same input.
 
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 

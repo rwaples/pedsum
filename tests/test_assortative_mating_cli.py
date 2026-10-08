@@ -74,6 +74,34 @@ def test_one_continuous_trait(tmp_path, traits_tsv):
     assert "p_perm" not in cell["crude"]["spearman"]
 
 
+def test_string_ids_give_the_integer_ids_estimates(tmp_path, traits_tsv):
+    """Alphanumeric IDs run as codes: the cells' estimates and counts match the same pedigree with integer IDs."""
+    df = pl.read_csv(traits_tsv, separator="\t")
+    named = df.with_columns(
+        pl.when(pl.col(c) == -1).then(pl.lit("-1")).otherwise(pl.lit("P") + pl.col(c).cast(pl.String)).alias(c)
+        for c in ("id", "mother", "father")
+    )
+    named_tsv = tmp_path / "named.tsv"
+    named.write_csv(named_tsv, separator="\t")
+    flags = ("--trait", "liability", "dx", "--permutations", "0")
+    cells = []
+    for name, pedigree in (("int", traits_tsv), ("str", named_tsv)):
+        res, path = _run(tmp_path / name, pedigree, *flags)
+        assert res.returncode == 0, res.stderr
+        cells.append(_load(path)["assortative_mating"]["mate_correlation"])
+    for a, b in zip(*cells, strict=True):
+        assert (a["mother"], a["father"], a["n"], a["n_mate_networks"]) == (
+            b["mother"],
+            b["father"],
+            b["n"],
+            b["n_mate_networks"],
+        )
+        for name, record in a["crude"].items():
+            for key in ("r", "rho", "value", "se"):
+                if key in record:
+                    assert b["crude"][name][key] == pytest.approx(record[key], rel=1e-9), (name, key)
+
+
 def test_two_traits_report_every_cell(tmp_path, traits_tsv):
     """Two traits give four cells, each with its kind pair's primary estimator, and a within-person block."""
     res, path = _run(tmp_path, traits_tsv, "--trait", "liability", "dx", "--permutations", "9", "--bootstrap", "9")

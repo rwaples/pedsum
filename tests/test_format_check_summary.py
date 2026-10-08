@@ -66,7 +66,7 @@ def test_format_check_summary_total_findings_only_counts_fail():
 def test_summarize_findings_truncates_above_five():
     """8 findings → sample shows first 5 plus ``(and 3 more)`` suffix."""
     findings = [ps.Finding(check="negative_ids", id=i, row=i - 1, detail=f"id={i}") for i in range(1, 9)]
-    out = ps._summarize_findings(findings)
+    out = ps._summarize_findings(findings, str)
     assert out.startswith("negative_ids: 8 finding(s) — ")
     # First five rows present.
     for i in range(1, 6):

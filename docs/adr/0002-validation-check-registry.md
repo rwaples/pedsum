@@ -28,9 +28,10 @@ runner:
   or `accumulate` (for `validate`). A Check whose prerequisite did not `PASS` is
   auto-`SKIP`ped with `skip_reason = f"{first_failed_prereq} failed"`.
   `required_columns` is the universal root prerequisite.
-- **A mutable `ValidationContext`** is threaded to every `run(ctx)`. The five
-  parse Checks (`id_dtype`, `mother_dtype`, `father_dtype`, `sex_tokens`,
-  `birth_year_dtype`) and only those populate `ctx` (parsing *is* the Check);
+- **A mutable `ValidationContext`** is threaded to every `run(ctx)`. The
+  parse Checks (`id_dtype`, `sex_tokens`, `birth_year_dtype`; before 0.15
+  also `mother_dtype` and `father_dtype`, which `id_dtype` absorbed when IDs
+  became strings, pedsum#16) and only those populate `ctx` (parsing *is* the Check);
   every other Check reads from it. Sex imputation is a `@cached_property` on the
   context — shared by the three sex Checks, computed once, never a reported Check.
 - **Each `run(ctx)` returns a rich `CheckOutcome`** (`status` + `findings` +

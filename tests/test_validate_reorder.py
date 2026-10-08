@@ -96,7 +96,7 @@ def test_validate_fixed_tsv_sex_source_rides_with_reorder(tmp_path):
     fixed = load_validate_tsv_gz(out_dir)
     assert "sex_source" in fixed.columns
     by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
-    assert by_id[5]["sex"] == "0"
+    assert by_id[5]["sex"] == "2"
     assert by_id[5]["sex_source"] == "imputed_from_missing"
     # The other rows keep their asserted sex.
     assert by_id[1]["sex"] == "1"
@@ -127,7 +127,7 @@ def test_validate_fixed_tsv_overridden_sex_rides_with_reorder(tmp_path):
     assert r.returncode == 0, r.stderr
     fixed = load_validate_tsv_gz(out_dir)
     by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
-    assert by_id[5]["sex"] == "0"
+    assert by_id[5]["sex"] == "2"
     assert by_id[5]["sex_source"] == "imputed_from_role"
     ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(5) < ids_in_order.index(3)

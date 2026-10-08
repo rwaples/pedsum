@@ -12,98 +12,83 @@ from conftest import write_ped as _write_ped
 import pedigree_summary as ps
 
 # ---------------------------------------------------------------------------
-# Auto-detection
+# Decoding: words and PLINK's 1=male, 2=female, 0=unknown
 # ---------------------------------------------------------------------------
 
 
-def test_auto_detect_default_encoding(caplog):
-    """0/1 sex column resolves to default encoding, no WARNING."""
-    s = pl.Series(["0", "1", "0", "1"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [ps.SEX_FEMALE, ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_MALE]
-    assert any("default" in r.message for r in caplog.records if r.levelno == logging.INFO)
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_auto_detect_plink_encoding(caplog):
-    """1/2 sex column resolves to plink encoding, no WARNING."""
-    s = pl.Series(["1", "2", "1", "2"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_MALE, ps.SEX_FEMALE]
-    assert any("plink" in r.message for r in caplog.records if r.levelno == logging.INFO)
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_auto_detect_plink_with_zero_unknown(caplog):
-    """PLINK fam with sex={0,1,2} resolves to plink; 0 becomes sentinel."""
+def test_decode_plink_numeric_codes():
+    """1/2/0 decode as male/female/unknown with no WARNING when a 2 is present."""
     s = pl.Series(["0", "1", "2", "0"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
+    out = ps._decode_sex(s)
     assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_UNKNOWN]
 
 
-def test_auto_detect_zero_as_missing_flips_to_plink():
-    """0 tokens + zero_as_missing flips encoding to plink."""
-    s = pl.Series(["0", "1", "0", "1"])
-    out = ps._decode_sex(s, encoding="auto", zero_as_missing=True)
-    # under plink, 0 is missing, 1 is male
-    assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_UNKNOWN, ps.SEX_MALE]
-
-
-def test_auto_detect_ambiguous_only_ones_warns(caplog):
-    """Sex column with only '1' tokens triggers a WARNING."""
+def test_decode_only_ones_reads_plink_without_warning(caplog):
+    """A column of 1s is all male, with no WARNING: there is one numeric coding."""
     s = pl.Series(["1", "1", "1", "1"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        ps._decode_sex(s, encoding="auto")
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert warnings, "expected a WARNING for ambiguous only-1 column"
-    assert "1" in warnings[0].message
-
-
-def test_auto_detect_words_only_no_warning(caplog):
-    """Word-only sex columns produce NO WARNING (encoding is moot)."""
-    s = pl.Series(["M", "F", "Male", "Female"])
-    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        ps._decode_sex(s, encoding="auto")
+        out = ps._decode_sex(s)
+    assert (out == ps.SEX_MALE).all()
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
-def test_plink_sex_flag_alias_via_cli(tmp_path):
-    """--plink-sex sets sex_encoding=plink without explicit --sex-encoding."""
+def test_zero_coded_mothers_without_two_warn(tmp_path):
+    """Mothers coded 0 with no 2 look like the retired 0=female coding: 0 reads as unknown, with a WARNING."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
-            {"id": 1, "sex": "1", "mother": -1, "father": -1},
-            {"id": 2, "sex": "2", "mother": -1, "father": -1},
-            {"id": 3, "sex": "1", "mother": 2, "father": 1},
+            {"id": 1, "sex": "0", "mother": -1, "father": -1},
+            {"id": 2, "sex": "1", "mother": -1, "father": -1},
+            {"id": 3, "sex": "1", "mother": 1, "father": 2},
         ],
     )
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--plink-sex"])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out")])
+    assert "codes 1 mother(s) as 0 and has no 2" in r.stderr
+    assert "0=female, 1=male" in r.stderr
+
+
+def test_own_output_with_unknown_sex_and_no_females_does_not_warn(tmp_path):
+    """Output from pedsum with unknown-sex rows (0) and no females re-reads without the old-coding WARNING."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+        ],
+    )
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--allow-missing-sex"])
     assert r.returncode == 0, r.stderr
+    r2 = run_pedsum(
+        ["validate", "--in", str(out / "validate.tsv.gz"), "--out", str(tmp_path / "o2"), "--allow-missing-sex"]
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert "has no 2" not in r2.stderr
+
+
+def test_decode_words_only_no_warning(caplog):
+    """Word-only sex columns produce NO WARNING."""
+    s = pl.Series(["M", "F", "Male", "Female"])
+    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
+        ps._decode_sex(s)
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.parametrize("flag", [["--plink-sex"], ["--sex-encoding", "plink"], ["--sex-encoding=default"]])
+def test_removed_sex_encoding_flags_exit_2(tmp_path, flag):
+    """--plink-sex and --sex-encoding exit 2 and name the one coding pedsum reads."""
+    ped = _write_ped(tmp_path / "p.tsv", [{"id": 1, "sex": "1", "mother": -1, "father": -1}])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), *flag])
+    assert r.returncode == 2
+    assert "removed in 0.15.0" in r.stderr
+    assert "1=male, 2=female, 0=unknown" in r.stderr
 
 
 def test_sex_missing_tokens_recognized():
-    """Empty / NA / -1 / U / Unknown all decode to SEX_UNKNOWN."""
-    s = pl.Series(["M", "F", "", "NA", "-1", "U", "Unknown"])
-    out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [
-        ps.SEX_MALE,
-        ps.SEX_FEMALE,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-    ]
-
-
-def test_unknown_encoding_raises():
-    """Passing an unknown encoding string is a clean error."""
-    s = pl.Series(["M", "F"])
-    with pytest.raises(ps.PedigreeError, match="unknown sex encoding"):
-        ps._decode_sex(s, encoding="bogus")
+    """Empty / NA / -1 / 0 / U / Unknown all decode to SEX_UNKNOWN."""
+    s = pl.Series(["M", "F", "", "NA", "-1", "0", "U", "Unknown"])
+    out = ps._decode_sex(s)
+    assert out.tolist() == [ps.SEX_MALE, ps.SEX_FEMALE, *[ps.SEX_UNKNOWN] * 6]
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +106,7 @@ def test_missing_sex_imputed_from_mother_role(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},  # uses 2 as mother
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
 
@@ -136,7 +121,7 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
             {"id": 3, "sex": "M", "mother": 1, "father": 2},  # uses 2 as father
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
 
@@ -165,7 +150,7 @@ def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     assert (df["sex"] == ps.SEX_UNKNOWN).any()
 
 
@@ -179,7 +164,7 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     summary, _ = ps.compute_size_structure(df, *parent_rows(df))
     assert summary["n_male"] + summary["n_female"] + summary["n_unknown_sex"] == summary["n_total"]
     assert summary["n_unknown_sex"] == 1
@@ -209,7 +194,7 @@ def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
 def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
     """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
     ped = _ambig_pedigree(tmp_path / "p.tsv")
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     row = df.filter(pl.col("id") == 7).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_UNKNOWN
 
@@ -293,7 +278,7 @@ def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
     assert row["sex_source"] == "imputed_from_role"
@@ -309,7 +294,7 @@ def test_impute_overrides_asserted_f_used_as_father(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 1).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "imputed_from_role"
@@ -358,7 +343,7 @@ def test_assertion_kept_when_no_role(tmp_path):
             {"id": 4, "sex": "M", "mother": -1, "father": -1},  # orphan, no role
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 4).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "input"

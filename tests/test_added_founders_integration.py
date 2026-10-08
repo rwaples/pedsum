@@ -7,7 +7,7 @@ from conftest import write_ped as _write_ped
 
 
 def test_validate_writes_added_mother_founder(tmp_path):
-    """Mother referenced but absent → row appears in fixed TSV with sex=0 (female)."""
+    """Mother referenced but absent → row appears in fixed TSV with sex=2 (female)."""
     # id=100 is referenced as mother of id=3 but never appears as an id.
     ped = _write_ped(
         tmp_path / "p.tsv",
@@ -26,7 +26,7 @@ def test_validate_writes_added_mother_founder(tmp_path):
     by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert 100 in by_id
     added = by_id[100]
-    assert added["sex"] == "0"
+    assert added["sex"] == "2"
     assert added["mother"] == "-1"
     assert added["father"] == "-1"
 
@@ -55,7 +55,7 @@ def test_validate_writes_added_conflicting_founder_with_no_sex_check(tmp_path):
 
     Without --no-sex-check this case BLOCKs on parent_refs_sex_conflict
     (rc=2 and no fixed TSV). With the flag, the conflict check is
-    bypassed and ``_build_added_founders`` synthesises a sex=0 (female) founder
+    bypassed and ``_build_added_founders`` synthesises a sex=2 (female) founder
     per its documented fallback.
     """
     ped = _write_ped(
@@ -84,4 +84,4 @@ def test_validate_writes_added_conflicting_founder_with_no_sex_check(tmp_path):
     fixed = load_validate_tsv_gz(out_dir)
     by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert 100 in by_id
-    assert by_id[100]["sex"] == "0"
+    assert by_id[100]["sex"] == "2"

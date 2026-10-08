@@ -192,7 +192,7 @@ def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
     from pedsum.validate import load_and_validate
 
     ped = write_ped(tmp_path / "incest.tsv", _INCEST_PEDIGREE)
-    df = load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     pg = _build_pedigree_graph(df)
     pair_lists = pg.relationship_pairs(max_degree=5)
     streamed = pg.relationship_counts(max_degree=5)
