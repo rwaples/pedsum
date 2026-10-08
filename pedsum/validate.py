@@ -1038,8 +1038,9 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
             break
         drop_rounds += 1
         # Deduped (id, check) reasons for this round — one finding may flag an
-        # id twice (e.g. a self-loop via both parent columns).
-        round_pairs = {(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids}  # ty: ignore[invalid-argument-type]
+        # id twice (e.g. a self-loop via both parent columns). Sorted, because
+        # str hashing varies per process and the manifest keeps this order.
+        round_pairs = sorted({(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids})  # ty: ignore[invalid-argument-type]
         dropped.extend((fid, check, rnd) for fid, check in round_pairs)
 
         drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))

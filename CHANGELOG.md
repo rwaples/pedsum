@@ -135,6 +135,14 @@ whole command.
   `--sex-encoding` was given. To re-run pedsum on the file, leave
   `--sex-encoding` at `auto` or set it to `default`, not `plink`.
 
+### Fixed
+
+- **`validate.dropped.tsv` rows come in one order on every run**
+  ([#15](https://github.com/rwaples/pedsum/issues/15)): by round, then
+  id, then check. Each round's reasons were collected in a set of
+  `(id, check)` tuples, so the row order followed Python's per-process
+  string hashing and differed between runs of the same input.
+
 ## 0.14.0 — 2026-10-01 — exact relationship counts; pedigree-graph 0.12
 
 Pedsum now requires `pedigree-graph>=0.12,<0.13` (0.13.0 required

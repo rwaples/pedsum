@@ -7,8 +7,12 @@ under the invoked flags. See docs/adr/0003-drop-offending-reduction.md.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import polars as pl
-from conftest import load_validate_tsv_gz, run_pedsum
+from conftest import REPO, SCRIPT, load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -235,3 +239,36 @@ def test_drop_off_by_default_unchanged(tmp_path):
     assert r.returncode == 1, r.stderr
     assert not (out / "validate.dropped.tsv").exists()
     assert "3" in load_validate_tsv_gz(out)["id"].to_list()  # offender NOT dropped
+
+
+def _many_offenders_pedigree(path):
+    """Ten ids used as both mother and father, plus a duplicated id: eleven round-1 drops over two checks."""
+    rows = [{"id": i, "sex": "F", "mother": -1, "father": -1} for i in range(1, 11)]
+    rows += [{"id": 100 + i, "sex": "M", "mother": i, "father": -1} for i in range(1, 11)]
+    rows += [{"id": 200 + i, "sex": "M", "mother": -1, "father": i} for i in range(1, 11)]
+    rows += [{"id": 50, "sex": "F", "mother": -1, "father": -1}, {"id": 50, "sex": "M", "mother": -1, "father": -1}]
+    return _write_ped(path, rows)
+
+
+def test_drop_manifest_is_ordered_and_independent_of_hash_seed(tmp_path):
+    """The manifest lists (round, id, check) in sorted order, byte-identical across PYTHONHASHSEED values."""
+    ped = _many_offenders_pedigree(tmp_path / "p.tsv")
+    manifests = []
+    for seed in ("1", "2", "3"):
+        out = tmp_path / f"out{seed}"
+        res = subprocess.run(
+            [sys.executable, str(SCRIPT), "validate", "--in", str(ped), "--out", str(out), "--drop-offending"],
+            cwd=REPO,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert res.returncode == 1, res.stderr
+        manifests.append((out / "validate.dropped.tsv").read_bytes())
+    assert manifests[0] == manifests[1] == manifests[2]
+    m = _read_manifest(tmp_path / "out1")
+    assert m.height == 11
+    rows = list(zip(m["round"], m["id"], m["check"], strict=True))
+    assert rows == sorted(rows)
