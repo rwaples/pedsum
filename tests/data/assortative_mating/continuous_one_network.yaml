@@ -1,0 +1,90 @@
+n_total: 99
+assortative_mating:
+  traits:
+  - name: bmi
+    type: continuous
+    type_source: stated
+    n_values: 50
+    n_missing: 49
+  settings:
+    permutations: 199
+    bootstrap: 0
+    seed: 0
+    threads: N
+    ci_level: 0.95
+    ci_method: sandwich
+    stratify_by: null
+    birth_year_bin: null
+    min_stratum_networks: null
+  inference:
+    se_method: cluster-robust sandwich over Mate Networks of the stacked two-step
+      estimating equations (thresholds, stratum means and variances, then rho), G/(G-1)
+      small-sample factor
+    ci_scale: Fisher z for correlations, log for the odds ratio
+    bootstrap_unit: mate_network
+    bootstrap_assumption: Mate Networks are independent. Dependence from remating
+      is kept; dependence between networks through ancestry or siblings is not modelled.
+    bootstrap_method: 'one_step: each draw refits the first step (thresholds, stratum
+      moments) and every closed-form estimator exactly on the resampled Mate Networks,
+      and takes one Newton step for rho from the observed estimate with the draw-weighted
+      score and the full-sample Hessian'
+    permutation_null: father trait vectors exchangeable within blocks
+    permutation_blocks: father_stratum x father_missingness_pattern
+    permutation_statistic: 'score_at_zero: the score of the latent-correlation log-likelihood
+      at rho = 0 with every margin refit on the permuted pairs (polychoric, tetrachoric,
+      polyserial, biserial); pearson: Pearson r (continuous x continuous)'
+    permutation_stopping: besag_clifford_closed
+    permutation_stop_h: 20
+  mating_pairs:
+    n_total: 49
+    n_dropped:
+      unknown_stratum: 0
+    n_mate_networks: 1
+    largest_mate_network_share: 1.0
+    n_mothers_multiple_mates: 24
+    n_fathers_multiple_mates: 24
+  mate_correlation:
+  - mother: bmi
+    father: bmi
+    n: 49
+    n_dropped:
+      mother_missing: 0
+      father_missing: 0
+      both_missing: 0
+      small_stratum: 0
+      degenerate_stratum: 0
+    n_mate_networks: 1
+    largest_mate_network_share: 1.0
+    crude:
+      pearson:
+        r: 0.1119
+        se: null
+        ci: null
+        ci_method: null
+        ci_unavailable_reason: single_mate_network
+        p_perm: 0.4082
+        p_perm_unavailable_reason: null
+        permutation_statistic: pearson
+        permutations:
+          requested: 199
+          valid: 49
+          failed: 0
+          failure_reasons: {}
+          seed: 0
+          n_fixed_fathers: 0
+          stopped_early: true
+          draws_used: 49
+          sequential_h: 20
+      spearman:
+        r: 0.1284
+        se: null
+        ci: null
+        ci_method: null
+        ci_unavailable_reason: single_mate_network
+  notes:
+  - Mating Pairs are observed only through offspring; partnerships without a recorded
+    child are absent.
+  - Phenotypic correlation; tetrachoric/polychoric/polyserial assume bivariate-normal
+    liability, the other estimators describe the observed values.
+  - Censored age-dependent diagnoses are not corrected; a mate who has not yet been
+    diagnosed counts as unaffected.

@@ -1,0 +1,176 @@
+n_total: 305
+assortative_mating:
+  traits:
+  - name: liability
+    type: continuous
+    type_source: stated
+    n_values: 274
+    n_missing: 31
+  - name: dx
+    type: binary
+    type_source: stated
+    levels:
+    - '0'
+    - '1'
+    n_values: 282
+    n_missing: 23
+  settings:
+    permutations: 199
+    bootstrap: 0
+    seed: 0
+    threads: N
+    ci_level: 0.95
+    ci_method: sandwich
+    stratify_by: birth_year
+    birth_year_bin: 5
+    min_stratum_networks: 10
+  inference:
+    se_method: cluster-robust sandwich over Mate Networks of the stacked two-step
+      estimating equations (thresholds, stratum means and variances, then rho), G/(G-1)
+      small-sample factor
+    ci_scale: Fisher z for correlations, log for the odds ratio
+    bootstrap_unit: mate_network
+    bootstrap_assumption: Mate Networks are independent. Dependence from remating
+      is kept; dependence between networks through ancestry or siblings is not modelled.
+    bootstrap_method: 'one_step: each draw refits the first step (thresholds, stratum
+      moments) and every closed-form estimator exactly on the resampled Mate Networks,
+      and takes one Newton step for rho from the observed estimate with the draw-weighted
+      score and the full-sample Hessian'
+    permutation_null: father trait vectors exchangeable within blocks
+    permutation_blocks: father_stratum x father_missingness_pattern
+    permutation_statistic: 'score_at_zero: the score of the latent-correlation log-likelihood
+      at rho = 0 with every margin refit on the permuted pairs (polychoric, tetrachoric,
+      polyserial, biserial); pearson: Pearson r (continuous x continuous)'
+    permutation_stopping: besag_clifford_closed
+    permutation_stop_h: 20
+  mating_pairs:
+    n_total: 91
+    n_dropped:
+      unknown_stratum: 0
+    n_mate_networks: 78
+    largest_mate_network_share: 0.06593
+    n_mothers_multiple_mates: 8
+    n_fathers_multiple_mates: 8
+  mate_correlation:
+  - mother: liability
+    father: liability
+    n: 0
+    n_dropped:
+      mother_missing: 7
+      father_missing: 6
+      both_missing: 2
+      small_stratum: 76
+      degenerate_stratum: 0
+    n_mate_networks: 0
+    largest_mate_network_share: null
+    crude:
+      pearson:
+        r: null
+        reason: no_complete_pairs
+      spearman:
+        r: null
+        reason: no_complete_pairs
+    stratified:
+      pearson:
+        r: null
+        reason: no_complete_pairs
+        n_strata_mothers: 0
+        n_strata_fathers: 0
+  - mother: liability
+    father: dx
+    n: 0
+    n_dropped:
+      mother_missing: 8
+      father_missing: 5
+      both_missing: 1
+      small_stratum: 77
+      degenerate_stratum: 0
+    n_mate_networks: 0
+    largest_mate_network_share: null
+    crude:
+      biserial:
+        rho: null
+        reason: no_complete_pairs
+      point_biserial:
+        r: null
+        reason: no_complete_pairs
+    stratified:
+      biserial:
+        rho: null
+        reason: no_complete_pairs
+        n_strata_mothers: 0
+        n_strata_fathers: 0
+  - mother: dx
+    father: liability
+    n: 0
+    n_dropped:
+      mother_missing: 10
+      father_missing: 8
+      both_missing: 0
+      small_stratum: 73
+      degenerate_stratum: 0
+    n_mate_networks: 0
+    largest_mate_network_share: null
+    crude:
+      biserial:
+        rho: null
+        reason: no_complete_pairs
+      point_biserial:
+        r: null
+        reason: no_complete_pairs
+    stratified:
+      biserial:
+        rho: null
+        reason: no_complete_pairs
+        n_strata_mothers: 0
+        n_strata_fathers: 0
+  - mother: dx
+    father: dx
+    n: 0
+    n_dropped:
+      mother_missing: 10
+      father_missing: 6
+      both_missing: 0
+      small_stratum: 75
+      degenerate_stratum: 0
+    n_mate_networks: 0
+    largest_mate_network_share: null
+    crude:
+      table:
+      - - 0
+        - 0
+      - - 0
+        - 0
+      tetrachoric:
+        rho: null
+        reason: no_complete_pairs
+      odds_ratio:
+        value: null
+        reason: no_complete_pairs
+      phi:
+        r: null
+        reason: no_complete_pairs
+    stratified:
+      tetrachoric:
+        rho: null
+        reason: no_complete_pairs
+        n_strata_mothers: 0
+        n_strata_fathers: 0
+  within_person:
+    mothers:
+      estimator: biserial
+      n: 68
+      rho: 0.374
+      boundary: false
+    fathers:
+      estimator: biserial
+      n: 70
+      rho: 0.4534
+      boundary: false
+  notes:
+  - Mating Pairs are observed only through offspring; partnerships without a recorded
+    child are absent.
+  - Phenotypic correlation; tetrachoric/polychoric/polyserial assume bivariate-normal
+    liability, the other estimators describe the observed values.
+  - Censored age-dependent diagnoses are not corrected; a mate who has not yet been
+    diagnosed counts as unaffected.

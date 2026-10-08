@@ -230,10 +230,10 @@ def test_usage_errors_exit_2(tmp_path, traits_tsv, flags, message):
 
 
 def test_cli_import_and_parser_leave_numba_unloaded():
-    """Importing the CLI and building every subcommand's parser load neither numba, SciPy's optimisers nor the assortative-mating module."""
+    """Importing the CLI and building every subcommand's parser load neither numba, SciPy's optimisers, pg-phenotype nor the assortative-mating module."""
     code = (
         "import sys; from pedsum.cli import _parse_args; _parse_args(['summarize', '--in', 'x', '--out', 'y']); "
-        "print([m for m in ('numba', 'scipy.optimize', 'pedsum.assortative_mating') if m in sys.modules])"
+        "print([m for m in ('numba', 'scipy.optimize', 'pg_phenotype', 'pedsum.assortative_mating') if m in sys.modules])"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert proc.stdout.strip() == "[]"
@@ -300,7 +300,7 @@ def test_data_errors_exit_1(tmp_path, traits_tsv, trait, message):
 
 
 # ---------------------------------------------------------------------------
-# --threads: numba takes the physical cores unless told otherwise
+# --threads: pg-phenotype takes the physical cores unless told otherwise
 # ---------------------------------------------------------------------------
 
 
@@ -334,7 +334,7 @@ def test_physical_cores_falls_back_without_topology(tmp_path, monkeypatch):
 
 
 def test_threads_default_is_physical_cores_and_explicit_wins(tmp_path, traits_tsv):
-    """Without ``--threads`` numba runs on the physical cores (capped by ``NUMBA_NUM_THREADS``); ``--threads N`` sets N; other subcommands keep 1."""
+    """Without ``--threads`` pg-phenotype runs on the physical cores (capped by ``NUMBA_NUM_THREADS``); ``--threads N`` sets N; other subcommands keep 1."""
     assert _parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx"]).threads is None
     assert (
         _parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx", "--threads", "3"]).threads == 3

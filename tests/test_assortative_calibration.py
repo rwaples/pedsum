@@ -12,6 +12,7 @@ Run with ``-s`` to see the achieved rates with their binomial SDs.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -19,9 +20,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 import pytest
-from scipy.stats import norm
+from scipy.stats import multivariate_normal, norm
 
-from pedsum.assortative_mating import Trait, bvn_cdf, compute_assortative_mating
+from pedsum.assortative_mating import Trait, compute_assortative_mating
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -119,7 +120,7 @@ class Design:
         c, p = self.cut, self.prevalence
         if estimator == "point_biserial":
             return self.r_mf * norm.pdf(c) / math.sqrt(p * (1 - p))
-        p11 = float(bvn_cdf(np.array([-c]), np.array([-c]), self.r_mf)[0])
+        p11 = float(multivariate_normal(mean=[0, 0], cov=[[1, self.r_mf], [self.r_mf, 1]]).cdf([-c, -c]))
         if estimator == "phi":
             return (p11 - p * p) / (p * (1 - p))
         if estimator == "odds_ratio":
@@ -161,9 +162,20 @@ def _cells(payload: dict) -> Iterator[tuple[str, str, str, dict]]:
 
 
 def _replicates(design: Design, seed: int, n_reps: int, **kwargs) -> Iterator[dict]:
+    """Each replicate's ``mate_correlation`` cells.
+
+    pg-phenotype takes one or two traits, so three run as their three pairs,
+    each cell kept once; a cell uses only its own pairwise-complete pairs.
+    """
     for rep in range(n_reps):
         df, traits = design.dataset(seed + rep)
-        yield compute_assortative_mating(df, traits, seed=seed + rep, stratify_by="birth_year", **kwargs)
+        groups = [traits] if len(traits) <= 2 else list(itertools.combinations(traits, 2))
+        cells: dict[tuple[str, str], dict] = {}
+        for group in groups:
+            payload = compute_assortative_mating(df, list(group), seed=seed + rep, stratify_by="birth_year", **kwargs)
+            for cell in payload["mate_correlation"]:
+                cells.setdefault((cell["mother"], cell["father"]), cell)
+        yield {"mate_correlation": list(cells.values())}
 
 
 def _table(title: str, nominal: float, rows: list[tuple[str, str, str, Rate, float, bool]]) -> None:

@@ -142,12 +142,12 @@ def _add_logging_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_threads_args(p: argparse.ArgumentParser, *, numba_default_cores: bool = False) -> None:
-    if numba_default_cores:
+def _add_threads_args(p: argparse.ArgumentParser, *, default_cores: bool = False) -> None:
+    if default_cores:
         default = None
         purpose = (
-            "threads for the numba kernels (default: the physical cores the process may run on; "
-            "the pedigree-graph engine keeps 1 unless this is given)"
+            "threads for the pg-phenotype computation (default: the physical cores the process may run on, "
+            "capped by NUMBA_NUM_THREADS; the pedigree-graph engine keeps 1 unless this is given)"
         )
     else:
         default = 1
@@ -340,7 +340,7 @@ def _trait_type(v: str) -> tuple[str, str]:
 
 
 def _int64(v: str) -> int:
-    """Argparse type guard for the int64 range the numba kernels take a seed in."""
+    """Argparse type guard for the int64 range pg-phenotype takes a seed in."""
     try:
         n = int(v)
     except ValueError as exc:
@@ -829,7 +829,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: %(default)s).",
     )
     _add_format_args(p_am)
-    _add_threads_args(p_am, numba_default_cores=True)
+    _add_threads_args(p_am, default_cores=True)
     _add_memory_args(p_am)
     _add_logging_args(p_am)
 
@@ -885,18 +885,24 @@ def _commit_thread_budget(args: argparse.Namespace) -> None:
         logger.debug("pedigree-graph thread budget already committed; --threads=%s ignored", threads)
 
 
-def _set_numba_threads(threads: int) -> None:
-    """Hand ``--threads`` to numba's parallel kernels.
+def _set_assortative_threads(threads: int) -> None:
+    """Hand ``--threads`` to pg-phenotype, capped as numba caps it.
 
     numba caps a process at ``NUMBA_NUM_THREADS`` (the test task pins it to 1)
-    and refuses more; the cap then stands.
+    and refuses more; pg-phenotype gets the count numba keeps.  Like
+    pedigree-graph, pg-phenotype commits one budget per process.
     """
     import numba
+    import pg_phenotype
 
     try:
         numba.set_num_threads(threads)
     except ValueError:
         logger.debug("numba allows fewer than --threads=%d thread(s) in this process; keeping its maximum", threads)
+    try:
+        pg_phenotype.configure_threads(numba.get_num_threads())
+    except RuntimeError:
+        logger.debug("pg-phenotype thread budget already committed; --threads=%s ignored", threads)
 
 
 def _init_logging(verbose: bool, quiet: bool) -> None:
@@ -1325,13 +1331,12 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
 
 def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
     """``assortative-mating``: type the trait columns and write ``assortative_mating.yaml``."""
-    # numba and SciPy's optimisers cost ~0.2 s to import; only this subcommand needs them.
-    from pedsum.assortative_mating import FIT_OUTCOMES, classify_trait, compute_assortative_mating
+    from pedsum.assortative_mating import classify_trait, compute_assortative_mating
 
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     _commit_thread_budget(args)
-    _set_numba_threads(physical_cores() if args.threads is None else args.threads)
+    _set_assortative_threads(physical_cores() if args.threads is None else args.threads)
     try:
         with _timed("load+validate"):
             df = load_and_validate(args.in_path, **_validation_kwargs(args))
@@ -1362,18 +1367,21 @@ def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
             len(df),
         )
 
-    with _timed("assortative mating"):
-        payload = compute_assortative_mating(
-            df,
-            traits,
-            permutations=args.permutations,
-            bootstrap=args.bootstrap,
-            seed=args.seed,
-            stratify_by=args.stratify_by,
-            birth_year_bin=args.birth_year_bin,
-            min_stratum_networks=args.min_stratum_networks,
-        )
-    logger.debug("latent fits by outcome: %s", dict(FIT_OUTCOMES))
+    try:
+        with _timed("assortative mating"):
+            payload = compute_assortative_mating(
+                df,
+                traits,
+                permutations=args.permutations,
+                bootstrap=args.bootstrap,
+                seed=args.seed,
+                stratify_by=args.stratify_by,
+                birth_year_bin=args.birth_year_bin,
+                min_stratum_networks=args.min_stratum_networks,
+            )
+    except PedigreeError as e:
+        logger.error("%s", e)
+        return 1
     out_path = args.out_dir / "assortative_mating.yaml"
     data = _build_assortative_mating_data(args.in_path, cmd, len(df), payload)
     _write_yaml(data, out_path, figures=ASSORTATIVE_MATING_FIGURES)

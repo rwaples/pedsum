@@ -1,0 +1,297 @@
+n_total: 180
+assortative_mating:
+  traits:
+  - name: liability
+    type: continuous
+    type_source: stated
+    n_values: 120
+    n_missing: 60
+  - name: smoker
+    type: binary
+    type_source: stated
+    levels:
+    - '0'
+    - '1'
+    n_values: 120
+    n_missing: 60
+  settings:
+    permutations: 199
+    bootstrap: 200
+    seed: 8
+    threads: N
+    ci_level: 0.95
+    ci_method: bootstrap
+    stratify_by: null
+    birth_year_bin: null
+    min_stratum_networks: null
+  inference:
+    se_method: cluster-robust sandwich over Mate Networks of the stacked two-step
+      estimating equations (thresholds, stratum means and variances, then rho), G/(G-1)
+      small-sample factor
+    ci_scale: Fisher z for correlations, log for the odds ratio
+    bootstrap_unit: mate_network
+    bootstrap_assumption: Mate Networks are independent. Dependence from remating
+      is kept; dependence between networks through ancestry or siblings is not modelled.
+    bootstrap_method: 'one_step: each draw refits the first step (thresholds, stratum
+      moments) and every closed-form estimator exactly on the resampled Mate Networks,
+      and takes one Newton step for rho from the observed estimate with the draw-weighted
+      score and the full-sample Hessian'
+    permutation_null: father trait vectors exchangeable within blocks
+    permutation_blocks: father_stratum x father_missingness_pattern
+    permutation_statistic: 'score_at_zero: the score of the latent-correlation log-likelihood
+      at rho = 0 with every margin refit on the permuted pairs (polychoric, tetrachoric,
+      polyserial, biserial); pearson: Pearson r (continuous x continuous)'
+    permutation_stopping: besag_clifford_closed
+    permutation_stop_h: 20
+  mating_pairs:
+    n_total: 60
+    n_dropped:
+      unknown_stratum: 0
+    n_mate_networks: 60
+    largest_mate_network_share: 0.01667
+    n_mothers_multiple_mates: 0
+    n_fathers_multiple_mates: 0
+  mate_correlation:
+  - mother: liability
+    father: liability
+    n: 60
+    n_dropped:
+      mother_missing: 0
+      father_missing: 0
+      both_missing: 0
+      small_stratum: 0
+      degenerate_stratum: 0
+    n_mate_networks: 60
+    largest_mate_network_share: 0.01667
+    crude:
+      pearson:
+        r: -0.002363
+        se: 0.1271
+        ci:
+        - -0.228
+        - 0.2394
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+        p_perm: 0.9524
+        p_perm_unavailable_reason: null
+        permutation_statistic: pearson
+        permutations:
+          requested: 199
+          valid: 21
+          failed: 0
+          failure_reasons: {}
+          seed: 8
+          n_fixed_fathers: 0
+          stopped_early: true
+          draws_used: 21
+          sequential_h: 20
+      spearman:
+        r: -0.03873
+        se: null
+        ci:
+        - -0.2722
+        - 0.2196
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+  - mother: liability
+    father: smoker
+    n: 60
+    n_dropped:
+      mother_missing: 0
+      father_missing: 0
+      both_missing: 0
+      small_stratum: 0
+      degenerate_stratum: 0
+    n_mate_networks: 60
+    largest_mate_network_share: 0.01667
+    crude:
+      biserial:
+        rho: 0.9999
+        boundary: true
+        se: null
+        ci:
+        - 0.9797
+        - 0.9999
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+        p_perm: 0.005
+        p_perm_unavailable_reason: null
+        permutation_statistic: score_at_zero
+        permutations:
+          requested: 199
+          valid: 199
+          failed: 0
+          failure_reasons: {}
+          seed: 8
+          n_fixed_fathers: 0
+          stopped_early: false
+          draws_used: 199
+          sequential_h: 20
+      point_biserial:
+        r: 0.8138
+        se: 0.02613
+        ci:
+        - 0.7633
+        - 0.8638
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+  - mother: smoker
+    father: liability
+    n: 60
+    n_dropped:
+      mother_missing: 0
+      father_missing: 0
+      both_missing: 0
+      small_stratum: 0
+      degenerate_stratum: 0
+    n_mate_networks: 60
+    largest_mate_network_share: 0.01667
+    crude:
+      biserial:
+        rho: -0.0465
+        boundary: false
+        se: 0.1627
+        ci:
+        - -0.3188
+        - 0.2133
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+        p_perm: 0.8696
+        p_perm_unavailable_reason: null
+        permutation_statistic: score_at_zero
+        permutations:
+          requested: 199
+          valid: 23
+          failed: 0
+          failure_reasons: {}
+          seed: 8
+          n_fixed_fathers: 0
+          stopped_early: true
+          draws_used: 23
+          sequential_h: 20
+      point_biserial:
+        r: -0.03696
+        se: 0.1288
+        ci:
+        - -0.2543
+        - 0.1686
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+  - mother: smoker
+    father: smoker
+    n: 60
+    n_dropped:
+      mother_missing: 0
+      father_missing: 0
+      both_missing: 0
+      small_stratum: 0
+      degenerate_stratum: 0
+    n_mate_networks: 60
+    largest_mate_network_share: 0.01667
+    crude:
+      table:
+      - - 16
+        - 14
+      - - 18
+        - 12
+      tetrachoric:
+        rho: -0.106
+        boundary: false
+        se: 0.2039
+        ci:
+        - -0.47
+        - 0.274
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+        p_perm: 0.9091
+        p_perm_unavailable_reason: null
+        permutation_statistic: score_at_zero
+        permutations:
+          requested: 199
+          valid: 22
+          failed: 0
+          failure_reasons: {}
+          seed: 8
+          n_fixed_fathers: 0
+          stopped_early: true
+          draws_used: 22
+          sequential_h: 20
+      odds_ratio:
+        value: 0.7619
+        se: 0.5267
+        ci:
+        - 0.2821
+        - 2.04
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+      phi:
+        r: -0.06727
+        se: 0.1299
+        ci:
+        - -0.2986
+        - 0.1746
+        ci_method: bootstrap
+        ci_unavailable_reason: null
+        bootstrap:
+          requested: 200
+          valid: 200
+          failed: 0
+          failure_reasons: {}
+  within_person:
+    mothers:
+      estimator: biserial
+      n: 60
+      rho: -0.1148
+      boundary: false
+    fathers:
+      estimator: biserial
+      n: 60
+      rho: 0.09565
+      boundary: false
+  notes:
+  - Mating Pairs are observed only through offspring; partnerships without a recorded
+    child are absent.
+  - Phenotypic correlation; tetrachoric/polychoric/polyserial assume bivariate-normal
+    liability, the other estimators describe the observed values.
+  - Censored age-dependent diagnoses are not corrected; a mate who has not yet been
+    diagnosed counts as unaffected.

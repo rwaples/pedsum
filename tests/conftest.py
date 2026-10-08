@@ -6,13 +6,12 @@ import contextlib
 import csv
 import gzip
 import io
-import json
 import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -58,30 +57,6 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
         sys.argv = prev_argv
         logging.getLogger().handlers.clear()
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
-
-
-def four_thread_json(code: str) -> Any:
-    """Run ``code``, which prints one JSON value, in a subprocess where numba may use 4 threads; return that value.
-
-    The suite pins numba to one thread per worker, and ``NUMBA_NUM_THREADS`` is
-    read once per process, so a thread-count invariance check needs a fresh
-    interpreter. ``code`` can import the test modules and has ``json`` and
-    ``sys`` imported.
-    """
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            f"import json, sys; sys.path.insert(0, sys.argv[1]); {code}",
-            str(Path(__file__).parent),
-        ],
-        capture_output=True,
-        text=True,
-        env=os.environ | {"NUMBA_NUM_THREADS": "4"},
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
-    return json.loads(proc.stdout)
 
 
 def write_ped(path, rows):

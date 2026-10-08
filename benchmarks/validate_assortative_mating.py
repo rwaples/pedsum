@@ -71,12 +71,12 @@ import numpy as np
 import polars as pl
 import yaml
 from scipy.special import ndtri
+from scipy.stats import multivariate_normal
 
 # Make ``pedsum`` importable when run as ``python benchmarks/...`` from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pedsum import cli as pedsum_cli
-from pedsum.assortative_mating import bvn_cdf
 from pedsum.report import ASSORTATIVE_MATING_FIGURES, _round_floats
 
 if TYPE_CHECKING:
@@ -343,7 +343,7 @@ def implied_phi(table: list[list[int]], r: float) -> float:
     (a, b), (c, d) = table
     n = a + b + c + d
     p_m, p_f = (c + d) / n, (b + d) / n
-    both = float(bvn_cdf(np.array([-ndtri(1 - p_m)]), np.array([-ndtri(1 - p_f)]), r)[0])
+    both = float(multivariate_normal(mean=[0, 0], cov=[[1, r], [r, 1]]).cdf([-ndtri(1 - p_m), -ndtri(1 - p_f)]))
     return (both - p_m * p_f) / math.sqrt(p_m * (1 - p_m) * p_f * (1 - p_f))
 
 
@@ -481,7 +481,7 @@ def render(simace_root: Path, results: list[tuple[RepContext, list[CheckResult]]
         f"pedsum `{header['pedsum_rev']}` (worktree; uncommitted changes: {header['pedsum_dirty']}), "
         f"simACE `{header['simace_rev']}` at `{simace_root}`.",
         "Inputs are each replicate's `pedigree.parquet`; pedsum ran with `--sex-encoding default` and its default "
-        f"`--threads` ({header['threads']} numba threads).",
+        f"`--threads` ({header['threads']} pg-phenotype threads).",
         "",
         "## Pair sets",
         "",

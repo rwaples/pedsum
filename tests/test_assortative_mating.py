@@ -1,4 +1,4 @@
-"""Mate Correlation (pedsum#13): trait reading and typing, estimators, permutation null, Mate Network bootstrap."""
+"""Mate Correlation (pedsum#13): trait reading and typing, and the payload pedsum writes from pg-phenotype's result."""
 
 from __future__ import annotations
 
@@ -6,41 +6,18 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-import assortative_oracles as oracles
 import numpy as np
 import polars as pl
 import pytest
 from conftest import run_pedsum, write_ped
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-from scipy.integrate import quad
-from scipy.stats import multivariate_normal, norm, spearmanr
 
 from pedsum.assortative_mating import (
     MIN_STRATUM_NETWORKS,
-    CellPairs,
-    Fit,
     Trait,
-    Undefined,
-    bootstrap_networks,
-    bootstrap_record,
-    bvn_cdf,
     classify_trait,
     compute_assortative_mating,
-    drop_thin_strata,
-    father_blocks,
-    mate_networks,
-    odds_ratio,
-    pearson,
-    permutation_donors,
-    permutation_record,
-    polychoric,
-    polyserial,
-    pooled,
-    spearman,
-    standardise,
-    stratified_pearson,
-    table_2x2,
 )
 from pedsum.base import PedigreeError
 from pedsum.parse import read_trait_columns
@@ -170,101 +147,6 @@ def test_missing_trait_column(tmp_path):
     rows = [{"id": 1, "sex": "M", "mother": -1, "father": -1}]
     with pytest.raises(PedigreeError, match="'y'"):
         _read(tmp_path, rows, ["y"])
-
-
-# ---------------------------------------------------------------------------
-# Step 2: estimators
-# ---------------------------------------------------------------------------
-
-
-@settings(deadline=None)
-@given(seed=st.integers(0, 10_000), n=st.integers(3, 60))
-def test_pearson_and_spearman_match_reference(seed, n):
-    """Pearson agrees with np.corrcoef and Spearman with scipy.stats.spearmanr."""
-    rng = np.random.default_rng(seed)
-    m = rng.normal(size=n)
-    f = 0.4 * m + rng.normal(size=n)
-    f[: n // 3] = f[0]  # ties
-    assert pearson(m, f) == pytest.approx(np.corrcoef(m, f)[0, 1], abs=1e-12)
-    assert spearman(m, f) == pytest.approx(spearmanr(m, f).statistic, abs=1e-12)
-
-
-@pytest.mark.parametrize("fn", [pearson, spearman])
-def test_undefined_estimates(fn):
-    """No pairs and a constant side are undefined with a reason, not an exception."""
-    assert fn(np.zeros(0), np.zeros(0)) == Undefined("no_complete_pairs")
-    assert fn(np.ones(4), np.arange(4.0)) == Undefined("constant_margin")
-    assert fn(np.arange(4.0), np.full(4, 0.1)) == Undefined("constant_margin")
-
-
-# ---------------------------------------------------------------------------
-# Step 2: sample structure and resampling
-# ---------------------------------------------------------------------------
-
-
-def test_mate_networks_follow_mating_pairs_only():
-    """Remating chains join one network; labels follow each network's first pair."""
-    mothers = np.array([10, 11, 10, 12, 13])
-    fathers = np.array([20, 21, 22, 22, 23])
-    np.testing.assert_array_equal(mate_networks(mothers, fathers), [0, 1, 0, 0, 2])
-
-
-def test_bootstrap_draws_whole_networks():
-    """Each draw weights whole networks by how often they were drawn, as many draws as there are networks."""
-    labels = np.array([0, 1, 0, 2, 2, 2])
-    for w in bootstrap_networks(labels, 50, 1):
-        assert w.dtype == np.float64
-        assert w.shape == labels.shape
-        per_network = [np.unique(w[labels == label]) for label in range(3)]
-        assert all(len(multiplicity) == 1 for multiplicity in per_network)
-        multiplicities = np.concatenate(per_network)
-        assert np.all(multiplicities == multiplicities.astype(int))
-        assert multiplicities.sum() == 3
-
-
-def test_permutation_stays_in_block_and_keeps_missingness():
-    """Donors share the recipient's stratum and missingness pattern, so every cell keeps its pairs."""
-    rng = np.random.default_rng(7)
-    n = 40
-    stratum = rng.integers(0, 3, n)
-    values = rng.normal(size=(2, n))
-    values[rng.random((2, n)) < 0.3] = np.nan
-    blocks = father_blocks(stratum, ~np.isnan(values))
-    for donor in permutation_donors(blocks, 30, 7):
-        assert sorted(donor) == list(range(n))
-        np.testing.assert_array_equal(blocks[donor], blocks)
-        np.testing.assert_array_equal(stratum[donor], stratum)
-        np.testing.assert_array_equal(np.isnan(values[:, donor]), np.isnan(values))
-
-
-def test_remating_father_keeps_one_vector():
-    """A remating father carries one donor vector across all of his pairs in every permutation."""
-    pair_father = np.array([0, 0, 0, 1, 2, 3, 3])
-    father_values = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
-    blocks = np.zeros(4, dtype=np.int64)
-    for donor in permutation_donors(blocks, 30, 3):
-        permuted = father_values[:, donor[pair_father]]
-        for father in range(4):
-            mine = permuted[:, pair_father == father]
-            assert (mine == mine[:, :1]).all()
-
-
-def test_failed_permutations_leave_the_denominator():
-    """Undefined permutation statistics are counted as failed and excluded from B_valid."""
-    record = permutation_record(0.5, [0.6, Undefined("constant_margin"), -0.1, 0.5], 4, 9, 0, "pearson")
-    assert record["p_perm"] == (2 + 1) / (3 + 1)
-    assert record["permutation_statistic"] == "pearson"
-    assert record["permutations"] == {
-        "requested": 4,
-        "valid": 3,
-        "failed": 1,
-        "failure_reasons": {"constant_margin": 1},
-        "seed": 9,
-        "n_fixed_fathers": 0,
-        "stopped_early": False,
-        "draws_used": 4,
-        "sequential_h": 20,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +316,8 @@ def test_row_order_invariance(n_pairs, remate_every, seed, stratify, binary):
         trait = _binary(frame, values) if binary else _trait(frame, values)
         return compute_assortative_mating(frame, [trait], permutations=draws, bootstrap=draws, seed=seed, **options)
 
+    present = _binary(df, values).values if binary else _trait(df, values).values
+    assume(len(np.unique(present[~np.isnan(present)])) > 1)  # pg-phenotype refuses a constant trait
     assert run(df[rng.permutation(len(df)).tolist()]) == run(df)
 
 
@@ -539,70 +423,6 @@ def _manual_standardise(x: np.ndarray, code: np.ndarray) -> np.ndarray:
         sel = code == c
         z[sel] = (x[sel] - x[sel].mean()) / x[sel].std()
     return z
-
-
-def test_standardise_within_each_stratum():
-    """Values are centred and scaled within each stratum; per-stratum shifts and scales leave the r unchanged."""
-    rng = np.random.default_rng(13)
-    n = 300
-    m, f = rng.normal(size=n), rng.normal(size=n)
-    f += 0.5 * m
-    ms, fs = rng.integers(0, 4, n), rng.integers(0, 3, n)
-    np.testing.assert_allclose(standardise(m, ms), _manual_standardise(m, ms), atol=1e-12)
-    r = stratified_pearson(CellPairs(m, f, ms, fs))
-    assert r == pytest.approx(np.corrcoef(_manual_standardise(m, ms), _manual_standardise(f, fs))[0, 1], abs=1e-12)
-
-    shifted = CellPairs(m * (1 + ms) + 10 * ms, f * (3 - fs) - 5 * fs, ms, fs)
-    assert stratified_pearson(shifted) == pytest.approx(r, abs=1e-12)
-    assert pearson(shifted.m, shifted.f) != pytest.approx(r, abs=1e-3)
-
-
-def test_degenerate_strata_make_the_stratified_estimate_undefined():
-    """A stratum with one value is never merged: the estimate is undefined with reason degenerate_stratum."""
-    m, f = np.array([0.0, 1.0, 2.0, 5.0]), np.array([1.0, 0.0, 2.0, 3.0])
-    assert stratified_pearson(CellPairs(m, f, np.array([0, 0, 0, 1]), np.zeros(4, dtype=np.int64))) == Undefined(
-        "degenerate_stratum"
-    )
-    assert stratified_pearson(
-        CellPairs(m, np.array([1.0, 1.0, 2.0, 3.0]), np.zeros(4, dtype=np.int64), np.array([0, 0, 1, 1]))
-    ) == Undefined("degenerate_stratum")
-    assert stratified_pearson(
-        CellPairs(m[:0], f[:0], np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64))
-    ) == Undefined("no_complete_pairs")
-
-
-def test_degenerate_drop_repeats_until_no_stratum_is_degenerate():
-    """Dropping a constant father stratum can leave a mother stratum with one pair, which is dropped in turn."""
-    pairs = CellPairs(
-        m=np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
-        f=np.array([1.0, 1.0, 0.0, 2.0, 3.0, 1.0]),
-        m_stratum=np.array([0, 1, 1, 2, 2, 2]),
-        f_stratum=np.array([0, 0, 1, 1, 1, 1]),
-    )
-    keep, n_small, _ = drop_thin_strata(pairs, np.arange(6), np.arange(10, 16), min_networks=1)
-    np.testing.assert_array_equal(keep, [3, 4, 5])
-    assert n_small == 0
-
-
-def test_thin_strata_drop_repeats_to_a_fixed_point():
-    """Dropping a one-network father stratum leaves a mother stratum in one network, which is dropped in turn.
-
-    Mother 1 mates fathers 11 and 12, the only fathers in stratum 1; father 13
-    mates mothers 2 and 5, the rest of mother stratum 0. No stratum is constant.
-    """
-    pairs = CellPairs(
-        m=np.array([1.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
-        f=np.array([0.5, 1.5, 2.5, 3.5, 4.5, 2.5]),
-        m_stratum=np.array([0, 0, 0, 1, 1, 0]),
-        f_stratum=np.array([1, 1, 0, 0, 0, 0]),
-    )
-    mothers, fathers = np.array([1, 1, 2, 3, 4, 5]), np.array([11, 12, 13, 14, 15, 13])
-    keep, n_small, _ = drop_thin_strata(pairs, mothers, fathers, min_networks=2)
-    np.testing.assert_array_equal(keep, [3, 4])
-    assert n_small == 4
-    keep, n_small, _ = drop_thin_strata(pairs, mothers, fathers, min_networks=1)
-    np.testing.assert_array_equal(keep, np.arange(6))
-    assert n_small == 0
 
 
 def _stratified_fixture(
@@ -796,208 +616,9 @@ def test_cohort_trend_without_assortment_vanishes_when_stratified():
     assert abs(cell["stratified"]["pearson"]["r"]) < 0.04
 
 
-def test_stratified_permutations_refit_the_pair_weighted_father_margins():
-    """Each permutation restandardises the permuted fathers; holding the observed margins fixed gives another null."""
-    df, pairs, values, years = _stratified_fixture(19, n_pairs=60)
-    permutations = 49
-    record = compute_assortative_mating(
-        df,
-        [_trait(df, values)],
-        permutations=permutations,
-        bootstrap=0,
-        seed=3,
-        stratify_by="birth_year",
-        birth_year_bin=10,
-    )["mate_correlation"][0]["stratified"]["pearson"]
-
-    father_ids, pair_father = np.unique([fa for _, fa in pairs], return_inverse=True)
-    father_values = np.array([values[i] for i in father_ids])
-    blocks = father_blocks(np.array([years[i] // 10 for i in father_ids]), np.ones((1, len(father_ids)), dtype=bool))
-    m = np.array([values[mo] for mo, _ in pairs])
-    ms = np.array([years[mo] // 10 for mo, _ in pairs])
-    fs = blocks[pair_father]
-    zf = standardise(father_values[pair_father], fs)
-    zf_of_father = zf[np.unique(pair_father, return_index=True)[1]]
-    refit, fixed = [], []
-    for donor in permutation_donors(blocks, permutations, 3):
-        refit.append(stratified_pearson(CellPairs(m, father_values[donor[pair_father]], ms, fs)))
-        fixed.append(pearson(standardise(m, ms), zf_of_father[donor[pair_father]]))
-    observed = stratified_pearson(CellPairs(m, father_values[pair_father], ms, fs))
-    assert record["r"] == observed
-    assert record["p_perm"] == permutation_record(observed, refit, permutations, 3, 0, "pearson")["p_perm"]
-    assert not np.allclose(refit, fixed)
-
-
 # ---------------------------------------------------------------------------
-# Step 3: threshold estimators
+# Step 3: threshold estimators in the payload
 # ---------------------------------------------------------------------------
-
-
-def _from_table(table, strata: np.ndarray | None = None) -> CellPairs:
-    """One pair per count of ``table`` (rows mother level, columns father level); ``strata`` gives a code per table."""
-    tables = np.asarray(table)[None] if strata is None else np.asarray(table)
-    m, f, code = [], [], []
-    for t, counts in enumerate(tables):
-        for (i, j), count in np.ndenumerate(counts):
-            m += [i] * int(count)
-            f += [j] * int(count)
-            code += [0 if strata is None else int(strata[t])] * int(count)
-    stratum = np.array(code, dtype=np.int64)
-    return CellPairs(np.array(m, float), np.array(f, float), stratum, stratum).with_levels(*tables.shape[1:])
-
-
-def _grid_argmin(nll) -> float:
-    """Dense grid on (-0.99, 0.99), then two local refinements, independent of any optimiser."""
-    grid = np.arange(-0.99, 0.991, 0.01)
-    best = grid[np.argmin([nll(r) for r in grid])]
-    for step in (1e-3, 1e-5):
-        grid = np.arange(best - 100 * step, best + 100 * step + step / 2, step)
-        grid = grid[np.abs(grid) < 0.9999]
-        best = grid[np.argmin([nll(r) for r in grid])]
-    return float(best)
-
-
-def _cumulative_thresholds(counts: np.ndarray) -> np.ndarray:
-    return np.concatenate([[-np.inf], norm.ppf(np.cumsum(counts)[:-1] / counts.sum()), [np.inf]])
-
-
-def _polychoric_oracle(tables: list[np.ndarray]) -> float:
-    """Grid two-step ML over the summed log-likelihoods of per-stratum tables with their own margins' thresholds."""
-    fixed = []
-    for n in tables:
-        a, b = _cumulative_thresholds(n.sum(1)), _cumulative_thresholds(n.sum(0))
-        fixed.append((n, a, b))
-
-    def nll(rho):
-        total = 0.0
-        for n, a, b in fixed:
-            cdf = np.array([[oracles.phi2(u, v, rho) for v in b] for u in a])
-            pi = cdf[1:, 1:] - cdf[:-1, 1:] - cdf[1:, :-1] + cdf[:-1, :-1]
-            total -= np.sum(n[n > 0] * np.log(np.maximum(pi[n > 0], 1e-300)))
-        return total
-
-    return _grid_argmin(nll)
-
-
-def test_bvn_cdf_matches_the_density_integral():
-    """The CDF helper agrees with Φ(h)Φ(k) + ∫φ2 dρ, infinite arguments included."""
-    h = np.array([0.2, -1.1, np.inf, -np.inf, 0.4, np.inf])
-    k = np.array([-0.5, 0.7, 0.3, 0.3, np.inf, np.inf])
-    for rho in (-0.6, 0.0, 0.3, 0.95):
-        expected = [oracles.phi2(u, v, rho) for u, v in zip(h, k, strict=True)]
-        np.testing.assert_allclose(bvn_cdf(h, k, rho), expected, atol=1e-9)
-
-
-def test_bvn_cdf_matches_scipy():
-    """The Owen's T Φ2 agrees with ``scipy.stats.multivariate_normal.cdf`` to 1e-12 on a dense grid.
-
-    The grid holds ``h = 0``, ``k = 0`` (both at once too), values near 0,
-    the tails, and ±inf, at correlations out to ±0.9999.
-    """
-    axis = np.concatenate([np.linspace(-6, 6, 49), [0.0, 1e-9, -1e-9, 1e-3, 8.0, -8.0, np.inf, -np.inf]])
-    h, k = (a.ravel() for a in np.meshgrid(axis, axis, indexing="ij"))
-    finite = np.isfinite(h) & np.isfinite(k)
-    for rho in (-0.9999, -0.99, -0.9, -0.5, -1e-6, 0.0, 1e-6, 0.3, 0.7, 0.925, 0.99, 0.9999):
-        got = bvn_cdf(h, k, rho)
-        expected = multivariate_normal(mean=[0.0, 0.0], cov=[[1.0, rho], [rho, 1.0]]).cdf(np.column_stack([h, k]))
-        np.testing.assert_allclose(got[finite], expected[finite], rtol=0, atol=1e-12)
-        infinite = np.where(np.isposinf(h), norm.cdf(k), np.where(np.isposinf(k), norm.cdf(h), 0.0))
-        np.testing.assert_allclose(got[~finite], infinite[~finite], rtol=0, atol=1e-12)
-        assert got[(h == 0) & (k == 0)] == pytest.approx(0.25 + np.arcsin(rho) / (2 * np.pi), abs=1e-14)
-
-
-OLSSON_TABLE_7 = np.array([[13, 6, 0], [69, 113, 22], [41, 132, 104]])
-
-
-@pytest.mark.parametrize(
-    "table",
-    [
-        OLSSON_TABLE_7,
-        np.array([[30, 10], [5, 20]]),
-        np.array([[40, 12, 3, 1], [10, 30, 15, 5], [2, 8, 20, 25]]),
-        np.array([[50, 20], [30, 10], [5, 25]]),
-    ],
-)
-def test_polychoric_agrees_with_grid_ml_oracle(table):
-    """Two-step ρ̂ matches a brute-force grid over an independent Φ2 to 1e-4."""
-    fit = polychoric(_from_table(table))
-    assert isinstance(fit, Fit)
-    assert fit.value == pytest.approx(_polychoric_oracle([table]), abs=1e-4)
-
-
-def test_stratified_polychoric_agrees_with_grid_ml_oracle():
-    """One shared ρ over two strata with their own thresholds matches the grid oracle on the summed likelihood."""
-    tables = np.array([[[20, 10, 2], [8, 25, 12], [1, 9, 30]], [[5, 3, 1], [4, 15, 6], [2, 7, 12]]])
-    fit = polychoric(_from_table(tables, strata=np.array([0, 1])))
-    assert isinstance(fit, Fit)
-    assert fit.value == pytest.approx(_polychoric_oracle(list(tables)), abs=1e-4)
-    pooled_fit = polychoric(pooled(_from_table(tables, strata=np.array([0, 1]))))
-    assert pooled_fit.value == pytest.approx(_polychoric_oracle([tables.sum(0)]), abs=1e-4)
-    assert pooled_fit.value != pytest.approx(fit.value, abs=1e-3)
-
-
-def test_olsson_table_7_reproduces_the_printed_estimates():
-    """Olsson (1979) Table 7: ρ̂ rounds to .49 with thresholds a = (-1.77, -.14), b = (-.69, .67); two-step ρ̂ = 0.491372."""
-    pairs = _from_table(OLSSON_TABLE_7)
-    fit = polychoric(pairs)
-    assert isinstance(fit, Fit)
-    assert round(fit.value, 2) == 0.49
-    assert fit.value == pytest.approx(0.491372, abs=1e-5)
-    assert not fit.boundary
-    a = _cumulative_thresholds(OLSSON_TABLE_7.sum(1))[1:-1]
-    b = _cumulative_thresholds(OLSSON_TABLE_7.sum(0))[1:-1]
-    assert np.round(a, 2).tolist() == [-1.77, -0.14]
-    assert np.round(b, 2).tolist() == [-0.69, 0.67]
-
-
-def test_binary_boundary_is_flagged_from_the_fit():
-    """A 2x2 with one zero cell fits ρ̂ on a plateau that reaches the bound and is flagged boundary."""
-    fit = polychoric(_from_table([[30, 10], [0, 20]]))
-    assert isinstance(fit, Fit)
-    assert fit.value > 0.998
-    assert fit.boundary
-    negative = polychoric(_from_table([[0, 20], [30, 10]]))
-    assert negative.value < -0.998
-    assert negative.boundary
-
-
-def test_ordinal_empty_centre_is_interior():
-    """The 3x3 table with an empty centre fits ρ̂ ≈ 0 and is not a boundary case."""
-    fit = polychoric(_from_table([[10, 10, 10], [10, 0, 10], [10, 10, 10]]))
-    assert isinstance(fit, Fit)
-    assert fit.value == pytest.approx(0.0, abs=1e-4)
-    assert not fit.boundary
-
-
-def test_stratified_zero_leaves_the_shared_rho_interior():
-    """A zero cell in one stratum's sub-table does not make the shared ρ (or the pooled fit) a boundary case."""
-    tables = np.array([[[15, 5], [0, 10]], [[10, 10], [10, 10]]])
-    pairs = _from_table(tables, strata=np.array([0, 1]))
-    stratified, crude = polychoric(pairs), polychoric(pooled(pairs))
-    assert isinstance(stratified, Fit)
-    assert isinstance(crude, Fit)
-    assert 0 < stratified.value < 0.95
-    assert not stratified.boundary
-    assert 0 < crude.value < 0.95
-    assert not crude.boundary
-    assert polychoric(_from_table(tables[0])).boundary
-
-
-def test_constant_margin_is_undefined():
-    """A one-level margin leaves ρ unidentified: undefined with reason constant_margin, for every table statistic."""
-    pairs = _from_table([[10, 10], [0, 0]])
-    assert polychoric(pairs) == Undefined("constant_margin")
-    assert odds_ratio(pairs) == Undefined("constant_margin")
-    one_stratum = np.zeros(20, dtype=np.int64)
-    one_level = np.array([[True, False]])
-    assert polyserial(np.arange(20.0), np.zeros(20), one_stratum, one_stratum, one_level) == Undefined(
-        "constant_margin"
-    )
-    assert polyserial(np.ones(20), pairs.f, one_stratum, one_stratum, np.ones((1, 2), bool)) == Undefined(
-        "constant_margin"
-    )
-    empty = _from_table([[0, 0], [0, 0]])
-    assert polychoric(empty) == Undefined("no_complete_pairs")
 
 
 def test_constant_margin_cell_in_the_payload():
@@ -1011,98 +632,6 @@ def test_constant_margin_cell_in_the_payload():
     assert cell["crude"]["tetrachoric"] == {"rho": None, "reason": "constant_margin"}
     assert cell["crude"]["odds_ratio"] == {"value": None, "reason": "constant_margin"}
     assert cell["crude"]["phi"] == {"r": None, "reason": "constant_margin"}
-
-
-def _polyserial_oracle(x: np.ndarray, y: np.ndarray) -> float:
-    """Grid two-step ML with each pair's category probability integrated from the bivariate density."""
-    z = (x - x.mean()) / x.std()
-    tau = _cumulative_thresholds(np.bincount(y.astype(int)))
-    lower, upper = tau[y.astype(int)], tau[y.astype(int) + 1]
-
-    def nll(rho):
-        s2 = 1 - rho * rho
-
-        def conditional(zi, lo, hi):
-            def density(eta):
-                return np.exp(-((eta - rho * zi) ** 2) / (2 * s2)) / np.sqrt(2 * np.pi * s2)
-
-            return quad(density, lo, hi, epsabs=1e-13, epsrel=1e-13)[0]
-
-        return -sum(np.log(conditional(zi, lo, hi)) for zi, lo, hi in zip(z, lower, upper, strict=True))
-
-    return _grid_argmin(nll)
-
-
-@pytest.mark.parametrize(("rho", "cuts"), [(0.5, [-0.5, 0.7]), (-0.3, [0.0]), (0.8, [-1.0, 0.0, 1.0])])
-def test_polyserial_agrees_with_grid_ml_oracle(rho, cuts):
-    """Two-step polyserial ρ̂ (biserial with one cut) matches a brute-force grid over the integrated density to 1e-4."""
-    rng = np.random.default_rng(abs(int(rho * 100)))
-    draws = rng.multivariate_normal([0, 0], [[1, rho], [rho, 1]], size=40)
-    x, y = draws[:, 0], np.digitize(draws[:, 1], cuts).astype(float)
-    one_stratum = np.zeros(40, dtype=np.int64)
-    fit = polyserial(x, y, one_stratum, one_stratum, np.ones((1, len(cuts) + 1), bool))
-    assert isinstance(fit, Fit)
-    assert fit.value == pytest.approx(_polyserial_oracle(x, y), abs=1e-4)
-
-
-def test_polyserial_uses_the_1_over_n_variance_and_cumulative_thresholds():
-    """Shifting and scaling x leaves ρ̂ unchanged (x is standardised); the fit matches an explicit eq 19-20 likelihood."""
-    rng = np.random.default_rng(3)
-    draws = rng.multivariate_normal([0, 0], [[1, 0.4], [0.4, 1]], size=300)
-    x, y = draws[:, 0], np.digitize(draws[:, 1], [-0.3, 0.9]).astype(float)
-    one_stratum = np.zeros(300, dtype=np.int64)
-    levels = np.ones((1, 3), bool)
-    fit = polyserial(x, y, one_stratum, one_stratum, levels)
-    assert polyserial(10 + 3 * x, y, one_stratum, one_stratum, levels).value == pytest.approx(fit.value, abs=1e-9)
-
-    z = (x - x.mean()) / np.sqrt(((x - x.mean()) ** 2).mean())
-    tau = _cumulative_thresholds(np.bincount(y.astype(int)))
-
-    def nll(rho):
-        star = (tau[None, :] - rho * z[:, None]) / np.sqrt(1 - rho * rho)
-        p = norm.cdf(star[np.arange(300), y.astype(int) + 1]) - norm.cdf(star[np.arange(300), y.astype(int)])
-        return -np.sum(np.log(np.maximum(p, 1e-300)))
-
-    assert fit.value == pytest.approx(_grid_argmin(nll), abs=1e-4)
-
-
-def test_polyserial_matches_the_unmasked_likelihood_bitwise():
-    """Evaluating Φ only at finite thresholds reproduces the all-thresholds ``norm.cdf`` fit exactly.
-
-    Two strata, one of which never shows the top level, so an interior
-    threshold is ``+inf`` for some pairs and the masks differ from the level codes.
-    The bitwise claim is about the oracle (Brent on either likelihood); the
-    kernel's Newton fit lands within 1e-7 of it.
-    """
-    rng = np.random.default_rng(8)
-    n = 500
-    draws = rng.multivariate_normal([0, 0], [[1, 0.35], [0.35, 1]], size=n)
-    stratum = rng.integers(0, 2, n)
-    x = draws[:, 0] + stratum
-    y = np.digitize(draws[:, 1], [-0.5, 0.8]).astype(float)
-    y[(stratum == 1) & (y == 2)] = 1
-    levels = np.array([[True, True, True], [True, True, False]])
-    fit = polyserial(x, y, stratum, stratum, levels)
-    assert isinstance(fit, Fit)
-
-    z = oracles.standardise(x, stratum)
-    codes = y.astype(int)
-    margin = np.bincount(stratum * 3 + codes, minlength=6).reshape(2, 3)
-    tau = oracles.thresholds(margin)
-    upper, lower = tau[stratum, codes + 1], tau[stratum, codes]
-    assert np.isposinf(upper[(stratum == 1) & (codes == 1)]).all()
-
-    def nll(rho):
-        scale = np.sqrt(1 - rho * rho)
-        p = norm.cdf((upper - rho * z) / scale) - norm.cdf((lower - rho * z) / scale)
-        return -float(np.sum(np.log(np.maximum(p, 1e-300))))
-
-    reference = oracles._maximise_rho(nll)
-    oracle_fit = oracles.polyserial(x, y, stratum, stratum, levels)
-    assert oracle_fit.value == reference.value
-    assert oracle_fit.boundary == reference.boundary
-    assert fit.value == pytest.approx(reference.value, abs=1e-7)
-    assert fit.boundary == reference.boundary
 
 
 def _mates(rng, r_mf, n, within_m=0.4, within_f=0.3) -> tuple[pl.DataFrame, dict[int, float], dict[int, float]]:
@@ -1179,21 +708,10 @@ def test_within_person_mixed_kinds_count_a_remating_individual_once():
     out = compute_assortative_mating(
         df, [_trait(df, x, "x"), _binary(df, b, "b", cut=0.5)], permutations=0, bootstrap=0, seed=0
     )
-    fathers = [10, 11, 12, 13]
-    one_stratum = np.zeros(4, dtype=np.int64)
-    direct = polyserial(
-        np.array([x[i] for i in fathers]),
-        np.array([b[i] for i in fathers], float),
-        one_stratum,
-        one_stratum,
-        np.ones((1, 2), bool),
-    )
-    assert out["within_person"]["fathers"] == {
-        "estimator": "biserial",
-        "n": 4,
-        "rho": direct.value,
-        "boundary": direct.boundary,
-    }
+    fathers = out["within_person"]["fathers"]
+    assert list(fathers) == ["estimator", "n", "rho", "boundary"]
+    assert (fathers["estimator"], fathers["n"]) == ("biserial", 4)
+    assert -1 < fathers["rho"] < 1
     assert out["within_person"]["mothers"]["n"] == 6
 
 
@@ -1215,13 +733,6 @@ def test_empty_category_in_a_draw_is_counted():
 
 def test_odds_ratio_inf_is_a_value_and_the_ci_is_never_nan():
     """A zero off-diagonal gives .inf; bootstrap bounds are order statistics, so a draw at inf gives an inf bound, not NaN."""
-    pairs = _from_table([[30, 10], [0, 20]])
-    assert odds_ratio(pairs) == np.inf
-    assert table_2x2(pairs) == [[30, 10], [0, 20]]
-    record = bootstrap_record([2.0, 3.0, np.inf, np.inf, 1.5, np.inf], 6, 10)
-    assert record["ci"] == [1.5, np.inf]
-    assert not any(np.isnan(record["ci"]))
-
     ped = _pedigree(_one_to_one(60))
     rows = [(0, 0)] * 30 + [(0, 1)] * 10 + [(1, 1)] * 20
     values = {m: float(mv) for (m, _), (mv, _) in zip(_one_to_one(60), rows, strict=True)} | {
@@ -1232,6 +743,7 @@ def test_odds_ratio_inf_is_a_value_and_the_ci_is_never_nan():
     cell = out["mate_correlation"][0]
     odds = cell["crude"]["odds_ratio"]
     assert odds["value"] == np.inf
+    assert cell["crude"]["table"] == [[30, 10], [0, 20]]
     # No pair has (mother 1, father 0), so no draw can either: every draw is inf and so is the whole CI.
     assert odds["ci"] == [np.inf, np.inf]
     assert odds["bootstrap"]["failed"] == 0
@@ -1272,7 +784,13 @@ def test_stratified_tetrachoric_in_the_payload():
     assert stratified["p_perm"] is not None
     assert stratified["rho"] < cell["crude"]["tetrachoric"]["rho"]
 
-    m = trait.values[[df["id"].to_list().index(mo) for mo, _ in pairs]]
-    f = trait.values[[df["id"].to_list().index(fa) for _, fa in pairs]]
-    direct = polychoric(CellPairs(m, f, cohort, cohort).with_levels(2, 2))
-    assert stratified["rho"] == direct.value
+
+def test_pg_phenotype_refusals_raise_pedigree_error():
+    """A constant trait or three traits, which the CLI never passes, come back as ``PedigreeError``."""
+    df = _pedigree(_one_to_one(10))
+    constant = Trait("c", "binary", "stated", ("0", "1"), np.where(df["mother"].to_numpy() == -1, 1.0, np.nan))
+    with pytest.raises(PedigreeError, match="constant"):
+        compute_assortative_mating(df, [constant], permutations=0, bootstrap=0, seed=0)
+    varied = _trait(df, {i: float(i % 7) for i in df["id"].to_list()})
+    with pytest.raises(PedigreeError, match="traits"):
+        compute_assortative_mating(df, [varied] * 3, permutations=0, bootstrap=0, seed=0)
