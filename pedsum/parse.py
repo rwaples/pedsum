@@ -38,28 +38,6 @@ _SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
 )
 
 
-def _detect_sex_encoding(
-    upper_non_missing: np.ndarray,
-    zero_as_missing: bool,
-) -> tuple[str, str]:
-    """Resolve the sex-column encoding from the observed tokens.
-
-    Returns ``(encoding, ambiguity_class)`` where encoding is ``"default"``
-    (0=F, 1=M) or ``"plink"`` (1=M, 2=F), and ambiguity_class is one of
-    ``"confident"``, ``"word_only"``, or ``"ones_only"``.
-    """
-    numeric = {t for t in np.unique(upper_non_missing).tolist() if t.isdigit() or t.lstrip("-").isdigit()}
-    if "2" in numeric:
-        return "plink", "confident"
-    if "0" in numeric and not zero_as_missing:
-        return "default", "confident"
-    if "0" in numeric and zero_as_missing:
-        return "plink", "confident"
-    if not numeric:
-        return "default", "word_only"
-    return "default", "ones_only"
-
-
 def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
     """Deterministic random sample of ``k`` IDs as a comma-separated string.
 
@@ -82,27 +60,14 @@ def _stripped_str_array(series: pl.Series) -> np.ndarray:
     return cleaned.to_numpy().astype(object)
 
 
-def _decode_sex(
-    series: pl.Series,
-    *,
-    encoding: str = "auto",
-    zero_as_missing: bool = False,
-) -> np.ndarray:
+def _decode_sex(series: pl.Series) -> np.ndarray:
     """Parse a sex column to int8 with ``SEX_UNKNOWN`` (-1) for missing.
 
-    Accepts M/F (any case), Male/Female, and numeric tokens whose meaning
-    depends on the resolved encoding:
-
-    - ``encoding="default"`` (pedsum default): ``0=female, 1=male``.
-    - ``encoding="plink"`` (PLINK fam convention): ``1=male, 2=female``,
-      with ``0`` always treated as missing (PLINK fam spec).
-    - ``encoding="auto"``: detect from the observed tokens (presence of
-      ``"2"`` → plink; presence of ``"0"`` → default unless
-      ``zero_as_missing=True``, which flips to plink).
-
-    Missing tokens (``""``, ``NA``, ``NaN``, ``N/A``, ``.``, ``?``, ``None``,
-    ``null``, ``-1``, ``U``, ``Unknown``, case-insensitive) decode to
-    ``SEX_UNKNOWN``. Unrecognized non-missing tokens raise ``PedigreeError``.
+    Accepts M/F (any case), Male/Female, and PLINK's numeric coding: ``1`` =
+    male, ``2`` = female, ``0`` = unknown. The missing tokens (``""``, ``NA``,
+    ``NaN``, ``N/A``, ``.``, ``?``, ``None``, ``null``, ``-1``, ``U``,
+    ``Unknown``, case-insensitive) also decode to ``SEX_UNKNOWN``.
+    Unrecognized non-missing tokens raise ``PedigreeError``.
 
     Returns an ``int8`` array; rows whose token was missing carry
     ``SEX_UNKNOWN`` (-1) and must be resolved by the caller.
@@ -111,43 +76,11 @@ def _decode_sex(
     # missing-token set rather than leaking into the unique-token scan.
     str_vals = _stripped_str_array(series)
     upper = np.array([v.upper() for v in str_vals], dtype=object)
-    missing_mask = np.isin(upper, list(_SEX_MISSING_TOKENS))
-    non_missing = upper[~missing_mask]
-
-    if encoding == "auto":
-        resolved, ambiguity = _detect_sex_encoding(non_missing, zero_as_missing)
-        if ambiguity == "ones_only":
-            logger.warning(
-                "sex auto-detect: only '1' tokens present; defaulting to "
-                "0=female, 1=male — pass --sex-encoding=plink if your file "
-                "uses 1=male, 2=female",
-            )
-    elif encoding in ("default", "plink"):
-        resolved = encoding
-    else:
-        raise PedigreeError(
-            f"unknown sex encoding {encoding!r}; expected 'auto', 'default', or 'plink'",
-        )
-
-    # Under PLINK, "0" is always missing (fam-file spec); fold it into the
-    # missing mask before decoding numeric tokens.
-    if resolved == "plink":
-        missing_mask = missing_mask | (str_vals == "0")
+    missing_mask = np.isin(upper, list(_SEX_MISSING_TOKENS)) | (str_vals == "0")
 
     out = np.full(len(str_vals), SEX_UNKNOWN, dtype=np.int8)
-    female_words = (upper == "F") | (upper == "FEMALE")
-    male_words = (upper == "M") | (upper == "MALE")
-    if resolved == "plink":
-        out[female_words | (str_vals == "2")] = SEX_FEMALE
-        out[male_words | (str_vals == "1")] = SEX_MALE
-        allowed = "M/F (any case), Male/Female, or 1/2 (1=male, 2=female; PLINK convention)."
-    else:
-        out[female_words | (str_vals == "0")] = SEX_FEMALE
-        out[male_words | (str_vals == "1")] = SEX_MALE
-        allowed = (
-            "M/F (any case), Male/Female, or 0/1 (0=female, 1=male). "
-            "Pass --sex-encoding=plink if your file uses 1=male, 2=female."
-        )
+    out[(upper == "F") | (upper == "FEMALE") | (str_vals == "2")] = SEX_FEMALE
+    out[(upper == "M") | (upper == "MALE") | (str_vals == "1")] = SEX_MALE
 
     bad = (out == SEX_UNKNOWN) & ~missing_mask
     if bad.any():
@@ -156,7 +89,16 @@ def _decode_sex(
         raise PedigreeError(
             f"sex column has {int(bad.sum())} invalid value(s); "
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
-            f"Allowed: {allowed}",
+            "Allowed: M/F (any case), Male/Female, or PLINK 1=male, 2=female, 0=unknown."
+        )
+    # Files pedsum wrote before 0.15.0 coded 0=female, 1=male, which reads
+    # here as unknown and male.
+    if (str_vals == "0").any() and not (str_vals == "2").any():
+        logger.warning(
+            "sex column has '0' tokens and no '2': pedsum reads 0 as unknown "
+            "(PLINK: 1=male, 2=female, 0=unknown). Recode a file that uses "
+            "0=female, 1=male, including validate and summarize output from "
+            "pedsum before 0.15.0.",
         )
     # Surface the literal tokens that mapped to each sex (case preserved) so
     # collaborators can verify sex was handled correctly without re-reading
@@ -164,14 +106,21 @@ def _decode_sex(
     tokens_female = sorted(set(str_vals[out == SEX_FEMALE].tolist()))
     tokens_male = sorted(set(str_vals[out == SEX_MALE].tolist()))
     logger.info(
-        "sex parsed: encoding=%s, female={%s} (n=%d), male={%s} (n=%d), unknown=%d",
-        resolved,
+        "sex parsed: female={%s} (n=%d), male={%s} (n=%d), unknown=%d",
         ", ".join(tokens_female),
         int((out == SEX_FEMALE).sum()),
         ", ".join(tokens_male),
         int((out == SEX_MALE).sum()),
         int((out == SEX_UNKNOWN).sum()),
     )
+    return out
+
+
+def plink_sex(sex: np.ndarray) -> np.ndarray:
+    """Internal sex codes as pedsum writes them, PLINK's 1=male, 2=female, 0=unknown."""
+    out = np.zeros(len(sex), dtype=np.int8)
+    out[sex == SEX_MALE] = 1
+    out[sex == SEX_FEMALE] = 2
     return out
 
 

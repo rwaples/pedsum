@@ -89,9 +89,9 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
     assert by_id[5] == "imputed_from_missing"
     assert by_id[6] == "imputed_from_role"
     assert by_id[8] == "unresolved"
-    # Row 6 in the fixed file has its sex overridden to 0 (female).
+    # Row 6 in the fixed file has its sex overridden to female (PLINK 2).
     row6 = fixed.filter(pl.col("id").cast(pl.Int64) == 6).row(0, named=True)
-    assert row6["sex"] == "0"
+    assert row6["sex"] == "2"
 
 
 def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
@@ -141,21 +141,21 @@ def test_override_count_in_grouped_summary(tmp_path):
     assert "1 overridden from role" in lines[0]
 
 
-# Sex tokens per input encoding: (female, male, unknown).
+# Sex tokens per input style: (female, male, unknown).
 _SEX_TOKENS = {
     "words": ("F", "M", ""),
-    "default": ("0", "1", "-1"),
     "plink": ("2", "1", "0"),
+    "plink_minus_one": ("2", "1", "-1"),
 }
 
 
 @pytest.mark.parametrize("encoding", sorted(_SEX_TOKENS))
 def test_validate_tsv_writes_one_sex_encoding(tmp_path, encoding):
-    """validate.tsv.gz writes every row's sex as 0=female, 1=male, -1=unknown.
+    """validate.tsv.gz writes every row's sex in PLINK coding: 1=male, 2=female, 0=unknown.
 
     Rows kept from the input, imputed rows, unresolved rows and added founders
     share the one encoding, whatever the input used, so a reader that infers
-    types sees an integer column (issue #11).
+    types sees an integer column (issues #11, #12).
     """
     f, m, u = _SEX_TOKENS[encoding]
     ped = _write_ped(
@@ -178,11 +178,11 @@ def test_validate_tsv_writes_one_sex_encoding(tmp_path, encoding):
         fixed = pl.read_csv(fh.read(), separator="\t")
     assert fixed["sex"].dtype.is_integer()
     by_id = dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True))
-    assert by_id == {1: 1, 2: 0, 5: 0, 6: 1, 8: -1, 3: 1, 7: 0, 9: 0, 100: 0}
+    assert by_id == {1: 1, 2: 2, 5: 2, 6: 1, 8: 0, 3: 1, 7: 2, 9: 2, 100: 2}
 
 
 def test_drop_offending_self_verifies_plink_input(tmp_path):
-    """--drop-offending re-reads its 0/1 output as 0/1 even under --sex-encoding plink."""
+    """--drop-offending re-reads its PLINK-coded output and self-verifies on a PLINK input."""
     ped = _write_ped(
         tmp_path / "ped.tsv",
         [
@@ -194,9 +194,9 @@ def test_drop_offending_self_verifies_plink_input(tmp_path):
         ],
     )
     out_dir = tmp_path / "out"
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--sex-encoding", "plink", "--drop-offending"])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--drop-offending"])
     assert r.returncode == 1, r.stderr  # exit 1 because something was dropped
     assert "self-verify failed" not in r.stderr
     with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
         fixed = pl.read_csv(fh.read(), separator="\t")
-    assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 0, 2: 1, 4: 0, 5: 1}
+    assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 2, 2: 1, 4: 2, 5: 1}

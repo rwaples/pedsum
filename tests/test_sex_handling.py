@@ -12,98 +12,60 @@ from conftest import write_ped as _write_ped
 import pedigree_summary as ps
 
 # ---------------------------------------------------------------------------
-# Auto-detection
+# Decoding: words and PLINK's 1=male, 2=female, 0=unknown
 # ---------------------------------------------------------------------------
 
 
-def test_auto_detect_default_encoding(caplog):
-    """0/1 sex column resolves to default encoding, no WARNING."""
-    s = pl.Series(["0", "1", "0", "1"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [ps.SEX_FEMALE, ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_MALE]
-    assert any("default" in r.message for r in caplog.records if r.levelno == logging.INFO)
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_auto_detect_plink_encoding(caplog):
-    """1/2 sex column resolves to plink encoding, no WARNING."""
-    s = pl.Series(["1", "2", "1", "2"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_MALE, ps.SEX_FEMALE]
-    assert any("plink" in r.message for r in caplog.records if r.levelno == logging.INFO)
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_auto_detect_plink_with_zero_unknown(caplog):
-    """PLINK fam with sex={0,1,2} resolves to plink; 0 becomes sentinel."""
+def test_decode_plink_numeric_codes():
+    """1/2/0 decode as male/female/unknown with no WARNING when a 2 is present."""
     s = pl.Series(["0", "1", "2", "0"])
-    with caplog.at_level(logging.INFO, logger="pedigree_summary"):
-        out = ps._decode_sex(s, encoding="auto")
+    out = ps._decode_sex(s)
     assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_UNKNOWN]
 
 
-def test_auto_detect_zero_as_missing_flips_to_plink():
-    """0 tokens + zero_as_missing flips encoding to plink."""
-    s = pl.Series(["0", "1", "0", "1"])
-    out = ps._decode_sex(s, encoding="auto", zero_as_missing=True)
-    # under plink, 0 is missing, 1 is male
-    assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_UNKNOWN, ps.SEX_MALE]
-
-
-def test_auto_detect_ambiguous_only_ones_warns(caplog):
-    """Sex column with only '1' tokens triggers a WARNING."""
+def test_decode_only_ones_reads_plink_without_warning(caplog):
+    """A column of 1s is all male, with no WARNING: there is one numeric coding."""
     s = pl.Series(["1", "1", "1", "1"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        ps._decode_sex(s, encoding="auto")
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert warnings, "expected a WARNING for ambiguous only-1 column"
-    assert "1" in warnings[0].message
-
-
-def test_auto_detect_words_only_no_warning(caplog):
-    """Word-only sex columns produce NO WARNING (encoding is moot)."""
-    s = pl.Series(["M", "F", "Male", "Female"])
-    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        ps._decode_sex(s, encoding="auto")
+        out = ps._decode_sex(s)
+    assert (out == ps.SEX_MALE).all()
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
-def test_plink_sex_flag_alias_via_cli(tmp_path):
-    """--plink-sex sets sex_encoding=plink without explicit --sex-encoding."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "1", "mother": -1, "father": -1},
-            {"id": 2, "sex": "2", "mother": -1, "father": -1},
-            {"id": 3, "sex": "1", "mother": 2, "father": 1},
-        ],
-    )
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--plink-sex"])
-    assert r.returncode == 0, r.stderr
+def test_decode_zero_without_two_warns(caplog):
+    """0s with no 2 look like the retired 0=female coding: decode 0 as unknown and warn."""
+    s = pl.Series(["0", "1", "0", "1"])
+    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
+        out = ps._decode_sex(s)
+    assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_UNKNOWN, ps.SEX_MALE]
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "0=female, 1=male" in warnings[0]
+
+
+def test_decode_words_only_no_warning(caplog):
+    """Word-only sex columns produce NO WARNING."""
+    s = pl.Series(["M", "F", "Male", "Female"])
+    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
+        ps._decode_sex(s)
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.parametrize("flag", [["--plink-sex"], ["--sex-encoding", "plink"], ["--sex-encoding=default"]])
+def test_removed_sex_encoding_flags_exit_2(tmp_path, flag):
+    """--plink-sex and --sex-encoding exit 2 and name the one coding pedsum reads."""
+    ped = _write_ped(tmp_path / "p.tsv", [{"id": 1, "sex": "1", "mother": -1, "father": -1}])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), *flag])
+    assert r.returncode == 2
+    assert "removed in 0.15.0" in r.stderr
+    assert "1=male, 2=female, 0=unknown" in r.stderr
 
 
 def test_sex_missing_tokens_recognized():
-    """Empty / NA / -1 / U / Unknown all decode to SEX_UNKNOWN."""
-    s = pl.Series(["M", "F", "", "NA", "-1", "U", "Unknown"])
-    out = ps._decode_sex(s, encoding="auto")
-    assert out.tolist() == [
-        ps.SEX_MALE,
-        ps.SEX_FEMALE,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-        ps.SEX_UNKNOWN,
-    ]
-
-
-def test_unknown_encoding_raises():
-    """Passing an unknown encoding string is a clean error."""
-    s = pl.Series(["M", "F"])
-    with pytest.raises(ps.PedigreeError, match="unknown sex encoding"):
-        ps._decode_sex(s, encoding="bogus")
+    """Empty / NA / -1 / 0 / U / Unknown all decode to SEX_UNKNOWN."""
+    s = pl.Series(["M", "F", "", "NA", "-1", "0", "U", "Unknown"])
+    out = ps._decode_sex(s)
+    assert out.tolist() == [ps.SEX_MALE, ps.SEX_FEMALE, *[ps.SEX_UNKNOWN] * 6]
 
 
 # ---------------------------------------------------------------------------

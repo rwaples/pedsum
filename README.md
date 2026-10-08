@@ -96,11 +96,10 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
 - Sex imputed from parent role (F if used as a mother, M if used as
   a father) for any row whose original sex was missing.
-- The sex column written in one encoding, `0` = female, `1` = male,
-  `-1` = unknown, whatever encoding the input used. `sex_source` says
+- The sex column written in PLINK's coding, `1` = male, `2` = female,
+  `0` = unknown, whatever tokens the input used. `sex_source` says
   where each row's sex came from: `input`, `imputed_from_missing`,
-  `imputed_from_role` or `unresolved`. To re-run pedsum on the file,
-  leave `--sex-encoding` at `auto` or set it to `default`.
+  `imputed_from_role` or `unresolved`.
 - Rows reordered so parents always precede children (topological
   order), if the input was not already ordered.
 
@@ -200,17 +199,11 @@ Flags:
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
   **Not a safe-harbor guarantee** — review before sharing.
-- `--sex-encoding {auto,default,plink}` — how to decode the sex
-  column. `auto` (default) detects from the observed tokens; `default`
-  forces `0 = female, 1 = male` (pedsum convention); `plink` forces
-  `1 = male, 2 = female` with `0 = unknown` (PLINK fam spec). See
-  "Sex auto-detection" below.
-- `--plink-sex` — legacy alias for `--sex-encoding=plink`.
 - `--allow-missing-sex` — tolerate rows whose sex is missing after
   imputation, either because the row is unsexed and not used as a
   parent (orphan), or because it is used as BOTH mother and father
   with unknown sex (role-ambiguous). Such rows are auto-fixed to
-  `sex=-1` in the validate-fixed output. Without this flag, either
+  `sex=0` (unknown) in the validate-fixed output. Without this flag, either
   case hard-blocks. `summarize` runs normally on such rows, F included.
   `effective-size` refuses them only when `ne_sex_ratio`,
   `ne_variance_family_size` or `ne_hill_overlapping` is selected, since
@@ -467,7 +460,7 @@ Flags:
   `reference_column`; the other seven estimators are unchanged. Its
   `ne_unrelated_founders` field divides by `t − 1` and is the value purgeR
   (`pop_Ne`) reports.
-- The column, `--sep`, `--sex-encoding`, `--threads` and `--max-memory`
+- The column, `--sep`, `--threads` and `--max-memory`
   flags work as in `summarize`.
 
 Examples:
@@ -565,7 +558,7 @@ id	sex	mother	father
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int ≥ 0, unique | **Strings (e.g. `"P001"`) are not accepted** — see "Preparing your data" below. |
-| `sex` | `M`/`F`/`Male`/`Female` (any case) or numeric token | Numeric meaning depends on the resolved encoding (see "Sex auto-detection" below); default pedsum is `0 = female, 1 = male`, PLINK is `1 = male, 2 = female` with `0 = unknown`. Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
+| `sex` | `M`/`F`/`Male`/`Female` (any case) or PLINK's `1`/`2`/`0` | `1 = male, 2 = female, 0 = unknown` (see "Sex coding" below). Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
 | `mother` | int parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
 | `father` | int parent ID or missing | Same conventions as `mother`. |
 
@@ -590,19 +583,16 @@ processing. `validate` writes the sorted pedigree to
 in-memory. Only cycles or rows that cannot be reached from any root
 raise a `PedigreeError` (hard block) — fix the source data first.
 
-### Sex auto-detection
+### Sex coding
 
-`--sex-encoding=auto` (the default) picks an encoding from the tokens
-in the sex column:
+pedsum reads and writes PLINK's numeric sex coding, `1` = male,
+`2` = female, `0` = unknown, and also reads `M`/`F`/`Male`/`Female` in
+any case. `validate.tsv.gz` and `annotated.tsv.gz` write `1`/`2`/`0`.
+Any other number is an error. A column with `0` tokens and no `2`
+gets a WARNING: it is likely coded `0` = female, `1` = male, the
+coding pedsum wrote before 0.15.0, and must be recoded first.
 
-| Tokens seen | Resolved encoding |
-|---|---|
-| any `2` | `plink` (1=M, 2=F, 0=unknown) |
-| any `0` | `default` (0=F, 1=M) |
-| only `M`/`F`/`Male`/`Female` | `default` (encoding choice is moot) |
-| only `1` tokens | `default` + WARNING — pass `--sex-encoding=plink` if the file is actually PLINK-encoded |
-
-Missing-sex tokens decode to a sentinel `-1`. pedsum then imputes
+Missing-sex tokens, and `0`, decode to unknown. pedsum then imputes
 from parent role: F if used as mother, M if used as father. Two
 cases hard-block unless `--allow-missing-sex` is set — an individual
 used as BOTH mother and father (pedsum cannot pick a side), and an
@@ -626,8 +616,7 @@ header and remap `0 → -1`:
 
 python pedigree_summary.py summarize \
     --in cohort.fam.headed --out cohort/ \
-    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX \
-    --plink-sex
+    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX
 ```
 
 ### Non-TSV inputs (CSV, Excel)
@@ -747,7 +736,8 @@ Exit codes:
 | Error | Likely cause | Fix |
 |---|---|---|
 | `column 'id' must be integer-valued` | string/alphanumeric IDs | map to ints |
-| `sex column has N invalid value(s)` showing `'2'` | PLINK 1/2 encoding | add `--plink-sex` |
+| `sex column has N invalid value(s)` | a numeric coding other than PLINK's 1=male, 2=female, 0=unknown | recode the sex column to PLINK or `M`/`F` |
+| WARNING `sex column has '0' tokens and no '2'` | a `0` = female, `1` = male column, such as pedsum output before 0.15.0 | recode `0` → `2` |
 | `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
 | `column 'mother' must be integer-valued` showing `NA` or non-finite | non-standard missing token | replace with `-1`, `NA`, blank, or `.` |
 | `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |

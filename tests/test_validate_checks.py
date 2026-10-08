@@ -86,7 +86,7 @@ def test_validate_sex_role_ambiguity_is_hard_block_without_flag(tmp_path):
 
 
 def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
-    """--allow-missing-sex lets ambiguity through; fixed TSV writes sex=-1 for the row."""
+    """--allow-missing-sex lets ambiguity through; fixed TSV writes sex=0 (unknown) for the row."""
     import gzip
 
     ped = _ambig_pedigree(tmp_path / "p.tsv")
@@ -110,7 +110,7 @@ def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
     with gzip.open(fixed, "rb") as fh:
         df = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     row = df.filter(pl.col("id").cast(pl.Int64) == 7).row(0, named=True)
-    assert row["sex"] == "-1"
+    assert row["sex"] == "0"
     # validate.log should NOT contain a row for the tolerated ambiguous id.
     log = (tmp_path / "out" / "validate.log").read_text()
     assert "sex_role_ambiguity" not in log
@@ -173,8 +173,8 @@ def test_parent_refs_sex_conflict_log_pins_rows(tmp_path):
     assert "father (row(s) [3])" in detail
 
 
-def test_orphan_unsexed_writes_minus_one_in_fixed_tsv(tmp_path):
-    """Orphan-only pedigree (n_imputed==0) + --allow-missing-sex: orphan sex normalised to -1."""
+def test_orphan_unsexed_writes_unknown_in_fixed_tsv(tmp_path):
+    """Orphan-only pedigree (n_imputed==0) + --allow-missing-sex: orphan sex normalised to 0 (unknown)."""
     import gzip
 
     ped = _write_ped(
@@ -202,7 +202,7 @@ def test_orphan_unsexed_writes_minus_one_in_fixed_tsv(tmp_path):
     with gzip.open(fixed, "rb") as fh:
         df = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     row = df.filter(pl.col("id").cast(pl.Int64) == 3).row(0, named=True)
-    assert row["sex"] == "-1"
+    assert row["sex"] == "0"
 
 
 def test_validate_summary_uses_grouped_layout(tmp_path):
@@ -249,4 +249,4 @@ def test_validate_writes_imputed_sex_in_fixed_output(tmp_path):
     with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rb") as fh:
         fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     row2 = fixed.filter(pl.col("id").cast(pl.Int64) == 2).row(0, named=True)
-    assert row2["sex"] == "0"
+    assert row2["sex"] == "2"

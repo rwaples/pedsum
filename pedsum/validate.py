@@ -210,7 +210,6 @@ class ValidationContext:
     mother_col: str
     father_col: str
     birth_year_col: str | None
-    sex_encoding: str
     zero_as_missing: bool
     allow_missing_sex: bool
     override_asserted_sex: bool
@@ -346,7 +345,7 @@ def _ck_father_dtype(ctx: ValidationContext) -> CheckOutcome:
 def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
     ctx.sex, fail = _try_parse(
         "sex_tokens",
-        lambda: _decode_sex(ctx.df_raw[ctx.sex_col], encoding=ctx.sex_encoding, zero_as_missing=ctx.zero_as_missing),
+        lambda: _decode_sex(ctx.df_raw[ctx.sex_col]),
     )
     return fail or _PASS
 
@@ -726,7 +725,6 @@ def _build_context_from_df(
     sex_col: str,
     mother_col: str,
     father_col: str,
-    sex_encoding: str,
     zero_as_missing: bool,
     allow_missing_sex: bool,
     override_asserted_sex: bool,
@@ -750,7 +748,6 @@ def _build_context_from_df(
         mother_col=mother_col,
         father_col=father_col,
         birth_year_col=birth_year_col,
-        sex_encoding=sex_encoding,
         zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
@@ -768,7 +765,6 @@ def _build_context(
     sex_col: str,
     mother_col: str,
     father_col: str,
-    sex_encoding: str,
     zero_as_missing: bool,
     allow_missing_sex: bool,
     override_asserted_sex: bool,
@@ -792,7 +788,6 @@ def _build_context(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        sex_encoding=sex_encoding,
         zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
@@ -815,7 +810,6 @@ def load_and_validate(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    sex_encoding: str = "auto",
     zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
     override_asserted_sex: bool = True,
@@ -843,7 +837,6 @@ def load_and_validate(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        sex_encoding=sex_encoding,
         zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
@@ -905,7 +898,6 @@ def validate_pedigree(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    sex_encoding: str = "auto",
     zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
     override_asserted_sex: bool = True,
@@ -928,7 +920,6 @@ def validate_pedigree(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        sex_encoding=sex_encoding,
         zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,

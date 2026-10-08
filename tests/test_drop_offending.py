@@ -134,7 +134,7 @@ def test_drop_composes_with_allow_missing_sex(tmp_path):
         [
             {"id": 1, "sex": "F", "mother": -1, "father": -1},
             {"id": 2, "sex": "M", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": -1, "father": -1},  # orphan unsexed: tolerated, kept as -1
+            {"id": 3, "sex": "", "mother": -1, "father": -1},  # orphan unsexed: tolerated, kept as unknown
             {"id": 5, "sex": "F", "mother": -1, "father": -1},  # both-role offender
             {"id": 6, "sex": "F", "mother": 5, "father": 2},  # 5 used as mother
             {"id": 7, "sex": "M", "mother": 1, "father": 5},  # ...and father
@@ -146,10 +146,10 @@ def test_drop_composes_with_allow_missing_sex(tmp_path):
     dropped = set(_read_manifest(out)["id"])
     assert 5 in dropped  # offender dropped
     assert 3 not in dropped  # tolerated orphan kept
-    # The reduced output keeps id 3 as -1; that it re-validated clean during
+    # The reduced output keeps id 3 as unknown (0); that it re-validated clean during
     # self-verify proves the verify ran under --allow-missing-sex (plain
     # validate would FAIL on the unresolved-sex row).
-    assert load_validate_tsv_gz(out).filter(pl.col("id") == "3")["sex"][0] == "-1"
+    assert load_validate_tsv_gz(out).filter(pl.col("id") == "3")["sex"][0] == "0"
 
 
 def test_drop_no_sex_check_does_not_drop_missing_parent_conflict(tmp_path):

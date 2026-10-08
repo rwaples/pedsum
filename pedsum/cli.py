@@ -34,7 +34,7 @@ from pedsum.epimight import (
 )
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
-from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, read_reference_mask
+from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, plink_sex, read_reference_mask
 from pedsum.pedigree_ops import _group_mating_pairs
 from pedsum.progress import relationship_progress
 from pedsum.report import (
@@ -121,6 +121,24 @@ class _RemovedForEffectiveSize(argparse.Action):
         )
 
 
+class _RemovedSexEncoding(argparse.Action):
+    """Exit 2 on a sex-encoding flag that 0.15.0 removed when PLINK coding became the only numeric one."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> NoReturn:
+        """Name the flag and the one coding pedsum now reads."""
+        parser.exit(
+            2,
+            f"{option_string} was removed in 0.15.0; pedsum reads sex as M/F, Male/Female, or PLINK's "
+            "1=male, 2=female, 0=unknown. Recode a 0=female, 1=male column first.\n",
+        )
+
+
 def _add_logging_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group()
     g.add_argument(
@@ -173,21 +191,8 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
         "whitespace (PLINK fam-style) when none are present. Pass an "
         "explicit choice to opt out of sniffing.",
     )
-    p.add_argument(
-        "--sex-encoding",
-        choices=("auto", "default", "plink"),
-        default="auto",
-        help="how to decode the sex column: 'default' = 0=female, 1=male "
-        "(pedsum default); 'plink' = 1=male, 2=female, 0=unknown (PLINK fam "
-        "convention); 'auto' (default) detects from the observed tokens.",
-    )
-    p.add_argument(
-        "--plink-sex",
-        action="store_const",
-        dest="sex_encoding",
-        const="plink",
-        help="legacy alias for --sex-encoding=plink (PLINK convention: 1=male, 2=female)",
-    )
+    p.add_argument("--sex-encoding", action=_RemovedSexEncoding, nargs="?", help=argparse.SUPPRESS)
+    p.add_argument("--plink-sex", action=_RemovedSexEncoding, nargs=0, help=argparse.SUPPRESS)
     p.add_argument(
         "--allow-missing-sex",
         action="store_true",
@@ -238,7 +243,7 @@ def _add_input_args(p: argparse.ArgumentParser, *, out_help: str, birth_year_hel
         default="sex",
         metavar="NAME",
         help="column name for sex; accepts M/F (any case), Male/Female, or "
-        "0/1 (default: %(default)s; 0=female, 1=male). See --plink-sex.",
+        "PLINK's 1=male, 2=female, 0=unknown (default: %(default)s).",
     )
     p.add_argument(
         "--mother-col",
@@ -780,7 +785,6 @@ def _validation_kwargs(args: argparse.Namespace) -> dict:
         "sex_col": args.sex_col,
         "mother_col": args.mother_col,
         "father_col": args.father_col,
-        "sex_encoding": args.sex_encoding,
         "zero_as_missing": False,
         "allow_missing_sex": args.allow_missing_sex,
         "override_asserted_sex": not args.no_override_asserted_sex,
@@ -1154,20 +1158,20 @@ def _write_fixed_pedigree(
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
         added_founders = _build_added_founders(ctx.mothers, ctx.fathers, ctx.id_index, args.no_sex_check)
         # Write every row's resolved sex (after imputation and role overrides)
-        # in pedsum's canonical encoding, 0=female, 1=male, -1=unknown,
-        # whatever encoding the input used, so the column holds one encoding.
-        # sex_source records which rows pedsum changed.
+        # in PLINK's coding, 1=male, 2=female, 0=unknown, whatever tokens the
+        # input used, so the column holds one encoding. sex_source records
+        # which rows pedsum changed.
         sex_imp = ctx.get_imputation()
         if sex_imp is not None:
             if sex_imp.n_imputed > 0:
                 logger.info("validate: imputed sex for %d row(s) from parent role", int(sex_imp.n_imputed))
             n_unresolved = int((sex_imp.imputed_sex == SEX_UNKNOWN).sum())
             if n_unresolved > 0:
-                logger.info("validate: wrote %d unresolved-sex row(s) as -1 in fixed output", n_unresolved)
+                logger.info("validate: wrote %d unresolved-sex row(s) as 0 in fixed output", n_unresolved)
             # Stamp sex and sex_source BEFORE the topological reorder so they
             # are reordered along with the rest.
             df_out = df_out.with_columns(
-                pl.Series(args.sex_col, sex_imp.imputed_sex).cast(pl.String),
+                pl.Series(args.sex_col, plink_sex(sex_imp.imputed_sex)).cast(pl.String),
                 pl.Series("sex_source", sex_imp.sex_source.astype(str)),
             )
         if args.fill_half_founders:
@@ -1239,12 +1243,11 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
     _write_fixed_pedigree(result.ctx_final, args, out_dir, next_id=_next_free_id(*ctx.require_id_parents()))
 
     # Self-verify the written artifact passes under the invoked flags. The
-    # output is always tab-separated regardless of the input --sep, so sniff it,
-    # and always writes sex as 0=female, 1=male whatever the input encoding.
+    # output is always tab-separated regardless of the input --sep, so sniff it.
     out_path = out_dir / "validate.tsv.gz"
     _n, vresults, _vf, _vctx = validate_pedigree(
         out_path,
-        **{**_validation_kwargs(args), "sep": "auto", "sex_encoding": "default"},  # ty: ignore[invalid-argument-type]
+        **{**_validation_kwargs(args), "sep": "auto"},  # ty: ignore[invalid-argument-type]
     )
     failed = sorted(r.name for r in vresults if r.status == "FAIL")
     if failed:

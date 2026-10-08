@@ -16,7 +16,7 @@ import polars as pl
 import yaml
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, VERSION, PedigreeError, logger
-from pedsum.parse import _as_int_col, _read_pedigree_table
+from pedsum.parse import _as_int_col, _read_pedigree_table, plink_sex
 from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
@@ -643,8 +643,8 @@ def _write_annotated_tsv(
     """Re-read input pedigree, append derived columns, write annotated tsv.gz.
 
     Output preserves input columns under canonical names (id/sex/mother/
-    father; user-supplied names are renamed). Sex is the validated int
-    encoding (0=female, 1=male). All derived per-individual columns are
+    father; user-supplied names are renamed). Sex is the resolved sex in
+    PLINK's coding (1=male, 2=female, 0=unknown). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
     raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"))
@@ -695,6 +695,7 @@ def _write_annotated_tsv(
             [new_names[c] for c in user_collisions],
         )
 
+    idf = idf.with_columns(pl.Series("sex", plink_sex(idf["sex"].to_numpy())))
     annotated = pl.concat([idf, extras], how="horizontal", strict=True)
     _to_csv_gz(annotated, out_path)
 
@@ -871,7 +872,7 @@ def _write_validate_tsv_gz(
         # fields; polars quotes explicit empty strings as "".
         data: dict[str, list[str | None]] = {col: [None] * n_new for col in df_raw.columns}
         data[id_col] = [str(f["id"]) for f in added_founders]
-        data[sex_col] = [str(f["sex"]) for f in added_founders]
+        data[sex_col] = plink_sex(np.array([f["sex"] for f in added_founders], dtype=np.int8)).astype(str).tolist()
         data[mother_col] = ["-1"] * n_new
         data[father_col] = ["-1"] * n_new
         new_rows = pl.DataFrame(data, schema=dict.fromkeys(df_raw.columns, pl.String))

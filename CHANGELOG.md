@@ -22,6 +22,10 @@ whole command.
 - **`--effective-size`, `--no-effective-size` and `--ne-coancestry` exit
   2** on `summarize`, with a message naming `pedsum effective-size`. There
   is no deprecation release, as in ADR 0001.
+- **`--sex-encoding` and `--plink-sex` exit 2** on every command
+  ([#12](https://github.com/rwaples/pedsum/issues/12)): PLINK's coding is
+  the only numeric one left, so there is nothing to choose
+  ([ADR 0001](docs/adr/0001-collaborator-cli-redesign.md), 0.15 follow-up).
 
 ### Added
 
@@ -124,16 +128,21 @@ whole command.
   graph build, so an int64 overflow (reached by depth 59 on those
   pedigrees) exits 1 with one error line instead of a traceback after the
   F phase. README "Deep pedigrees" gives the measurements.
-- **`validate.tsv.gz` writes sex as `0` = female, `1` = male, `-1` =
-  unknown on every row** ([#11](https://github.com/rwaples/pedsum/issues/11)).
-  Before, only the rows pedsum changed were rewritten, to `M`, `F` or
-  `-1`, and every other row kept its input token, so a `0`/`1` or PLINK
-  `1`/`2` input came out with two encodings in one column and broke type
-  inference in other readers. Synthesized founders now get `0`/`1` instead
-  of `F`/`M`. `sex_source` still records which rows pedsum changed.
-  `--drop-offending` re-reads the file as `0`/`1` whatever
-  `--sex-encoding` was given. To re-run pedsum on the file, leave
-  `--sex-encoding` at `auto` or set it to `default`, not `plink`.
+- **pedsum reads and writes sex in PLINK's coding: `1` = male, `2` =
+  female, `0` = unknown** ([#12](https://github.com/rwaples/pedsum/issues/12)).
+  The `0` = female, `1` = male coding is gone, for input and output.
+  `M`/`F`/`Male`/`Female` and the missing tokens still read as before; any
+  other number is an error. `annotated.tsv.gz` writes `1`/`2`/`0` where it
+  wrote `1`/`0`/`-1`. A file pedsum wrote before 0.15.0 now reads its
+  females as unknown: recode `0` → `2` first. A sex column with `0` tokens
+  and no `2` gets a WARNING saying so.
+- **`validate.tsv.gz` writes every row's sex as `1`/`2`/`0`**
+  ([#11](https://github.com/rwaples/pedsum/issues/11)). Before, only the
+  rows pedsum changed were rewritten, to `M`, `F` or `-1`, and every other
+  row kept its input token, so a `0`/`1` or PLINK `1`/`2` input came out
+  with two encodings in one column and broke type inference in other
+  readers. Synthesized founders now get `2`/`1` instead of `F`/`M`.
+  `sex_source` still records which rows pedsum changed.
 
 ### Fixed
 

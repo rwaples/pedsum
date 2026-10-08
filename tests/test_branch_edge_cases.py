@@ -11,7 +11,7 @@ import pytest
 from conftest import parent_rows
 from relationship_summary_oracle import compute_relationship_summary
 
-from pedsum.base import PedigreeError
+from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError
 from pedsum.checks import (
     Finding,
     _check_birth_year_topology,
@@ -71,14 +71,12 @@ class TestParseEdgeCases:
         assert _format_id_sample(np.array([], dtype=np.int64)) == ""
         assert _format_id_sample(np.arange(10), k=3) == "5, 6, 9"
 
-    def test_decode_sex_explicit_default_plink_and_bad_encoding(self) -> None:
-        """Explicit sex encodings and invalid encoding names are handled distinctly."""
-        default = _decode_sex(pl.Series(["0", "1", ""], dtype=pl.String), encoding="default")
-        plink = _decode_sex(pl.Series(["2", "1", "0"], dtype=pl.String), encoding="plink")
-        np.testing.assert_array_equal(default, np.array([0, 1, -1], dtype=np.int8))
-        np.testing.assert_array_equal(plink, np.array([0, 1, -1], dtype=np.int8))
-        with pytest.raises(PedigreeError, match="unknown sex encoding"):
-            _decode_sex(pl.Series(["F"], dtype=pl.String), encoding="mystery")
+    def test_decode_sex_reads_plink_and_rejects_other_numbers(self) -> None:
+        """1/2/0 decode as PLINK and -1 as unknown; any other number is an error."""
+        plink = _decode_sex(pl.Series(["2", "1", "0", "-1"], dtype=pl.String))
+        np.testing.assert_array_equal(plink, np.array([0, 1, -1, -1], dtype=np.int8))
+        with pytest.raises(PedigreeError, match="PLINK 1=male, 2=female, 0=unknown"):
+            _decode_sex(pl.Series(["F", "3"], dtype=pl.String))
 
     def test_maybe_warn_csv_allows_normal_input_and_rejects_csv_shape(self) -> None:
         """The friendly CSV warning distinguishes split tables from one-column CSV-looking input."""
@@ -433,7 +431,7 @@ class TestReportEdgeCases:
         out = tmp_path / "validate.tsv.gz"
         _write_validate_tsv_gz(
             df_raw,
-            [{"id": 1, "sex": "F"}, {"id": 2, "sex": "M"}],
+            [{"id": 1, "sex": SEX_FEMALE}, {"id": 2, "sex": SEX_MALE}],
             "id",
             "sex",
             "mother",
@@ -444,6 +442,7 @@ class TestReportEdgeCases:
             fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
         assert fixed["id"].to_list() == ["1", "2", "3"]
         assert fixed["mother"].to_list() == ["-1", "-1", "1"]
+        assert fixed["sex"].to_list() == ["2", "1", "M"]  # founders in PLINK coding
 
     def test_write_annotated_tsv_detects_true_row_mismatch(self, tmp_path) -> None:
         """Annotated TSV writing raises when the input rows cannot realign to the individual table."""
