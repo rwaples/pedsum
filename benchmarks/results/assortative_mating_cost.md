@@ -1,5 +1,9 @@
 # assortative-mating cost (phase 5 draft; phase 6 finalises)
 
+These measurements are of pedsum#13's own numba implementation, before the
+computation moved to pg-phenotype. The CLI on pg-phenotype against that
+implementation is in [assortative_mating_cutover.md](assortative_mating_cutover.md).
+
 Config (b): `--trait liab dx --stratify-by birth_year --birth-year-col birth_year --threads 12`, default
 inference (sandwich CI, 999 score-statistic permutations, no bootstrap). Inputs from
 `benchmarks/generate_assortative_mating.py --pairs N --seed 0` (2.76 rows per pair; 8 birth-decade strata,
