@@ -85,7 +85,10 @@ whole command.
 - **`pedsum assortative-mating`** writes `assortative_mating.yaml`: the
   **Mate Correlation** of one or two `--trait` columns over Mating Pairs,
   with rows the mother's trait and columns the father's
-  ([#13](https://github.com/rwaples/pedsum/issues/13)). It types each
+  ([#13](https://github.com/rwaples/pedsum/issues/13)). pedsum types
+  the traits, assigns strata and writes the YAML; pg-phenotype's
+  `mate_correlation`, the method designed here and ported, computes the
+  estimates and their inference. It types each
   trait as continuous, binary or ordinal (`--trait-type`,
   `--trait-missing`) and reports, by trait types, Pearson and Spearman;
   tetrachoric with the 2×2 table, odds ratio and phi; polychoric;
@@ -106,11 +109,12 @@ whole command.
   strata that span fewer than `--min-stratum-networks` Mate Networks.
   Two traits add the Within-Person Cross-Trait Correlation. On the
   benchmark workstation, two traits with remating and stratification took
-  11.48 s at 10^6 Mating Pairs (median of 8) and 168.3 s and 8.1 GiB peak at 10^7 (one
-  run); README "Cost" has the table.
-- **`assortative-mating --threads`** drives the numba kernels and
+  15.9 s and 1,014 MiB at 10^6 Mating Pairs with 6 threads (median of 10);
+  README "Cost" has the table.
+- **`assortative-mating --threads`** sets pg-phenotype's threads and
   defaults to the physical cores the process may run on, SMT siblings
-  counted once (`settings.threads` records the count); the
+  counted once, capped by `NUMBA_NUM_THREADS` (`settings.threads`
+  records the count); the
   pedigree-graph budget keeps its default of 1 unless `--threads` is
   given. Results are identical under any value.
 - **`assortative-mating --seed`** keys every permutation and bootstrap
@@ -118,8 +122,8 @@ whole command.
   the draw number, with separate streams for permutations and the
   bootstrap. A draw is the same whichever thread runs it, so the same
   input and seed give the same YAML (apart from `generated_at`) under any
-  `--threads`. The streams are pedsum's own, not NumPy's, so a seed does
-  not reproduce the draws of NumPy-based code. The seed is any integer
+  `--threads`. The streams are pg-phenotype's own, not NumPy's, so a seed
+  does not reproduce the draws of NumPy-based code. The seed is any integer
   from -2^63 to 2^63-1; outside that range the command exits 2.
 - **`assortative_mating.yaml`** rounds floats to 4 decimal places, or to
   4 significant digits below 0.1, so a small p-value, SE or share is not
@@ -130,11 +134,16 @@ whole command.
 - **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
   needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
   longer run the kinship DP.
-- **Requires numba 0.68** (`>=0.68,<1`), now a hard dependency: the
-  `assortative-mating` kernels are numba-compiled, with one production
-  path and no NumPy fallback. numba 0.68 caps numpy below 2.6. The first
-  run after an install compiles the kernels, about 11 to 12 s on the
-  benchmark workstation; numba caches them on disk for later runs.
+- **Requires pg-phenotype 0.1.1** (`>=0.1.1,<0.2`), which computes
+  `assortative-mating`. Its port reproduces the numbers of pedsum#13's own
+  implementation to the bit, except one: in a sparse stratified
+  polychoric cell whose zero-count corner probability came out as
+  rounding noise, pedsum#13 withheld the SE (`sandwich_undefined`), and
+  pg-phenotype reports it, with the sandwich CI when `--bootstrap` is 0.
+  The function also refuses a constant trait or more than two traits,
+  which the CLI never passes.
+- **Requires numba 0.68** (`>=0.68,<1`), now a hard dependency.
+  numba 0.68 caps numpy below 2.6.
   Offspring Sex Concordance permutations, which used numba only when it
   was importable, now always use it, and their permutation block drops
   the `backend` field, which could only read `numba`. A seed whose
@@ -142,9 +151,8 @@ whole command.
 - **Requires SciPy 1.16.3** (`>=1.16.3,<2`, up from `>=1.14`). SciPy
   1.16.0 to 1.16.2 compute the 2-D `multivariate_normal.cdf` by
   randomized quasi-Monte Carlo; 1.16.3 restored the deterministic path
-  (scipy PR #23815). The test suite checks pedsum's bivariate normal CDF
-  against it to 1e-12. pedsum's own CDF uses Owen's T
-  (`scipy.special.owens_t`) and does not call `multivariate_normal`.
+  (scipy PR #23815). The assortative-mating calibration tests take their
+  analytic truth from it.
   Python 3.14, which pedsum requires, has no SciPy wheels before 1.16.1.
 - **Loading and validating repeat less work.** Validation collects the
   distinct mother and father ids and their rows once (`ParentRefs`) and

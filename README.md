@@ -494,6 +494,15 @@ python pedigree_summary.py assortative-mating --in PED.tsv --out DIR --trait COL
 file, `DIR/assortative_mating.yaml`, with the run metadata and an
 `assortative_mating:` block. It never runs as part of `summarize`.
 
+pedsum reads and types the traits, assigns strata and writes the YAML.
+The estimates and their inference come from
+[pg-phenotype](https://github.com/rwaples/pg-phenotype)'s
+`mate_correlation`, the method pedsum#13 designed, ported unchanged. Its
+[reference](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating.md)
+and [design notes](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating-design.md)
+give the method in full; this section covers what the command reads and
+writes.
+
 The command reports the **Mate Correlation**, the correlation between the
 mother's and the father's values of a trait, one observation per
 **Mating Pair** ([CONTEXT.md](CONTEXT.md) defines both terms). One trait
@@ -565,8 +574,9 @@ a bounded Brent search over that interval takes over, so every fit
 reaches the optimum Brent would. The bivariate normal CDF comes from
 Owen's T function (Owen 1956), and the thresholds from the AS 241 normal
 quantile (Wichura 1988). Each latent record carries `boundary`, which is
-`true` when the fit ends at a bound;
-[DESIGN.md](DESIGN.md#assortative-mating) gives the rule. Means, SDs,
+`true` when the fit ends at a bound; the rule is in pg-phenotype's
+[design notes](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating-design.md)
+(threshold estimators). Means, SDs,
 thresholds and the 2×2 table count each Mating Pair once, so a father
 with three mates counts three times.
 
@@ -690,17 +700,15 @@ draw number, with separate streams for permutations and the bootstrap.
 The stopping rule batches draws by draw count, never by thread count, and
 every parallel sum adds fixed blocks in a fixed order. The same input and
 `--seed` therefore give the same YAML, apart from `generated_at`, under
-any `--threads`. The kernels are compiled by numba the first time they
-run after an install, which took about 11 to 12 s on the benchmark
-machine below. numba caches the compiled kernels on disk
-(`NUMBA_CACHE_DIR` sets where), so later runs skip the compile.
+any `--threads`. pg-phenotype ships compiled, so the first run after an
+install has no compile step.
 
 **Output.** The `assortative_mating:` block holds:
 
 | Field | Contents |
 |---|---|
 | `traits` | per trait: `name`, `type`, `type_source`, `levels` (binary and ordinal), `n_values`, `n_missing` |
-| `settings` | `permutations`, `bootstrap`, `seed`, `threads` (the numba thread count used), `ci_level`, `ci_method`, `stratify_by`, `birth_year_bin`, `min_stratum_networks` (the last two null when unused) |
+| `settings` | `permutations`, `bootstrap`, `seed`, `threads` (the pg-phenotype thread count used), `ci_level`, `ci_method`, `stratify_by`, `birth_year_bin`, `min_stratum_networks` (the last two null when unused) |
 | `inference` | `se_method`, `ci_scale`, `bootstrap_unit`, `bootstrap_assumption`, `bootstrap_method`, `permutation_null`, `permutation_blocks`, `permutation_statistic`, `permutation_stopping` (`besag_clifford_closed`) and `permutation_stop_h` (20), as fixed strings |
 | `mating_pairs` | `n_total`, `n_dropped.unknown_stratum`, `n_mate_networks`, `largest_mate_network_share`, `n_mothers_multiple_mates`, `n_fathers_multiple_mates` |
 | `mate_correlation` | one record per cell, named by its `mother` and `father` trait, in `R_mf` row order |
@@ -780,13 +788,15 @@ Flags:
   CI from N one-step draws.
 - `--seed INT` (default 0) keys every permutation and bootstrap draw.
   It takes any integer from -2^63 to 2^63-1.
-- `--threads N` sets the threads of the numba kernels (the fits, the
-  sandwich, the bootstrap and the permutations). The default is the
-  physical cores the process may run on, with SMT siblings counted once:
-  the permutation pass is memory-bound, and hyperthreads do not speed it
-  up (see [Cost](#cost)). A `NUMBA_NUM_THREADS` below the request caps
-  it. Results are identical under any value. The pedigree-graph engine
-  keeps one thread unless `--threads` is given.
+- `--threads N` sets pg-phenotype's threads (the fits, the sandwich, the
+  bootstrap and the permutations). The default is the physical cores the
+  process may run on, with SMT siblings counted once: the permutation
+  pass is memory-bound, and hyperthreads do not speed it up (see
+  [Cost](#cost)). A `NUMBA_NUM_THREADS` below the request caps it.
+  pg-phenotype takes one thread count per process, so a second run in
+  the same process keeps the first one's. Results are identical under any
+  value. The pedigree-graph engine keeps one thread unless `--threads` is
+  given.
 - The column, `--sep`, `--sex-encoding` and `--max-memory` flags work as
   in `summarize`.
 
@@ -810,43 +820,35 @@ python pedigree_summary.py assortative-mating --in PED.tsv --out DIR \
 #### Cost
 
 The figures below are from one workstation: an Intel i7-9750H with 6
-cores, 12 threads and 31 GiB of RAM, shared with other jobs, so single
-runs carry roughly 10 to 20% noise. The input came from
-`benchmarks/generate_assortative_mating.py --pairs N --seed 0`: 2.76 rows
-per Mating Pair, 8 birth-decade strata, remating, and no missing values.
-The command ran `--trait liab dx --stratify-by birth_year
+cores, 12 threads and 31 GiB of RAM, shared with other jobs. The input came
+from `benchmarks/generate_assortative_mating.py --pairs N --seed 0`: 2.76
+rows per Mating Pair, 8 birth-decade strata, remating, and no missing
+values. The command ran `--trait liab dx --stratify-by birth_year
 --birth-year-col birth_year`, so all four cell types, with the default
-inference and threads (6). The generator's latent `R_mf` is 0.30, 0.15,
-0.05 and 0.25 (row-major); the "R_mf = 0" input has no assortment.
-[benchmarks/results/assortative_mating_cost.md](benchmarks/results/assortative_mating_cost.md)
-has the method and per-stage tables.
+inference (999 permutations, no bootstrap). Each figure is the median of
+10 runs of pg-phenotype 0.1.1's code, each a fresh process, with the
+1-minute load at most 12; peak memory is the cgroup `memory.peak` of the
+run.
 
-| Mating Pairs | Wall time | R_mf = 0 input | Peak memory |
+| Mating Pairs | Wall time, 6 threads | Wall time, 1 thread | Peak memory (6 threads) |
 |---|---|---|---|
-| 10^5 | 2.51 s (median of 8) | 2.24 s (median of 6) | 343 MiB |
-| 10^6 | 11.48 s (median of 8) | 7.89 s (median of 6) | 1,112 MiB |
-| 3 × 10^6 | 34.90 s (one run) | | 3,273 MiB |
-| 10^7 | 168.3 s (one run) | | 8,315 MiB |
+| 10^4 | 0.98 s | 1.08 s | 106 MiB |
+| 10^5 | 2.36 s | 3.17 s | 233 MiB |
+| 10^6 | 15.88 s | 28.07 s | 1,014 MiB |
 
-- At 10^5 and 10^6 the wall time is the CLI's, and the peak is the
-  median `ru_maxrss` of 3 other runs. At 3 × 10^6 and 10^7 both are the
-  stage driver's totals for the CLI code path at 3 × 10^6 (peak `VmHWM`).
-  The 10^7 row is the final gate: the CLI under `/usr/bin/time` in its own
-  cgroup, peak = cgroup `memory.peak` (`ru_maxrss` 8,379 MiB), load + validate
-  22.6 s of the 168.3 s. pedsum's default memory watchdog sets its limit to
-  80% of the memory available at start (12.9 GiB in that run); pass
-  `--max-memory` on a machine with less free memory.
-- The permutation pass costs the most (88.9 s of an earlier 196.2 s run at
-  10^7, under memory pressure). It is memory-bound, so at 3 × 10^6 the kernel took 14.0 s on 6 threads
-  and 14.2 s on 12 (one run each). Sequential stopping cuts it on null cells: with
-  R_mf = 0 every cell stops after about 98 draws, and the 10^6 run fell
-  from 11.64 s to 7.89 s (medians of 6). A strong signal runs all 999.
-- `--bootstrap 1000` took 7.5 s at 10^5, against 2.4 s without it
-  (medians of 3), and 101.9 s at 10^6 (one run). Both runs predate a fix
-  to the Spearman pass of the draws that cut the 10^6 `fit_cell` stage
-  under `--bootstrap 200` from 19.2 s to 13.9 s.
-- The first run after install adds 11 to 12 s of numba compilation (at
-  10^4 pairs: 13.46 s and 12.62 s cold against 1.43 s and 1.80 s warm).
+- Against pedsum's own numba implementation, which pg-phenotype replaced,
+  every configuration took 0.52 to 0.89 of the wall time and 0.74 to 1.00 of
+  the peak memory (medians over 10 alternating pairs).
+  [benchmarks/results/assortative_mating_cutover.md](benchmarks/results/assortative_mating_cutover.md)
+  has every configuration, one and two traits at 1 and 6 threads.
+- `--bootstrap 1000` at 10^5 took about 11 s with 6 threads.
+- Load and validation take 2 to 2.5 s of the 10^6 runs.
+- 3 × 10^6 and 10^7 pairs were measured only on the numba implementation
+  (34.9 s and 3,273 MiB; 168.3 s and 8,315 MiB);
+  [benchmarks/results/assortative_mating_cost.md](benchmarks/results/assortative_mating_cost.md)
+  has those runs. pedsum's default memory watchdog sets its limit to 80% of
+  the memory available at start; pass `--max-memory` on a machine with less
+  free memory.
 
 #### References
 
