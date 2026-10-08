@@ -13,8 +13,11 @@ import polars as pl
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
     from typing import TextIO
+
+    from pedsum.ids import IdLabels
 
 _PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
     {
@@ -38,7 +41,7 @@ _SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
 )
 
 
-def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
+def _format_id_sample(ids: np.ndarray, label: Callable[[int], str], k: int = 5) -> str:
     """Deterministic random sample of ``k`` IDs as a comma-separated string.
 
     Logged so collaborators can eyeball whether the id column was parsed
@@ -51,7 +54,7 @@ def _format_id_sample(ids: np.ndarray, k: int = 5) -> str:
     sample_size = min(k, n)
     rng = np.random.default_rng(0)
     indices = np.sort(rng.choice(n, size=sample_size, replace=False))
-    return ", ".join(str(int(x)) for x in ids[indices])
+    return ", ".join(label(x) for x in ids[indices])
 
 
 def _stripped_str_array(series: pl.Series) -> np.ndarray:
@@ -91,15 +94,6 @@ def _decode_sex(series: pl.Series) -> np.ndarray:
             f"first offending rows {bad_rows.tolist()} -> {bad_vals}. "
             "Allowed: M/F (any case), Male/Female, or PLINK 1=male, 2=female, 0=unknown."
         )
-    # Files pedsum wrote before 0.15.0 coded 0=female, 1=male, which reads
-    # here as unknown and male.
-    if (str_vals == "0").any() and not (str_vals == "2").any():
-        logger.warning(
-            "sex column has '0' tokens and no '2': pedsum reads 0 as unknown "
-            "(PLINK: 1=male, 2=female, 0=unknown). Recode a file that uses "
-            "0=female, 1=male, including validate and summarize output from "
-            "pedsum before 0.15.0.",
-        )
     # Surface the literal tokens that mapped to each sex (case preserved) so
     # collaborators can verify sex was handled correctly without re-reading
     # the file. ADR-0001 collaborator-facing transparency.
@@ -122,40 +116,6 @@ def plink_sex(sex: np.ndarray) -> np.ndarray:
     out[sex == SEX_MALE] = 1
     out[sex == SEX_FEMALE] = 2
     return out
-
-
-def _parse_int_tokens(cleaned: pl.Series) -> np.ndarray:
-    """Parse stripped string tokens to int64, tolerating float-form integers.
-
-    Integer-form tokens (``"7"``) parse directly; float-form tokens
-    (``"7.0"``, ``"7.5"``) fall back through float and truncate toward zero
-    (matching the historical ``pd.to_numeric(...).astype(int64)`` behavior).
-    Raises ``ValueError`` naming a sample of unparseable tokens.
-    """
-    as_int = cleaned.cast(pl.Int64, strict=False)
-    bad = as_int.is_null()
-    if not bad.any():
-        # writable=True: callers (zero-as-missing remap) mutate the result.
-        return as_int.to_numpy(writable=True)
-    as_float = cleaned.cast(pl.Float64, strict=False)
-    still_bad = as_float.is_null() | as_float.is_nan()
-    if still_bad.any():
-        samples = cleaned.filter(still_bad).head(3).to_list()
-        raise ValueError(f"unable to parse value(s) {samples} as numeric")
-    out = as_int.to_numpy(writable=True)
-    bad_np = bad.to_numpy()
-    out[bad_np] = as_float.to_numpy()[bad_np].astype(np.int64)
-    return out
-
-
-def _as_int_col(series: pl.Series, name: str) -> np.ndarray:
-    try:
-        cleaned = series.cast(pl.String).str.strip_chars()
-        if cleaned.is_null().any():
-            raise ValueError("column contains missing values")
-        return _parse_int_tokens(cleaned)
-    except (ValueError, TypeError, pl.exceptions.PolarsError) as e:
-        raise PedigreeError(f"column {name!r} must be integer-valued; failed to parse: {e}") from None
 
 
 def _replace_missing_with(
@@ -328,29 +288,6 @@ def _read_pedigree_table(
     return pl.read_csv(path, separator=chosen, null_values=_NULL_TOKENS, infer_schema_length=None)
 
 
-def _as_parent_int_col(
-    series: pl.Series,
-    name: str,
-    zero_as_missing: bool = False,
-) -> np.ndarray:
-    """Parse a parent-ID column, with NA-like tokens (and optionally 0) → -1.
-
-    Recognised missing tokens (case-insensitive): empty string, NA, NaN,
-    N/A, ".", "?", None, null. With ``zero_as_missing=True``, the literal
-    integer 0 is also remapped to -1 (PLINK fam convention).
-    """
-    cleaned = _replace_missing_with(series, _PARENT_MISSING_TOKENS, "-1")
-    try:
-        arr = _parse_int_tokens(cleaned)
-    except (ValueError, TypeError, pl.exceptions.PolarsError) as e:
-        raise PedigreeError(
-            f"column {name!r} must be integer-valued (with -1, NA, blank, or empty for unknown); failed to parse: {e}"
-        ) from None
-    if zero_as_missing:
-        arr[arr == 0] = -1
-    return arr
-
-
 def _as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     """Parse a birth-year column to int32 with sentinel -1 for unknown.
 
@@ -385,8 +322,10 @@ _REFERENCE_TRUE = frozenset({"1", "true", "t", "yes", "y"})
 _REFERENCE_FALSE = frozenset({"0", "false", "f", "no", "n"})
 
 
-def read_reference_mask(path: Path, sep: str, id_col: str, column: str, ids: np.ndarray) -> np.ndarray:
-    """Boolean reference-subpopulation mask from ``column`` of the input, aligned to ``ids``.
+def read_reference_mask(
+    path: Path, sep: str, id_col: str, column: str, ids: np.ndarray, labels: IdLabels
+) -> np.ndarray:
+    """Boolean reference-subpopulation mask from ``column`` of the input, aligned to the ID codes ``ids``.
 
     True tokens are ``1/true/t/yes/y`` and false tokens ``0/false/f/no/n``
     (any case); missing tokens are false. Rows are matched by id, because
@@ -403,5 +342,4 @@ def read_reference_mask(path: Path, sep: str, id_col: str, column: str, ids: np.
     if bad.any():
         samples = raw[column].filter(bad).head(3).to_list()
         raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
-    raw_ids = _as_int_col(raw[id_col], id_col)
-    return np.isin(ids, raw_ids[is_true.to_numpy()])
+    return np.isin(ids, labels.codes(raw[id_col].filter(is_true)))

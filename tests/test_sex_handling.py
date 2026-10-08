@@ -32,15 +32,38 @@ def test_decode_only_ones_reads_plink_without_warning(caplog):
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
-def test_decode_zero_without_two_warns(caplog):
-    """0s with no 2 look like the retired 0=female coding: decode 0 as unknown and warn."""
-    s = pl.Series(["0", "1", "0", "1"])
-    with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        out = ps._decode_sex(s)
-    assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_UNKNOWN, ps.SEX_MALE]
-    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "0=female, 1=male" in warnings[0]
+def test_zero_coded_mothers_without_two_warn(tmp_path):
+    """Mothers coded 0 with no 2 look like the retired 0=female coding: 0 reads as unknown, with a WARNING."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "0", "mother": -1, "father": -1},
+            {"id": 2, "sex": "1", "mother": -1, "father": -1},
+            {"id": 3, "sex": "1", "mother": 1, "father": 2},
+        ],
+    )
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out")])
+    assert "codes 1 mother(s) as 0 and has no 2" in r.stderr
+    assert "0=female, 1=male" in r.stderr
+
+
+def test_own_output_with_unknown_sex_and_no_females_does_not_warn(tmp_path):
+    """Output from pedsum with unknown-sex rows (0) and no females re-reads without the old-coding WARNING."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+        ],
+    )
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--allow-missing-sex"])
+    assert r.returncode == 0, r.stderr
+    r2 = run_pedsum(
+        ["validate", "--in", str(out / "validate.tsv.gz"), "--out", str(tmp_path / "o2"), "--allow-missing-sex"]
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert "has no 2" not in r2.stderr
 
 
 def test_decode_words_only_no_warning(caplog):
@@ -83,7 +106,7 @@ def test_missing_sex_imputed_from_mother_role(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},  # uses 2 as mother
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
 
@@ -98,7 +121,7 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
             {"id": 3, "sex": "M", "mother": 1, "father": 2},  # uses 2 as father
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
 
@@ -127,7 +150,7 @@ def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     assert (df["sex"] == ps.SEX_UNKNOWN).any()
 
 
@@ -141,7 +164,7 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     summary, _ = ps.compute_size_structure(df, *parent_rows(df))
     assert summary["n_male"] + summary["n_female"] + summary["n_unknown_sex"] == summary["n_total"]
     assert summary["n_unknown_sex"] == 1
@@ -171,7 +194,7 @@ def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
 def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
     """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
     ped = _ambig_pedigree(tmp_path / "p.tsv")
-    df = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
     row = df.filter(pl.col("id") == 7).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_UNKNOWN
 
@@ -255,7 +278,7 @@ def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_FEMALE
     assert row["sex_source"] == "imputed_from_role"
@@ -271,7 +294,7 @@ def test_impute_overrides_asserted_f_used_as_father(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 1).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "imputed_from_role"
@@ -320,7 +343,7 @@ def test_assertion_kept_when_no_role(tmp_path):
             {"id": 4, "sex": "M", "mother": -1, "father": -1},  # orphan, no role
         ],
     )
-    df = ps.load_and_validate(ped)
+    df, _labels = ps.load_and_validate(ped)
     row = df.filter(pl.col("id") == 4).row(0, named=True)
     assert int(row["sex"]) == ps.SEX_MALE
     assert row["sex_source"] == "input"

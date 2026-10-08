@@ -38,11 +38,10 @@ from pedsum.checks import (
     _check_unknown_sex,
     _summarize_findings,
 )
+from pedsum.ids import parse_ids
 from pedsum.parse import (
     _BIRTH_YEAR_DEFAULT_MIN,
     _as_birth_year_col,
-    _as_int_col,
-    _as_parent_int_col,
     _birth_year_default_max,
     _decode_sex,
     _format_id_sample,
@@ -54,6 +53,8 @@ from pedsum.pedigree_ops import IdIndex, _parent_rows, _structural_depth
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from pedsum.ids import IdLabels
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +227,18 @@ class ValidationContext:
     ids: np.ndarray | None = None
     mothers: np.ndarray | None = None
     fathers: np.ndarray | None = None
+    id_labels: IdLabels | None = None
+    # The --drop-offending rounds parse with the input's labels, so the ID
+    # mode and string-mode codes stay fixed while rows are dropped.
+    fixed_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
+
+    @property
+    def label(self) -> Callable[[int], str]:
+        """Prints an id code as the input's ID; set by the id parse Check."""
+        assert self.id_labels is not None
+        return self.id_labels.label
 
     @cached_property
     def id_index(self) -> IdIndex:
@@ -318,28 +329,41 @@ def _ck_empty_pedigree(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
-    ctx.ids, fail = _try_parse("id_dtype", lambda: _as_int_col(ctx.df_raw[ctx.id_col], ctx.id_col))
-    if fail:
-        return fail
-    assert ctx.ids is not None
-    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids))
+    df = ctx.df_raw
+    try:
+        ctx.ids, ctx.mothers, ctx.fathers, ctx.id_labels = parse_ids(
+            df[ctx.id_col],
+            df[ctx.mother_col],
+            df[ctx.father_col],
+            zero_as_missing=ctx.zero_as_missing,
+            labels=ctx.fixed_labels,
+        )
+    except PedigreeError as e:
+        return CheckOutcome("FAIL", [Finding(check="id_dtype", detail=str(e))], 1)
+    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids, ctx.label))
     return _PASS
 
 
-def _ck_mother_dtype(ctx: ValidationContext) -> CheckOutcome:
-    ctx.mothers, fail = _try_parse(
-        "mother_dtype",
-        lambda: _as_parent_int_col(ctx.df_raw[ctx.mother_col], ctx.mother_col, ctx.zero_as_missing),
-    )
-    return fail or _PASS
+def _warn_zero_female_coding(ctx: ValidationContext) -> None:
+    """Warn when mothers are coded 0 and no row is 2: likely 0=female, the coding pedsum wrote before 0.15.0.
 
-
-def _ck_father_dtype(ctx: ValidationContext) -> CheckOutcome:
-    ctx.fathers, fail = _try_parse(
-        "father_dtype",
-        lambda: _as_parent_int_col(ctx.df_raw[ctx.father_col], ctx.father_col, ctx.zero_as_missing),
-    )
-    return fail or _PASS
+    pedsum's own output never writes a mother as 0 (she is imputed female),
+    so its unknown-sex rows do not trigger this.
+    """
+    if ctx.ids is None or ctx.mothers is None:
+        return
+    tokens = ctx.df_raw[ctx.sex_col].cast(pl.String).str.strip_chars()
+    zero = (tokens == "0").fill_null(False).to_numpy()
+    if not zero.any() or (tokens == "2").any():
+        return
+    n = int((zero & np.isin(ctx.ids, ctx.mothers[ctx.mothers != -1])).sum())
+    if n:
+        logger.warning(
+            "sex column codes %d mother(s) as 0 and has no 2: pedsum reads 0 as unknown "
+            "(PLINK: 1=male, 2=female, 0=unknown). Recode a file that uses 0=female, 1=male, "
+            "including validate and summarize output from pedsum before 0.15.0.",
+            n,
+        )
 
 
 def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
@@ -347,37 +371,43 @@ def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
         "sex_tokens",
         lambda: _decode_sex(ctx.df_raw[ctx.sex_col]),
     )
-    return fail or _PASS
+    if fail:
+        return fail
+    _warn_zero_female_coding(ctx)
+    return _PASS
 
 
 def _ck_negative_ids(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.ids is not None
-    return _from_findings(_check_negative_ids(ctx.ids))
+    assert ctx.id_labels is not None
+    return _from_findings(_check_negative_ids(ctx.ids, ctx.id_labels.int_values(ctx.ids), label=ctx.label))
 
 
 def _ck_duplicate_ids(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.ids is not None
-    return _from_findings(_check_duplicate_ids(ctx.ids))
+    return _from_findings(_check_duplicate_ids(ctx.ids, label=ctx.label))
 
 
 def _ck_parent_token_range_mother(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.mothers is not None
-    return _from_findings(_check_parent_token_range(ctx.mothers, "mother"))
+    assert ctx.id_labels is not None
+    return _from_findings(_check_parent_token_range(ctx.id_labels.int_values(ctx.mothers), "mother"))
 
 
 def _ck_parent_token_range_father(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.fathers is not None
-    return _from_findings(_check_parent_token_range(ctx.fathers, "father"))
+    assert ctx.id_labels is not None
+    return _from_findings(_check_parent_token_range(ctx.id_labels.int_values(ctx.fathers), "father"))
 
 
 def _ck_parent_refs_present_mother(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.mothers is not None
-    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.id_index))
+    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.id_index, label=ctx.label))
 
 
 def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.fathers is not None
-    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.id_index))
+    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.id_index, label=ctx.label))
 
 
 def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
@@ -385,17 +415,17 @@ def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
         return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
     assert ctx.mothers is not None
     assert ctx.fathers is not None
-    return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index))
+    return _from_findings(_check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.id_index, label=ctx.label))
 
 
 def _ck_self_loops(ctx: ValidationContext) -> CheckOutcome:
     ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(_check_self_loops(ids, mothers, fathers))
+    return _from_findings(_check_self_loops(ids, mothers, fathers, label=ctx.label))
 
 
 def _ck_parents_distinct(ctx: ValidationContext) -> CheckOutcome:
     ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(_check_parents_distinct(ids, mothers, fathers))
+    return _from_findings(_check_parents_distinct(ids, mothers, fathers, label=ctx.label))
 
 
 def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
@@ -410,6 +440,7 @@ def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
             imp.ambiguous_mask,
             mothers,
             fathers,
+            label=ctx.label,
         )
     )
 
@@ -427,6 +458,7 @@ def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
         imp.imputed_sex,
         ctx.id_index,
         skip_mask=imp.original_unknown_mask,
+        label=ctx.label,
     )
     if findings:
         return CheckOutcome("FAIL", findings, len(findings))
@@ -442,12 +474,12 @@ def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
         n = int(((imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
     assert ctx.ids is not None
-    return _from_findings(_check_unknown_sex(ctx.ids, imp.imputed_sex, imp.ambiguous_mask))
+    return _from_findings(_check_unknown_sex(ctx.ids, imp.imputed_sex, imp.ambiguous_mask, label=ctx.label))
 
 
 def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
     ids, _, _ = ctx.require_id_parents()
-    return _from_findings(_check_acyclic(ids, ctx.depth))
+    return _from_findings(_check_acyclic(ids, ctx.depth, label=ctx.label))
 
 
 def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
@@ -465,7 +497,9 @@ def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
 def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.ids is not None
     assert ctx.birth_year is not None
-    return _from_findings(_check_birth_year_range(ctx.ids, ctx.birth_year, ctx.birth_year_min, ctx.by_max))
+    return _from_findings(
+        _check_birth_year_range(ctx.ids, ctx.birth_year, ctx.birth_year_min, ctx.by_max, label=ctx.label)
+    )
 
 
 def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
@@ -478,58 +512,52 @@ def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
             fathers,
             ctx.birth_year,
             ctx.id_index,
+            label=ctx.label,
         )
     )
 
 
-# Prerequisite shorthands.
+# Prerequisite shorthand: id_dtype parses the id and both parent columns.
 _IDS = ("id_dtype", "negative_ids", "duplicate_ids")
-_IDS_PARENTS = (*_IDS, "mother_dtype", "father_dtype")
 
 CHECKS: tuple[Check, ...] = (
     Check("required_columns", (), _ck_required_columns, "required columns present", "Columns & parsing"),
     Check("empty_pedigree", ("required_columns",), _ck_empty_pedigree, "pedigree is non-empty", "Columns & parsing"),
-    Check("id_dtype", ("required_columns",), _ck_id_dtype, "id column parses as integer", "Columns & parsing"),
-    Check(
-        "mother_dtype", ("required_columns",), _ck_mother_dtype, "mother column parses as integer", "Columns & parsing"
-    ),
-    Check(
-        "father_dtype", ("required_columns",), _ck_father_dtype, "father column parses as integer", "Columns & parsing"
-    ),
+    Check("id_dtype", ("required_columns",), _ck_id_dtype, "every row has an id", "Columns & parsing"),
     Check("sex_tokens", ("required_columns",), _ck_sex_tokens, "sex column tokens recognized", "Columns & parsing"),
     Check("negative_ids", ("id_dtype",), _ck_negative_ids, "no negative IDs", "IDs"),
     Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs", droppable=True),
     Check(
         "parent_token_range_mother",
-        ("mother_dtype",),
+        ("id_dtype",),
         _ck_parent_token_range_mother,
         "mother IDs in valid range",
         "Parent references",
     ),
     Check(
         "parent_token_range_father",
-        ("father_dtype",),
+        ("id_dtype",),
         _ck_parent_token_range_father,
         "father IDs in valid range",
         "Parent references",
     ),
     Check(
         "parent_refs_present_mother",
-        (*_IDS, "mother_dtype"),
+        _IDS,
         _ck_parent_refs_present_mother,
         "mother IDs present in pedigree",
         "Parent references",
     ),
     Check(
         "parent_refs_present_father",
-        (*_IDS, "father_dtype"),
+        _IDS,
         _ck_parent_refs_present_father,
         "father IDs present in pedigree",
         "Parent references",
     ),
     Check(
         "parent_refs_sex_conflict",
-        _IDS_PARENTS,
+        _IDS,
         _ck_parent_refs_sex_conflict,
         "no missing-parent sex conflicts",
         "Parent references",
@@ -537,16 +565,16 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "sex_role_ambiguity",
-        (*_IDS_PARENTS, "sex_tokens"),
+        (*_IDS, "sex_tokens"),
         _ck_sex_role_ambiguity,
         "no role-ambiguous unsexed individuals",
         "Parent references",
         droppable=True,
     ),
-    Check("self_loops", _IDS_PARENTS, _ck_self_loops, "no self-loops", "Graph structure", droppable=True),
+    Check("self_loops", _IDS, _ck_self_loops, "no self-loops", "Graph structure", droppable=True),
     Check(
         "parents_distinct",
-        _IDS_PARENTS,
+        _IDS,
         _ck_parents_distinct,
         "mother and father distinct",
         "Parent references",
@@ -554,7 +582,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "sex_role_consistency",
-        (*_IDS_PARENTS, "sex_tokens"),
+        (*_IDS, "sex_tokens"),
         _ck_sex_role_consistency,
         "sex consistent with parent role",
         "Graph structure",
@@ -562,7 +590,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "unknown_sex",
-        (*_IDS_PARENTS, "sex_tokens"),
+        (*_IDS, "sex_tokens"),
         _ck_unknown_sex,
         "all individuals have resolved sex",
         "Graph structure",
@@ -593,7 +621,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "birth_year_topology",
-        (*_IDS_PARENTS, "birth_year_dtype"),
+        (*_IDS, "birth_year_dtype"),
         _ck_birth_year_topology,
         "child birth_year >= parent birth_year",
         "Birth years (optional)",
@@ -634,8 +662,6 @@ _CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "required_columns",
             "empty_pedigree",
             "id_dtype",
-            "mother_dtype",
-            "father_dtype",
             "sex_tokens",
         ),
     ),
@@ -705,7 +731,9 @@ def _run_checks(
         outcome = check.run(ctx)
         if outcome.status == "FAIL":
             if on_fail == "raise":
-                raise PedigreeError(_summarize_findings(outcome.findings))
+                # The id parse Check runs before any Check that names an id.
+                label = ctx.label if ctx.id_labels is not None else str
+                raise PedigreeError(_summarize_findings(outcome.findings, label))
             findings.extend(outcome.findings)
             results[check.name] = CheckResult(name=check.name, status="FAIL", count=outcome.count)
         else:
@@ -818,10 +846,12 @@ def load_and_validate(
     birth_year_max: int | None = None,
     sep: str = "auto",
     no_sex_check: bool = False,
-) -> pl.DataFrame:
-    """Load TSV, run all QC fail-fast, return the validated pedigree.
+) -> tuple[pl.DataFrame, IdLabels]:
+    """Load TSV, run all QC fail-fast, return the validated pedigree and its ID labels.
 
-    The frame has columns id, sex (int8), mother, father, sex_source,
+    The frame's id, mother and father columns hold int64 ID codes, which the
+    labels print as the input's IDs (:mod:`pedsum.ids`); in integer mode a
+    code is the ID. The frame has columns id, sex (int8), mother, father, sex_source,
     ``birth_year`` (int32, sentinel -1) when ``birth_year_col`` is set and
     present, and ``ped_depth`` (int32 topological depth, founders 0). Missing
     parent encoded as -1. Raises ``PedigreeError`` on the first failing Check.
@@ -889,7 +919,8 @@ def load_and_validate(
         columns = {name: values[order] for name, values in columns.items()}
     out = pl.DataFrame(columns)
     logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
-    return out
+    assert ctx.id_labels is not None
+    return out, ctx.id_labels
 
 
 def validate_pedigree(
@@ -945,7 +976,7 @@ class ReductionResult:
     """Outcome of `reduce_pedigree`: the reduced frame plus a drop record."""
 
     df_current: pl.DataFrame
-    dropped: list[tuple[int, str, int]]  # one per distinct (id, check, round)
+    dropped: list[tuple[str, str, int]]  # one per distinct (id, check, round), the id as the input wrote it
     n_rounds: int  # rounds that actually dropped something
     n_input_rows: int
     n_rows_removed: int
@@ -1012,7 +1043,8 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
     df_cur = ctx0.df_raw
     n_input_rows = len(df_cur)
     ctx = ctx0
-    dropped: list[tuple[int, str, int]] = []
+    ctx0.fixed_labels = ctx0.id_labels
+    dropped: list[tuple[str, str, int]] = []
     rows_removed = 0
     cleared_refs = 0
     drop_rounds = 0
@@ -1032,7 +1064,8 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
         # id twice (e.g. a self-loop via both parent columns). Sorted, because
         # str hashing varies per process and the manifest keeps this order.
         round_pairs = sorted({(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids})  # ty: ignore[invalid-argument-type]
-        dropped.extend((fid, check, rnd) for fid, check in round_pairs)
+        # The manifest writes IDs as the input wrote them.
+        dropped.extend((ctx.label(fid), check, rnd) for fid, check in round_pairs)
 
         drop_arr = np.fromiter(drop_ids, dtype=np.int64, count=len(drop_ids))
         ids, mothers, fathers = ctx.require_id_parents()
@@ -1068,6 +1101,7 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
             .drop("__m_hit", "__f_hit")
         )
         ctx = _build_context_from_df(df_cur, **rebuild_kwargs)
+        ctx.fixed_labels = ctx0.id_labels
     return ReductionResult(
         df_current=df_cur,
         dropped=dropped,

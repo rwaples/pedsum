@@ -128,7 +128,7 @@ pedigree, so relatedness, Ne, and founder counts computed on it differ from the
 input. Every removal is recorded in `DIR/validate.dropped.tsv` (`id`, `check`,
 the round it was dropped); pedsum warns when more than 10% of rows are removed
 and exits non-zero whenever anything was dropped. Column- and parse-level
-failures (a missing column, non-integer or negative IDs) still hard-block — no
+failures (a missing column, a row without an id, negative IDs) still hard-block — no
 removal can fix those.
 
 The Reduced Pedigree is individual-level data (IDs, parents, and the dropped
@@ -557,10 +557,10 @@ id	sex	mother	father
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | int ≥ 0, unique | **Strings (e.g. `"P001"`) are not accepted** — see "Preparing your data" below. |
+| `id` | unique, non-missing | Integers or strings (`P001`, `FAM01-003`); see "String IDs" below. |
 | `sex` | `M`/`F`/`Male`/`Female` (any case) or PLINK's `1`/`2`/`0` | `1 = male, 2 = female, 0 = unknown` (see "Sex coding" below). Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
-| `mother` | int parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
-| `father` | int parent ID or missing | Same conventions as `mother`. |
+| `mother` | parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
+| `father` | parent ID or missing | Same conventions as `mother`. |
 
 Required column names are overridable via `--id-col` / `--sex-col` /
 `--mother-col` / `--father-col`. Half-founders (one parent missing,
@@ -600,9 +600,9 @@ unsexed row not used as a parent at all.
 
 ## Preparing your data
 
-Common preprocessing comes down to (a) adding a header row,
-(b) remapping non-standard missing tokens, or (c) integerising
-string IDs. `--sep auto` handles delimiter routing automatically.
+Common preprocessing comes down to (a) adding a header row or
+(b) remapping non-standard missing tokens. `--sep auto` handles
+delimiter routing automatically.
 
 ### PLINK `.fam` files
 
@@ -631,23 +631,25 @@ python -c "import polars as pl; pl.read_excel('input.xlsx').write_csv('input.tsv
 
 ### String IDs (`"P001"`, `"FAM01-003"`, …)
 
-The relationship enumerator requires integer IDs. Map them once and
-keep a lookup table:
+pedsum reads IDs as strings. Two tokens are the same ID only if they are
+the same string, so `001` and `1` are two individuals, and so are `1.0`
+and `1`. Every output writes the IDs as the input wrote them:
+`validate.tsv.gz`, `validate.log`, `validate.dropped.tsv`,
+`annotated.tsv.gz`, and `epimight-input`'s `person_id`, `id1` and `id2`.
 
-```python
-import polars as pl
+When every token is a plain integer, as an integer prints (no leading
+zeros, no `+`, no decimal point), pedsum runs on the integers. Any other
+token puts the whole file in string mode and logs a WARNING with
+examples. Either way, an id that is a missing-parent token (`.`, `?`,
+`None`, …) counts as a missing id, and an id written as a negative
+integer, such as `-1`, fails `no negative IDs`, since no parent column
+could name it. String mode changes two things:
 
-df = pl.read_csv("clinical.tsv", separator="\t", infer_schema=False)
-all_ids = set()
-for col in ("id", "mother", "father"):
-    all_ids |= set(df[col].to_list())
-lut = {sid: i for i, sid in enumerate(sorted(all_ids - {"-1"}))}
-df = df.with_columns(
-    pl.col(col).replace_strict(lut, default=-1, return_dtype=pl.Int64) for col in ("id", "mother", "father")
-)
-df.write_csv("clinical_int.tsv", separator="\t")
-pl.DataFrame({"id": list(lut), "row": list(lut.values())}).write_csv("id_lookup.tsv", separator="\t")
-```
+- Outputs order IDs by string, not by number: symmetric pairs in
+  `relative_pairs.tsv` put the smaller string first.
+- `--fill-half-founders` names phantom parents `_pedsum_phantom_1`,
+  `_pedsum_phantom_2`, … and refuses an input with an ID that already
+  starts with `_pedsum_phantom_`.
 
 ## Large pedigrees
 
@@ -735,11 +737,11 @@ Exit codes:
 
 | Error | Likely cause | Fix |
 |---|---|---|
-| `column 'id' must be integer-valued` | string/alphanumeric IDs | map to ints |
+| `column 'id' has N missing value(s)` | a row with a blank or `NA` id | give every row an id |
 | `sex column has N invalid value(s)` | a numeric coding other than PLINK's 1=male, 2=female, 0=unknown | recode the sex column to PLINK or `M`/`F` |
 | WARNING `sex column has '0' tokens and no '2'` | a `0` = female, `1` = male column, such as pedsum output before 0.15.0 | recode `0` → `2` |
 | `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
-| `column 'mother' must be integer-valued` showing `NA` or non-finite | non-standard missing token | replace with `-1`, `NA`, blank, or `.` |
+| WARNING `IDs read as strings` | an ID token that is not a plain integer, e.g. `001`, `1.0`, or a non-standard missing token | expected for string IDs; otherwise fix the token, or replace a missing token with `-1`, `NA`, blank, or `.` |
 | `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |
 
 ### Topological depth (`ped_depth`)

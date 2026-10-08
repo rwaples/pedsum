@@ -16,7 +16,7 @@ import polars as pl
 import yaml
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, VERSION, PedigreeError, logger
-from pedsum.parse import _as_int_col, _read_pedigree_table, plink_sex
+from pedsum.parse import _read_pedigree_table, plink_sex
 from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
+    from pedsum.ids import IdLabels
 
 #: One value in the ``relationship_pairs`` section: a count (``None`` when the
 #: code was not computed) or the ``by_degree`` rollup.
@@ -639,15 +640,18 @@ def _write_annotated_tsv(
     args: argparse.Namespace,
     idf: pl.DataFrame,
     out_path: Path,
+    labels: IdLabels,
 ) -> None:
     """Re-read input pedigree, append derived columns, write annotated tsv.gz.
 
     Output preserves input columns under canonical names (id/sex/mother/
-    father; user-supplied names are renamed). Sex is the resolved sex in
+    father; user-supplied names are renamed), with IDs as the input wrote
+    them. With string IDs every input column is re-read as text, since type
+    inference would turn ``001`` into ``1``. Sex is the resolved sex in
     PLINK's coding (1=male, 2=female, 0=unknown). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
-    raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"))
+    raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"), dtype=str if labels.is_string else None)
     rename_map = {
         args.id_col: "id",
         args.sex_col: "sex",
@@ -658,7 +662,7 @@ def _write_annotated_tsv(
     if rename_map:
         raw = raw.rename(rename_map)
 
-    raw_ids = _as_int_col(raw["id"], "id")
+    raw_ids = labels.codes(raw["id"])
     idf_ids = idf["id"].to_numpy()
     if not np.array_equal(raw_ids, idf_ids):
         # ``load_and_validate`` may have reordered rows into topological
@@ -696,6 +700,7 @@ def _write_annotated_tsv(
         )
 
     idf = idf.with_columns(pl.Series("sex", plink_sex(idf["sex"].to_numpy())))
+    idf = labels.relabel(idf, "id", "mother", "father")
     annotated = pl.concat([idf, extras], how="horizontal", strict=True)
     _to_csv_gz(annotated, out_path)
 
@@ -731,14 +736,17 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     return "\n".join(lines) + "\n"
 
 
-def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
-    """Tab-separated log: one row per finding (check / id / row / detail)."""
+def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
+    """Tab-separated log: one row per finding (check / id / row / detail).
+
+    ``labels`` is None when the id column did not parse, so no finding has an id.
+    """
     # Missing id/row are nulls (not "") so the CSV writer emits a bare empty
     # field; polars quotes explicit empty strings as "".
     df = pl.DataFrame(
         {
             "check": [f.check for f in findings],
-            "id": [None if f.id is None else str(f.id) for f in findings],
+            "id": [None if f.id is None or labels is None else labels.label(f.id) for f in findings],
             "row": [None if f.row is None else str(f.row) for f in findings],
             "detail": [f.detail for f in findings],
         },
@@ -748,7 +756,7 @@ def _write_validate_log(findings: list[Finding], out_path: Path) -> None:
         df.write_csv(tmp, separator="\t")
 
 
-def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path) -> None:
+def _write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
     """Tab-separated manifest of `validate --drop-offending` removals.
 
     One row per distinct ``(id, check, round)`` — the id removed, the Check that
@@ -756,8 +764,8 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
     record offenders spawned by earlier drops). Written even when nothing was
     dropped (header only) so downstream tooling can rely on its presence.
     """
-    seen: set[tuple[int, str, int]] = set()
-    rows: list[tuple[int, str, int]] = []
+    seen: set[tuple[str, str, int]] = set()
+    rows: list[tuple[str, str, int]] = []
     for fid, check, rnd in dropped:
         if (fid, check, rnd) not in seen:
             seen.add((fid, check, rnd))
@@ -768,7 +776,7 @@ def _write_dropped_manifest(dropped: list[tuple[int, str, int]], out_path: Path)
             "check": [r[1] for r in rows],
             "round": [r[2] for r in rows],
         },
-        schema={"id": pl.Int64, "check": pl.String, "round": pl.Int64},
+        schema={"id": pl.String, "check": pl.String, "round": pl.Int64},
     )
     with atomic_output(out_path) as tmp:
         df.write_csv(tmp, separator="\t")
@@ -864,6 +872,7 @@ def _write_validate_tsv_gz(
     mother_col: str,
     father_col: str,
     out_path: Path,
+    labels: IdLabels,
 ) -> None:
     """Write input pedigree (gzipped TSV), with new founder rows prepended at top."""
     if added_founders:
@@ -871,7 +880,7 @@ def _write_validate_tsv_gz(
         # Filler cells are nulls (not "") so the CSV writer emits bare empty
         # fields; polars quotes explicit empty strings as "".
         data: dict[str, list[str | None]] = {col: [None] * n_new for col in df_raw.columns}
-        data[id_col] = [str(f["id"]) for f in added_founders]
+        data[id_col] = [labels.label(f["id"]) for f in added_founders]
         data[sex_col] = plink_sex(np.array([f["sex"] for f in added_founders], dtype=np.int8)).astype(str).tolist()
         data[mother_col] = ["-1"] * n_new
         data[father_col] = ["-1"] * n_new

@@ -89,6 +89,25 @@ whole command.
 
 ### Changed
 
+- **IDs are strings** ([#16](https://github.com/rwaples/pedsum/issues/16)).
+  Two tokens are the same ID only if they are the same string, and every
+  output writes IDs as the input wrote them. Before, `validate` and
+  `summarize` parsed each token to an integer, truncating `2.9` to `2`
+  and reading `001` and `1.0` as `1`, while `validate.tsv.gz` wrote the
+  original tokens back. A file could pass `validate` with parent links
+  that broke when read with string IDs, and alphanumeric IDs such as
+  `A1` were rejected. A file whose tokens are all plain integers runs on
+  the integers as before, with byte-identical outputs. Any other token
+  puts the file in string mode, with a WARNING: outputs order IDs by
+  string, and `--fill-half-founders` names phantom parents
+  `_pedsum_phantom_1`, `_pedsum_phantom_2`, … `--drop-offending` keeps
+  the input's mode through every round. The `mother_dtype` and
+  `father_dtype` Checks are gone, since a parent token can no longer
+  fail to parse; `id_dtype` now fails only on a row without an id, or
+  with an id that is a missing-parent token (`.`, `?`, …).
+  `validate.dropped.tsv` writes its `id` column as text. In the Python
+  API, `load_and_validate` returns `(frame, IdLabels)`: the frame's id
+  columns hold int64 codes, and `IdLabels` prints them as the input's IDs.
 - **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
   needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
   longer run the kinship DP.

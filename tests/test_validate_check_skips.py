@@ -20,40 +20,22 @@ def _results_by_name(path) -> dict[str, ps.CheckResult]:
     return {r.name: r for r in results}
 
 
-def test_bad_id_dtype_skips_id_dependent_checks(tmp_path):
-    """Non-integer id → id_dtype FAIL; negative_ids / duplicate_ids SKIP."""
+def test_missing_id_skips_id_dependent_checks(tmp_path):
+    """A row with no id → id_dtype FAIL; every check on ids or parents SKIPs."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
-            {"id": "abc", "sex": "M", "mother": -1, "father": -1},
+            {"id": None, "sex": "M", "mother": -1, "father": -1},
             {"id": "2", "sex": "F", "mother": -1, "father": -1},
         ],
     )
     results = _results_by_name(ped)
     assert results["id_dtype"].status == "FAIL"
-    assert results["negative_ids"].status == "SKIP"
-    assert results["negative_ids"].skip_reason
-    assert results["duplicate_ids"].status == "SKIP"
-    assert results["duplicate_ids"].skip_reason
-
-
-def test_bad_mother_dtype_skips_parent_dependent_checks(tmp_path):
-    """Non-integer mother → mother_dtype FAIL; downstream parent checks SKIP."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": "x", "father": -1},
-            {"id": 2, "sex": "F", "mother": "-1", "father": -1},
-        ],
-    )
-    results = _results_by_name(ped)
-    assert results["mother_dtype"].status == "FAIL"
-    # parent_token_range_mother skipped with the local reason; the wider
-    # cascade below uses the "or father_dtype" wording because the same
-    # else-branch fires when either parent column failed to parse.
-    assert results["parent_token_range_mother"].status == "SKIP"
-    assert results["parent_refs_present_mother"].status == "SKIP"
     for name in (
+        "negative_ids",
+        "duplicate_ids",
+        "parent_token_range_mother",
+        "parent_refs_present_mother",
         "parent_refs_sex_conflict",
         "sex_role_ambiguity",
         "self_loops",
@@ -64,6 +46,39 @@ def test_bad_mother_dtype_skips_parent_dependent_checks(tmp_path):
     ):
         assert results[name].status == "SKIP", name
         assert results[name].skip_reason, name
+
+
+def test_string_ids_run_every_check(tmp_path):
+    """Non-integer ids parse as strings, and every check runs on them."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": "A1", "sex": "M", "mother": -1, "father": -1},
+            {"id": "B", "sex": "F", "mother": -1, "father": -1},
+            {"id": "x", "sex": "F", "mother": "B", "father": "A1"},
+        ],
+    )
+    results = _results_by_name(ped)
+    assert [n for n, r in results.items() if r.status != "PASS"] == [
+        "birth_year_dtype",
+        "birth_year_range",
+        "birth_year_topology",
+    ]
+
+
+def test_string_mode_still_rejects_negative_integer_ids(tmp_path):
+    """A negative integer token is negative in string mode too: ``-1`` as an id could never be a parent."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": "-1", "sex": "F", "mother": -1, "father": -1},
+            {"id": "b", "sex": "M", "mother": -1, "father": -1},
+            {"id": "c", "sex": "M", "mother": "-5", "father": "b"},
+        ],
+    )
+    results = _results_by_name(ped)
+    assert results["negative_ids"].status == "FAIL"
+    assert results["parent_token_range_mother"].status == "FAIL"
 
 
 def test_missing_required_column_returns_with_required_columns_fail(tmp_path):

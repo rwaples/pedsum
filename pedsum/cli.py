@@ -32,6 +32,7 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
+from pedsum.ids import PHANTOM_PREFIX, IdLabels
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
 from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, plink_sex, read_reference_mask
@@ -236,7 +237,7 @@ def _add_input_args(p: argparse.ArgumentParser, *, out_help: str, birth_year_hel
         "--id-col",
         default="id",
         metavar="NAME",
-        help="column name for individual ID (int) (default: %(default)s)",
+        help="column name for individual ID; integers or strings (default: %(default)s)",
     )
     p.add_argument(
         "--sex-col",
@@ -446,7 +447,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--id-col",
         default="id",
         metavar="NAME",
-        help="column name for individual ID (int) (default: %(default)s)",
+        help="column name for individual ID; integers or strings (default: %(default)s)",
     )
     p_val.add_argument(
         "--sex-col",
@@ -542,7 +543,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--id-col",
         default="id",
         metavar="NAME",
-        help="column name for individual ID (int) (default: %(default)s)",
+        help="column name for individual ID; integers or strings (default: %(default)s)",
     )
     p_epi.add_argument(
         "--sex-col",
@@ -824,8 +825,8 @@ def _write_validation_failure_log(args: argparse.Namespace) -> None:
     """
     log_path = args.out_dir / "validate.log"
     try:
-        _, _, findings, _ = validate_pedigree(args.in_path, **_validation_kwargs(args))
-        _write_validate_log(findings, log_path)
+        _, _, findings, ctx = validate_pedigree(args.in_path, **_validation_kwargs(args))
+        _write_validate_log(findings, log_path, ctx.id_labels)
     except (PedigreeError, FileNotFoundError, OSError) as e:
         logger.error("could not write %s: %s", log_path, e)
         return
@@ -840,7 +841,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # Wrapped so the read/validation peak is attributed to a phase by the
         # benchmark profiler; load_and_validate already logs its own timing.
         with _timed("load+validate"):
-            df = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)
@@ -1023,7 +1024,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # aggregate this phase across repeats; out_dir is already in the
         # summary.yaml log line above.
         with _timed("wrote annotated.tsv.gz"):
-            _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz")
+            _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz", labels)
 
     return 0
 
@@ -1071,7 +1072,7 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     watchdog.on_breach(publish_partial)
     try:
         with _timed("load+validate"):
-            df = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)
@@ -1093,7 +1094,9 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
     reference_rows = None
     if args.reference_col is not None:
         try:
-            mask = read_reference_mask(args.in_path, args.sep, args.id_col, args.reference_col, df["id"].to_numpy())
+            mask = read_reference_mask(
+                args.in_path, args.sep, args.id_col, args.reference_col, df["id"].to_numpy(), labels
+            )
         except PedigreeError as e:
             logger.error("%s", e)
             return 1
@@ -1155,7 +1158,10 @@ def _write_fixed_pedigree(
     n_total = len(ctx.df_raw)
     added_founders: list[dict] = []
     df_out = ctx.df_raw
+    labels = IdLabels()  # no ids parsed, so no founder row to name
     if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
+        assert ctx.id_labels is not None
+        labels = ctx.id_labels
         added_founders = _build_added_founders(ctx.mothers, ctx.fathers, ctx.id_index, args.no_sex_check)
         # Write every row's resolved sex (after imputation and role overrides)
         # in PLINK's coding, 1=male, 2=female, 0=unknown, whatever tokens the
@@ -1177,16 +1183,17 @@ def _write_fixed_pedigree(
         if args.fill_half_founders:
             if next_id is None:
                 next_id = _next_free_id(ctx.ids, ctx.mothers, ctx.fathers)
+            labels = labels.with_phantoms(next_id)
             mothers, fathers, phantoms = _build_phantom_parents(ctx.mothers, ctx.fathers, next_id)
             filled_m = mothers != ctx.mothers
             filled_f = fathers != ctx.fathers
             df_out = df_out.with_columns(
                 pl.when(pl.Series(filled_m))
-                .then(pl.Series(mothers.astype(str)))
+                .then(labels.strings(mothers))
                 .otherwise(pl.col(args.mother_col).cast(pl.String))
                 .alias(args.mother_col),
                 pl.when(pl.Series(filled_f))
-                .then(pl.Series(fathers.astype(str)))
+                .then(labels.strings(fathers))
                 .otherwise(pl.col(args.father_col).cast(pl.String))
                 .alias(args.father_col),
             )
@@ -1204,7 +1211,7 @@ def _write_fixed_pedigree(
 
     out_path = out_dir / "validate.tsv.gz"
     _write_validate_tsv_gz(
-        df_out, added_founders, args.id_col, args.sex_col, args.mother_col, args.father_col, out_path
+        df_out, added_founders, args.id_col, args.sex_col, args.mother_col, args.father_col, out_path, labels
     )
     n_total_out = n_total + len(added_founders)
     sys.stderr.write(f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n")
@@ -1280,6 +1287,15 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         logger.error("file error: %s", e)
         return 2
 
+    if args.fill_half_founders and ctx.id_labels is not None and (clashes := ctx.id_labels.phantom_clashes()):
+        logger.error(
+            "--fill-half-founders names phantom parents %s1, %s2, ...; the input already has IDs with that prefix: %s",
+            PHANTOM_PREFIX,
+            PHANTOM_PREFIX,
+            clashes,
+        )
+        return 2
+
     by_check = {r.name: r for r in results}
 
     blocks: list[str] = []
@@ -1303,7 +1319,7 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
 
     out_dir = args.out_dir
     log_path = out_dir / "validate.log"
-    _write_validate_log(findings, log_path)
+    _write_validate_log(findings, log_path, ctx.id_labels)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
     if args.drop_offending:
@@ -1380,7 +1396,7 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
 
     try:
         with _timed("load+validate"):
-            df = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
         _write_validation_failure_log(args)
@@ -1395,8 +1411,10 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
     # The skeleton counts relatives without a pair list. --pairs extracts the
     # list for its own export, after the skeleton's counts are freed.
     with _timed("epimight skeleton"):
+        # person_id comes from df's id column: relabel it once, at N rows,
+        # not the 8N-row skeleton.
         frame = build_epimight_skeleton(
-            df,
+            labels.relabel(df, "id"),
             pg,
             rels=rels,
             disorder=args.disorder,
@@ -1418,7 +1436,10 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
     if args.pairs:
         with _timed("relative pairs"):
             _write_relative_pairs(
-                iter_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship),
+                (
+                    labels.relabel(pairs, "id1", "id2")
+                    for pairs in iter_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship)
+                ),
                 out_dir,
                 parquet=args.parquet,
             )

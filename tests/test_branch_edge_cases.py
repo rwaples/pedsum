@@ -21,8 +21,8 @@ from pedsum.checks import (
     _check_sex_role_consistency,
     _summarize_findings,
 )
+from pedsum.ids import IdLabels, parse_ids
 from pedsum.parse import (
-    _as_parent_int_col,
     _decode_sex,
     _format_id_sample,
     _maybe_warn_csv,
@@ -68,8 +68,8 @@ class TestParseEdgeCases:
 
     def test_id_sample_empty_and_deterministic_subset(self) -> None:
         """ID samples handle empty inputs and return deterministic bounded samples."""
-        assert _format_id_sample(np.array([], dtype=np.int64)) == ""
-        assert _format_id_sample(np.arange(10), k=3) == "5, 6, 9"
+        assert _format_id_sample(np.array([], dtype=np.int64), str) == ""
+        assert _format_id_sample(np.arange(10), str, k=3) == "5, 6, 9"
 
     def test_decode_sex_reads_plink_and_rejects_other_numbers(self) -> None:
         """1/2/0 decode as PLINK and -1 as unknown; any other number is an error."""
@@ -118,10 +118,11 @@ class TestParseEdgeCases:
         auto = _read_pedigree_table(comma, dtype=str)
         assert auto.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
-    def test_parent_int_col_zero_as_missing(self) -> None:
+    def test_parent_ids_zero_as_missing(self) -> None:
         """PLINK-style zero parent IDs are normalised to -1 when requested."""
-        arr = _as_parent_int_col(pl.Series(["0", "2", "NA"], dtype=pl.String), "mother", zero_as_missing=True)
-        np.testing.assert_array_equal(arr, np.array([-1, 2, -1], dtype=np.int64))
+        ids = pl.Series(["1", "2", "3"])
+        _, mothers, _, _ = parse_ids(ids, pl.Series(["0", "2", "NA"]), pl.Series(["-1"] * 3), zero_as_missing=True)
+        np.testing.assert_array_equal(mothers, np.array([-1, 2, -1], dtype=np.int64))
 
 
 class TestCheckEdgeCases:
@@ -129,16 +130,16 @@ class TestCheckEdgeCases:
 
     def test_duplicate_ids_clean_and_offending(self) -> None:
         """Duplicate-ID checking returns no findings for unique IDs and one per duplicate value."""
-        assert _check_duplicate_ids(np.array([1, 2, 3], dtype=np.int64)) == []
-        findings = _check_duplicate_ids(np.array([2, 1, 2, 3, 1], dtype=np.int64))
+        assert _check_duplicate_ids(np.array([1, 2, 3], dtype=np.int64), label=str) == []
+        findings = _check_duplicate_ids(np.array([2, 1, 2, 3, 1], dtype=np.int64), label=str)
         assert [f.id for f in findings] == [1, 2]
 
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
         """Missing-parent detection distinguishes no refs, all-present refs, and the zero-token hint."""
         id_index = IdIndex([1, 2, 3])
-        assert _check_parent_refs_present(np.array([-1, -1]), "mother", id_index) == []
-        assert _check_parent_refs_present(np.array([1, -1, 2]), "mother", id_index) == []
-        findings = _check_parent_refs_present(np.array([0, 99, 99]), "father", id_index)
+        assert _check_parent_refs_present(np.array([-1, -1]), "mother", id_index, label=str) == []
+        assert _check_parent_refs_present(np.array([1, -1, 2]), "mother", id_index, label=str) == []
+        findings = _check_parent_refs_present(np.array([0, 99, 99]), "father", id_index, label=str)
         assert [f.id for f in findings] == [0, 99]
         assert "convert to -1" in findings[0].detail
 
@@ -153,28 +154,28 @@ class TestCheckEdgeCases:
         mothers = np.array([-1, -1, 2], dtype=np.int64)
         fathers = np.array([-1, -1, 1], dtype=np.int64)
         sex = np.array([1, 1, 0], dtype=np.int8)  # id=2 is male but used as mother.
-        findings = _check_sex_role_consistency(mothers, fathers, sex, IdIndex(ids))
+        findings = _check_sex_role_consistency(mothers, fathers, sex, IdIndex(ids), label=str)
         assert len(findings) == 1
         assert findings[0].id == 2
         assert "used as mother" in findings[0].detail
 
     def test_summarize_findings_variants(self) -> None:
         """Finding summaries render empty, id-only, row-only, and overflow samples."""
-        assert _summarize_findings([]) == ""
-        assert "id=7" in _summarize_findings([Finding(check="c", id=7)])
-        assert "row 4" in _summarize_findings([Finding(check="c", row=4)])
+        assert _summarize_findings([], str) == ""
+        assert "id=7" in _summarize_findings([Finding(check="c", id=7)], str)
+        assert "row 4" in _summarize_findings([Finding(check="c", row=4)], str)
         many = [Finding(check="c", id=i, row=i) for i in range(7)]
-        assert "and 2 more" in _summarize_findings(many)
+        assert "and 2 more" in _summarize_findings(many, str)
 
     def test_birth_year_topology_no_edges_and_bad_edge(self) -> None:
         """Birth-year topology skips no-edge pedigrees and flags child-before-parent years."""
         ids = np.array([1, 2], dtype=np.int64)
         no_edges = _check_birth_year_topology(
-            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids)
+            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids), label=str
         )
         assert no_edges == []
         bad = _check_birth_year_topology(
-            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids)
+            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids), label=str
         )
         assert len(bad) == 1
         assert bad[0].check == "birth_year_topology"
@@ -418,7 +419,7 @@ class TestReportEdgeCases:
     def test_write_dropped_manifest_deduplicates_rows(self, tmp_path) -> None:
         """Dropped manifests emit distinct id/check/round rows only once."""
         path = tmp_path / "dropped.tsv"
-        _write_dropped_manifest([(1, "self_loops", 1), (1, "self_loops", 1), (2, "negative_ids", 2)], path)
+        _write_dropped_manifest([("1", "self_loops", 1), ("1", "self_loops", 1), ("2", "negative_ids", 2)], path)
         df = pl.read_csv(path, separator="\t")
         assert df.to_dicts() == [
             {"id": 1, "check": "self_loops", "round": 1},
@@ -437,6 +438,7 @@ class TestReportEdgeCases:
             "mother",
             "father",
             out,
+            IdLabels(),
         )
         with gzip.open(out, "rt") as fh:
             fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
@@ -451,7 +453,7 @@ class TestReportEdgeCases:
         idf = pl.DataFrame({"id": [2], "sex": [0], "mother": [-1], "father": [-1]})
         args = SimpleNamespace(id_col="id", sex_col="sex", mother_col="mother", father_col="father", sep="tab")
         with pytest.raises(PedigreeError, match="row order mismatch"):
-            _write_annotated_tsv(in_path, args, idf, tmp_path / "annotated.tsv.gz")
+            _write_annotated_tsv(in_path, args, idf, tmp_path / "annotated.tsv.gz", IdLabels())
 
 
 class TestSectionEdgeCases:
