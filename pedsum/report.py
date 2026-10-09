@@ -734,7 +734,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     """
     by_check = {r.name: r for r in results}
     width = max(len(label) for label in _CHECK_LABELS.values()) + 1
-    lines = [f"pedigree_summary.py: validating {path} (N={n_total:,})"]
+    lines = [f"pedsum: validating {path} (N={n_total:,})"]
     total_findings = 0
     for group_name, check_names in _CHECK_GROUPS:
         lines.append("")

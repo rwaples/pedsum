@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shlex
 import sys
 import tempfile
 import time
@@ -377,7 +378,7 @@ def _nonnegative_int(v: str) -> int:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = _FullHelpParser(
-        prog="pedigree_summary.py",
+        prog="pedsum",
         description=("Pedigree summary CLI. Depends on numpy, scipy, polars, pyyaml, and pedigree-graph."),
     )
     parser.add_argument(
@@ -1716,7 +1717,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns process exit code."""
     args = _parse_args(argv)
     _init_logging(args.verbose, args.quiet)
-    cmd = " ".join(sys.argv)
+    cmd = shlex.join(["pedsum", *(sys.argv[1:] if argv is None else argv)])
     with MemoryWatchdog(resolve_limit(args.max_memory), phase=_current_profile_phase) as watchdog:
         if args.subcommand == "summarize":
             return _run_summarize(args, cmd)

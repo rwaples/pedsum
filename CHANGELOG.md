@@ -29,6 +29,16 @@ whole command.
 
 ### Added
 
+- **A `pedsum` command and `python -m pedsum`**
+  ([#18](https://github.com/rwaples/pedsum/issues/18)). Installing the
+  package, including from git, now installs the `pedsum` command; before,
+  only the repo-root `pedigree_summary.py` script ran pedsum, and an
+  install did not include it. Both return `main`'s exit code. The README
+  uses `pedsum <command>` throughout, `--help` and `--version` name
+  `pedsum`, and the recorded `command` in every report starts with
+  `pedsum` rather than the path of the script that ran, and is
+  shell-quoted so it can be pasted back.
+  `pedigree_summary.py` still works in an uninstalled checkout.
 - **`pedsum effective-size`** writes `effective_size.yaml`: the summary's
   metadata, `status`, `estimators_requested`, and all eight estimator
   records with their scalars and per-depth arrays in one file.

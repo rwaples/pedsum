@@ -36,16 +36,15 @@ if TYPE_CHECKING:
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Invoke the CLI in-process and return a ``CompletedProcess``-shaped result.
 
-    Runs ``pedsum.cli.main`` under redirected stdout/stderr with ``sys.argv``
-    and the working directory set as a ``python pedigree_summary.py ...``
-    invocation would see them.  A subprocess costs ~1.1s of interpreter and
-    import startup per call, which dominated the suite.
+    Runs ``pedsum.cli.main`` under redirected stdout/stderr with the working
+    directory set as a ``pedsum ...`` invocation would see it.  A subprocess
+    costs ~1.1s of interpreter and import startup per call, which dominated
+    the suite.
     """
     argv = [str(SCRIPT), *args]
     out, err = io.StringIO(), io.StringIO()
-    prev_cwd, prev_argv = os.getcwd(), sys.argv
+    prev_cwd = os.getcwd()
     os.chdir(cwd or REPO)
-    sys.argv = argv
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
@@ -54,7 +53,6 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
                 code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     finally:
         os.chdir(prev_cwd)
-        sys.argv = prev_argv
         logging.getLogger().handlers.clear()
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 

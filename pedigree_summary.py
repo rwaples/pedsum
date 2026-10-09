@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Pedigree summary CLI — thin entry point.
+"""Pedigree summary CLI — thin entry point for an uninstalled checkout.
 
-The implementation lives in the :mod:`pedsum` package; this module stays a
-runnable script (``python pedigree_summary.py summarize|validate ...``) and
+The implementation lives in the :mod:`pedsum` package, and an install
+provides the ``pedsum`` command (and ``python -m pedsum``). This module stays
+a runnable script (``python pedigree_summary.py summarize|validate ...``) and
 re-exports the symbols the test suite imports directly. See ``pedsum/`` for
 the modules and ``DESIGN.md`` for the maintainer map.
-
-Usage:
-    python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
-    python pedigree_summary.py validate  --in PED.tsv --out DIR [options]
 """
 
 from __future__ import annotations

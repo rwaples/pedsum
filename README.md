@@ -26,31 +26,43 @@ cd pedsum
 conda env create -f environment.yml
 # activate conda environment
 conda activate pedsum
+# install the pedsum command into it
+pip install -e .
 ```
+
+Or install the package and its dependencies straight from git:
+
+```bash
+pip install git+https://github.com/rwaples/pedsum.git
+```
+
+Either way installs the `pedsum` command. `python -m pedsum` runs the
+same thing.
 
 ## Quick start
 
 ```bash 
 # run like this:
-python pedigree_summary.py validate --in ...
-python pedigree_summary.py summarize --in ...
-python pedigree_summary.py effective-size --in ...
-python pedigree_summary.py epimight-input --in ...
+pedsum validate --in ...
+pedsum summarize --in ...
+pedsum effective-size --in ...
+pedsum epimight-input --in ...
 ```
 
 ```bash 
 # help:
-python pedigree_summary.py --help 
+pedsum --help 
 ```
 
 A 200-individual, 5-generation example pedigree
-(`example_pedigree.tsv`) ships with the repo. Try it:
+(`example_pedigree.tsv`) ships with the repo (a clone, not a pip
+install). Try it from the repo root:
 
 ```bash
-python pedigree_summary.py validate      --in example_pedigree.tsv --out /tmp/demo-validate
-python pedigree_summary.py summarize     --in example_pedigree.tsv --out /tmp/demo
-python pedigree_summary.py effective-size --in example_pedigree.tsv --out /tmp/demo-ne --birth-year-col birth_year
-python pedigree_summary.py epimight-input --in example_pedigree.tsv --out /tmp/demo-epimight --pairs
+pedsum validate      --in example_pedigree.tsv --out /tmp/demo-validate
+pedsum summarize     --in example_pedigree.tsv --out /tmp/demo
+pedsum effective-size --in example_pedigree.tsv --out /tmp/demo-ne --birth-year-col birth_year
+pedsum epimight-input --in example_pedigree.tsv --out /tmp/demo-epimight --pairs
 ```
 
 `--out` is a directory (created if needed). The bare `summarize` writes
@@ -71,7 +83,7 @@ and the per-individual derived columns.
 ### Validate a pedigree
 
 ```bash
-python pedigree_summary.py validate --in PED.tsv --out DIR
+pedsum validate --in PED.tsv --out DIR
 ```
 
 `--out DIR` is a directory (created if needed). Runs all integrity
@@ -140,7 +152,7 @@ as a shareable artifact.
 ### Summarize a pedigree
 
 ```bash
-python pedigree_summary.py summarize --in PED.tsv --out DIR [options]
+pedsum summarize --in PED.tsv --out DIR [options]
 ```
 
 `--out DIR` is a directory (created if needed). Files written inside:
@@ -228,10 +240,10 @@ predicts. Three groupings are analysed independently:
 
 ```bash
 # analytical screen
-python pedigree_summary.py summarize --in PED.tsv --out DIR --sex-concordance
+pedsum summarize --in PED.tsv --out DIR --sex-concordance
 
 # with permutation calibration (implies --sex-concordance)
-python pedigree_summary.py summarize --in PED.tsv --out DIR \
+pedsum summarize --in PED.tsv --out DIR \
     --sex-concordance-permutations 1000 --sex-concordance-seed 7
 ```
 
@@ -384,7 +396,7 @@ count and seed may remain.
 ### Estimate effective population size
 
 ```bash
-python pedigree_summary.py effective-size --in PED.tsv --out DIR [--estimators NAME[,NAME...]]
+pedsum effective-size --in PED.tsv --out DIR [--estimators NAME[,NAME...]]
 ```
 
 `--out DIR` is a directory (created if needed). The command writes one
@@ -465,10 +477,10 @@ Examples:
 
 ```bash
 # all eight, with Hill's cohort window
-python pedigree_summary.py effective-size --in PED.tsv --out DIR --birth-year-col birth_year
+pedsum effective-size --in PED.tsv --out DIR --birth-year-col birth_year
 
 # only the two coancestry estimators, under an explicit 16 GiB limit
-python pedigree_summary.py effective-size --in PED.tsv --out DIR \
+pedsum effective-size --in PED.tsv --out DIR \
     --estimators ne_coancestry,ne_group_coancestry --max-memory 16G
 ```
 
@@ -480,7 +492,7 @@ exits 3.
 ### Estimate the Mate Correlation
 
 ```bash
-python pedigree_summary.py assortative-mating --in PED.tsv --out DIR --trait COL [COL2] [options]
+pedsum assortative-mating --in PED.tsv --out DIR --trait COL [COL2] [options]
 ```
 
 `--out DIR` is a directory (created if needed). The command writes one
@@ -802,10 +814,10 @@ Examples:
 
 ```bash
 # one binary diagnosis, with the default inference
-python pedigree_summary.py assortative-mating --in PED.tsv --out DIR --trait dx
+pedsum assortative-mating --in PED.tsv --out DIR --trait dx
 
 # two traits, -9 as missing, stratified by birth decade
-python pedigree_summary.py assortative-mating --in PED.tsv --out DIR \
+pedsum assortative-mating --in PED.tsv --out DIR \
     --trait liability dx --trait-missing -9 \
     --stratify-by birth_year --birth-year-col birth_year
 ```
@@ -863,7 +875,7 @@ run.
 ### Emit EPIMIGHT input
 
 ```bash
-python pedigree_summary.py epimight-input --in PED.tsv --out DIR [options]
+pedsum epimight-input --in PED.tsv --out DIR [options]
 ```
 
 Builds the *structural skeleton* of an [EPIMIGHT](https://github.com/BioPsyk/epimight)
@@ -995,7 +1007,7 @@ header and remap `0 → -1`:
   awk 'BEGIN{OFS=" "} {if($3==0)$3=-1; if($4==0)$4=-1; print}' cohort.fam; } \
     > cohort.fam.headed
 
-python pedigree_summary.py summarize \
+pedsum summarize \
     --in cohort.fam.headed --out cohort/ \
     --id-col IID --mother-col MAT --father-col PAT --sex-col SEX
 ```
@@ -1039,7 +1051,7 @@ relationship pairs through degree 5, and per-individual inbreeding (F).
 For a first pass, stop pair counting at degree 2 and skip F:
 
 ```bash
-python pedigree_summary.py summarize \
+pedsum summarize \
     --in cohort.tsv --out cohort/ --threads 10 \
     --max-degree 2 --no-inbreeding
 ```
@@ -1094,7 +1106,7 @@ held, then exits with code 3.
   close it. Memory is sampled once a second, so a fast enough allocation
   can still cross it before pedsum notices. To make a limit binding, run
   pedsum in a cgroup, e.g.
-  `systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 python pedigree_summary.py ...`.
+  `systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0 pedsum ...`.
 - Every output file is written to a hidden `.<name>.partial-<pid>`
   beside it and renamed into place when complete, so a stop never leaves
   a truncated output. A stop mid-write can leave the `.partial-<pid>`
