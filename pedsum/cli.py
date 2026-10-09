@@ -1055,7 +1055,7 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
         pg = _build_pedigree_graph(df)
     mother_rows, father_rows = pg.mother_rows, pg.father_rows
     n_indiv = len(df)
-    max_depth = int(df["ped_depth"].max()) if n_indiv else 0
+    max_depth = int(df["ped_depth"].to_numpy().max()) if n_indiv else 0
 
     # One cheap pass, but path counts can double with each level of a deep
     # pedigree and overflow int64; counting first fails before the expensive
