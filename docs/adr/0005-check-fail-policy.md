@@ -107,6 +107,14 @@ argv.
   decompression) before and after the move to one Fixed Pedigree, on a corpus
   of 30 `validate` and 6 `summarize` runs. `validate`'s INFO lines now use
   `summarize`'s wording for sex imputation and reordering.
-- A pedigree with a cycle whose `acyclic` Check SKIPped (because a parent is
-  missing) is still written in input order, as before; the builder leaves the
-  order alone when any depth is -1.
+- `acyclic` no longer requires `parent_refs_present_*`
+  ([pedsum#22](https://github.com/rwaples/pedsum/issues/22)). It had been
+  SKIPped whenever a parent ID was missing, an `autofix` failure that never
+  blocks, so a cycle reached `validate.tsv.gz` with exit 1, or exit 0 under
+  `--drop-offending`. The depth it reads already counts a parent with no row
+  as a founder, so it now runs, and BLOCKs or drops the cycle, in every
+  pedigree whose IDs parse. `fix_pedigree` asserts that every row has a depth.
+- `self_loops` is `keep_or_drop`, but a self-loop is also a one-person
+  cycle, so `acyclic` FAILs with it and plain `validate` BLOCKs. Under
+  `--drop-offending` the `self_loops` policy is what removes it: `acyclic`
+  drops only the members of cycles of two or more (ADR 0003).

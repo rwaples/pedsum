@@ -714,7 +714,10 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "acyclic",
-        ("parent_refs_present_mother", "parent_refs_present_father", "parents_distinct"),
+        # Not parent_refs_present_*: a parent with no row counts as a founder
+        # for depth, so a cycle is found (and BLOCKs) even when a parent is
+        # missing (pedsum#22).
+        (*_IDS, "parents_distinct"),
         _ck_acyclic,
         "acyclic (no descent cycles)",
         "Graph structure",

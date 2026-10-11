@@ -102,15 +102,13 @@ def fix_pedigree(
         logger.info("added %d phantom parent(s) for half-founders", len(phantoms))
 
     # Parents before children, by the depth the acyclic Check computed. A
-    # cycle (depth -1) can only reach here when acyclic SKIPped; leave the
-    # input order then.
+    # cycle BLOCKs or is dropped before a pedigree is fixed (ADR 0005).
     depth = ctx.depth
-    order = np.arange(len(ids))
-    if (depth >= 0).all():
-        order = np.argsort(depth, kind="stable")
-        n_moved = int((order != np.arange(len(ids))).sum())
-        if n_moved:
-            logger.info("reordering %d/%d row(s) into topological order (parents before children)", n_moved, len(ids))
+    assert (depth >= 0).all(), "fix_pedigree needs an acyclic pedigree"
+    order = np.argsort(depth, kind="stable")
+    n_moved = int((order != np.arange(len(ids))).sum())
+    if n_moved:
+        logger.info("reordering %d/%d row(s) into topological order (parents before children)", n_moved, len(ids))
 
     return FixedPedigree(
         ids=ids[order],

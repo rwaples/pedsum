@@ -134,13 +134,15 @@ data first. Two kinds of failure hard-block:
   without an id, an unrecognized sex token, a negative id, an
   out-of-range parent token, an unparsable birth year, an empty
   pedigree;
-- cycles, duplicate IDs, a mother equal to the father, sex conflicts on
-  missing parents, unresolved sex without `--allow-missing-sex`, and
-  sex-role ambiguity.
+- cycles (including a self-loop, an individual listed as its own
+  parent, which is a one-person cycle), duplicate IDs, a mother equal to
+  the father, sex conflicts on missing parents, unresolved sex without
+  `--allow-missing-sex`, and sex-role ambiguity. A cycle blocks even
+  when some parent IDs are missing from the file.
 
-The other failures (self-loops, sex-role contradictions, birth years out
-of range or out of order) are written to `DIR/validate.tsv.gz` as they
-are, with exit 1; `--drop-offending` removes them.
+Sex-role contradictions and birth years out of range or out of order are
+written to `DIR/validate.tsv.gz` as they are, with exit 1;
+`--drop-offending` removes them.
 
 **`--drop-offending`** turns those hard-blocks into a passing pedigree by
 *removing* the offending individuals rather than refusing. It iteratively drops

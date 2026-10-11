@@ -308,3 +308,41 @@ def test_validate_column_level_failure_blocks(tmp_path, text, check):
     assert f"  - {check}\n" in r.stderr
     assert not (out / "validate.tsv.gz").exists()
     assert (out / "validate.log").exists()
+
+
+# A cycle (1 and 2 are each other's mother) plus a father ID (99) missing from the file.
+_CYCLE_WITH_MISSING_PARENT = "id\tmother\tfather\tsex\n1\t2\t3\tF\n2\t1\t3\tF\n3\t-1\t-1\tM\n4\t-1\t99\tF\n"
+
+
+def test_cycle_blocks_even_with_a_missing_parent(tmp_path):
+    """The cycle Check runs when a parent ID is missing, so the cycle BLOCKs plain validate (pedsum#22)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(_CYCLE_WITH_MISSING_PARENT)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert "  - cycle detected\n" in r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+
+
+def test_drop_offending_drops_a_cycle_with_a_missing_parent(tmp_path):
+    """--drop-offending removes the cycle members and keeps the founder for the missing parent (pedsum#22)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(_CYCLE_WITH_MISSING_PARENT)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
+    assert r.returncode == 1, r.stderr
+    with gzip.open(out / "validate.tsv.gz", "rt") as fh:
+        fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
+    assert sorted(fixed["id"].to_list()) == ["3", "4", "99"]
+    dropped = pl.read_csv(out / "validate.dropped.tsv", separator="\t", infer_schema=False)
+    assert sorted(set(dropped["id"].to_list())) == ["1", "2"]
+
+
+def test_self_loop_blocks_plain_validate_as_a_cycle(tmp_path):
+    """A self-loop is a one-person cycle: acyclic FAILs with self_loops, so plain validate BLOCKs."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t3\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out")])
+    assert r.returncode == 2, r.stderr
+    assert "  - cycle detected\n" in r.stderr

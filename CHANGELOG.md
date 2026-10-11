@@ -289,6 +289,13 @@ whole command.
 
 ### Fixed
 
+- **`validate` finds cycles when a parent ID is missing**
+  ([#22](https://github.com/rwaples/pedsum/issues/22)). `acyclic` was
+  skipped whenever any parent ID was missing from the file, so a cycle was
+  written to `validate.tsv.gz` with exit 1, or with exit 0 and "nothing
+  to drop" under `--drop-offending`, and the written file then failed its
+  own re-validation. `acyclic` now runs on every pedigree whose IDs parse:
+  plain `validate` BLOCKs, and `--drop-offending` drops the cycle members.
 - **`validate --help` describes `--sex-col` as the other commands do**:
   M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
   offered the 0=female, 1=male coding that 0.15 removed.
