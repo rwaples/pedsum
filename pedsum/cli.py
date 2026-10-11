@@ -36,7 +36,6 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.fixed_pedigree import _next_free_id, fix_pedigree, render_fixed_pedigree
 from pedsum.ids import PHANTOM_PREFIX
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
@@ -78,17 +77,16 @@ from pedsum.sections import (
 from pedsum.sex_concordance import compute_offspring_sex_concordance
 from pedsum.validate import (
     DROP_FRACTION_WARN,
-    DROPPABLE_CHECKS,
-    blocking_failures,
+    fix_validated,
     load_and_validate,
-    reduce_pedigree,
     validate_pedigree,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from pedsum.validate import ValidationContext
+    from pedsum.fixed_pedigree import FixedPedigree
+    from pedsum.validate import ReductionResult
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -992,20 +990,6 @@ def _validation_kwargs(args: argparse.Namespace) -> dict:
     }
 
 
-def _reduction_rebuild_kwargs(args: argparse.Namespace) -> dict:
-    """Context-rebuild kwargs for the ``--drop-offending`` loop / self-verify.
-
-    Exactly ``_validation_kwargs`` minus the file-only ``sep``, plus
-    ``require_birth_year_col=False`` — what ``_build_context_from_df`` needs to
-    rebuild a context from the reduced pedigree each round under the invoked
-    flags (so the tolerance flags compose).
-    """
-    kwargs = _validation_kwargs(args)
-    del kwargs["sep"]
-    kwargs["require_birth_year_col"] = False
-    return kwargs
-
-
 def _write_validation_failure_log(args: argparse.Namespace) -> None:
     """Persist a full ``validate.log`` after summarize's fail-fast validation bailed.
 
@@ -1396,65 +1380,11 @@ def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
     return 0
 
 
-def _write_fixed_pedigree(
-    ctx: ValidationContext, args: argparse.Namespace, out_dir: Path, *, next_id: int | None = None
-) -> int:
-    """Write the Fixed Pedigree of ``ctx`` to ``validate.tsv.gz``; return total rows written.
-
-    Shared by the normal validate path and ``--drop-offending`` (which passes
-    the reduced context, and the input's ``next_id`` so no phantom reuses a
-    dropped ID).
-    """
-    fp = fix_pedigree(ctx, fill_half_founders=args.fill_half_founders, next_id=next_id)
-    out = render_fixed_pedigree(
-        fp,
-        ctx.df_raw,
-        id_col=args.id_col,
-        sex_col=args.sex_col,
-        mother_col=args.mother_col,
-        father_col=args.father_col,
-    )
-    out_path = out_dir / "validate.tsv.gz"
-    _to_csv_gz(out, out_path)
-    sys.stderr.write(f"wrote {out_path} ({len(out):,} rows; {len(fp.founders)} founder(s) added)\n")
-    return len(out)
-
-
-def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, ctx: ValidationContext) -> int:
-    """``--drop-offending``: reduce the pedigree to a passing one.
-
-    The caller has already BLOCKed on column/parse-level failures (no row
-    removal fixes them). Iterate to a fixpoint, write the removal manifest + reduced
-    pedigree, self-verify the result passes under the invoked flags, and exit 1
-    if anything was dropped (0 if nothing needed dropping).
-    """
+def _report_reduction(result: ReductionResult, out_dir: Path) -> None:
+    """Write the ``--drop-offending`` manifest and the reduction summary to stderr."""
     manifest_path = out_dir / "validate.dropped.tsv"
-    if not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
-        _write_dropped_manifest([], manifest_path)
-        _write_fixed_pedigree(ctx, args, out_dir)
-        sys.stderr.write("--drop-offending: nothing to drop; pedigree already passes\n")
-        return 0
-
-    result = reduce_pedigree(ctx, rebuild_kwargs=_reduction_rebuild_kwargs(args))
-    if len(result.df_current) == 0:
-        sys.stderr.write("\nBLOCKED — --drop-offending removed every individual (empty pedigree)\n")
-        return 2
-
     _write_dropped_manifest(result.dropped, manifest_path)
     sys.stderr.write(f"wrote {manifest_path} ({result.n_distinct_dropped} id(s) dropped)\n")
-    _write_fixed_pedigree(result.ctx_final, args, out_dir, next_id=_next_free_id(*ctx.require_id_parents()))
-
-    # Self-verify the written artifact passes under the invoked flags. The
-    # output is always tab-separated regardless of the input --sep, so sniff it.
-    out_path = out_dir / "validate.tsv.gz"
-    _n, vresults, _vf, _vctx = validate_pedigree(
-        out_path,
-        **{**_validation_kwargs(args), "sep": "auto"},  # ty: ignore[invalid-argument-type]
-    )
-    failed = sorted(r.name for r in vresults if r.status == "FAIL")
-    if failed:
-        raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {failed}")
-
     pct = 100.0 * result.n_rows_removed / result.n_input_rows
     sys.stderr.write(
         f"--drop-offending: dropped {result.n_distinct_dropped} individual(s) / "
@@ -1466,7 +1396,6 @@ def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, 
             "--drop-offending removed %.1f%% of rows; relatedness / Ne / founder counts reflect the reduced set",
             pct,
         )
-    return 1
 
 
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
@@ -1491,8 +1420,6 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         )
         return 2
 
-    by_check = {r.name: r for r in results}
-
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
     out_dir = args.out_dir
@@ -1500,21 +1427,29 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     _write_validate_log(findings, log_path, ctx.id_labels)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
-    blocks = blocking_failures(by_check, drop_offending=args.drop_offending)
-    if blocks:
-        if args.drop_offending:
-            sys.stderr.write("\nBLOCKED — --drop-offending cannot fix these by removing individuals:\n")
-        else:
-            sys.stderr.write("\nBLOCKED — fix the following before re-running:\n")
-        for _name, message in blocks:
-            sys.stderr.write(f"  - {message}\n")
-        return 2
+    def write(frame: pl.DataFrame, fp: FixedPedigree) -> Path:
+        out_path = out_dir / "validate.tsv.gz"
+        _to_csv_gz(frame, out_path)
+        sys.stderr.write(f"wrote {out_path} ({len(frame):,} rows; {len(fp.founders)} founder(s) added)\n")
+        return out_path
 
-    if args.drop_offending:
-        return _run_validate_drop(args, by_check, out_dir, ctx)
-
-    _write_fixed_pedigree(ctx, args, out_dir)
-    return 0 if not findings else 1
+    outcome = fix_validated(
+        ctx,
+        results,
+        drop_offending=args.drop_offending,
+        fill_half_founders=args.fill_half_founders,
+        write=write,
+    )
+    if outcome.blocked is not None:
+        sys.stderr.write(f"\nBLOCKED — {outcome.blocked}\n")
+        for line in outcome.block_lines:
+            sys.stderr.write(f"  - {line}\n")
+    elif outcome.reduction is not None:
+        _report_reduction(outcome.reduction, out_dir)
+    elif args.drop_offending:
+        _write_dropped_manifest([], out_dir / "validate.dropped.tsv")
+        sys.stderr.write("--drop-offending: nothing to drop; pedigree already passes\n")
+    return outcome.exit_code
 
 
 def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> int:

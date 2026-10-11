@@ -39,7 +39,7 @@ from pedsum.checks import (
     _check_unknown_sex,
     _summarize_findings,
 )
-from pedsum.fixed_pedigree import fix_pedigree
+from pedsum.fixed_pedigree import _next_free_id, fix_pedigree, render_fixed_pedigree
 from pedsum.ids import parse_ids
 from pedsum.parse import (
     _BIRTH_YEAR_DEFAULT_MIN,
@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
+    from pedsum.fixed_pedigree import FixedPedigree
     from pedsum.ids import IdLabels
 
 
@@ -294,6 +295,27 @@ class ValidationContext:
         assert self.mothers is not None
         assert self.fathers is not None
         return self.ids, self.mothers, self.fathers
+
+    def rebuild_kwargs(self) -> dict:
+        """This context's config as ``_build_context_from_df`` kwargs.
+
+        Rebuilds a context from another frame (a ``--drop-offending`` round)
+        under the same columns, flags and bounds, so the tolerances compose.
+        """
+        return {
+            "id_col": self.id_col,
+            "sex_col": self.sex_col,
+            "mother_col": self.mother_col,
+            "father_col": self.father_col,
+            "zero_as_missing": self.zero_as_missing,
+            "allow_missing_sex": self.allow_missing_sex,
+            "override_asserted_sex": self.override_asserted_sex,
+            "birth_year_col": self.birth_year_col,
+            "birth_year_min": self.birth_year_min,
+            "birth_year_max": self.birth_year_max,
+            "require_birth_year_col": False,
+            "no_sex_check": self.no_sex_check,
+        }
 
     @property
     def by_max(self) -> int:
@@ -1099,7 +1121,7 @@ def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]
     return ids
 
 
-def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> ReductionResult:
+def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     """Iteratively drop offending individuals until the pedigree passes (fixpoint).
 
     Each round runs the registry (`_run_checks`, which re-imputes sex via a fresh
@@ -1111,6 +1133,7 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
     """
     mother_col = ctx0.mother_col
     father_col = ctx0.father_col
+    rebuild_kwargs = ctx0.rebuild_kwargs()
     df_cur = ctx0.df_raw
     n_input_rows = len(df_cur)
     ctx = ctx0
@@ -1183,3 +1206,88 @@ def reduce_pedigree(ctx0: ValidationContext, *, rebuild_kwargs: dict) -> Reducti
         n_cleared_refs=cleared_refs,
         ctx_final=ctx,
     )
+
+
+@dataclass(frozen=True)
+class ValidateOutcome:
+    """What ``validate`` made of a validated input: BLOCKED, or a Fixed Pedigree written."""
+
+    exit_code: int
+    # Set when BLOCKED: the reason after "BLOCKED — " and one line per cause.
+    # Nothing was written.
+    blocked: str | None = None
+    block_lines: list[str] = field(default_factory=list)
+    fixed: FixedPedigree | None = None
+    # Set when --drop-offending removed anyone.
+    reduction: ReductionResult | None = None
+
+
+def fix_validated(
+    ctx: ValidationContext,
+    results: list[CheckResult],
+    *,
+    drop_offending: bool,
+    fill_half_founders: bool,
+    write: Callable[[pl.DataFrame, FixedPedigree], Path],
+) -> ValidateOutcome:
+    """Decide what ``validate`` writes for ``ctx`` and its ``results``, and write it.
+
+    BLOCKs per each Check's Fail Policy (:func:`blocking_failures`). Otherwise
+    builds the Fixed Pedigree, after reducing it to a passing one under
+    ``--drop-offending`` (ADR 0003), renders it, and hands the frame to
+    ``write``, which returns the path written. A Reduced Pedigree is then
+    re-validated from that file under the same flags; a FAIL there is a bug and
+    raises ``PedigreeError``.
+
+    Exit codes: 2 when BLOCKED. Otherwise plain ``validate`` exits 1 when any
+    Check FAILed, and ``--drop-offending`` exits 1 when it dropped anyone; else 0.
+    """
+    by_check = {r.name: r for r in results}
+    blocks = blocking_failures(by_check, drop_offending=drop_offending)
+    if blocks:
+        reason = (
+            "--drop-offending cannot fix these by removing individuals:"
+            if drop_offending
+            else "fix the following before re-running:"
+        )
+        return ValidateOutcome(exit_code=2, blocked=reason, block_lines=[msg for _name, msg in blocks])
+
+    if not drop_offending or not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
+        fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write)
+        failed = any(r.status == "FAIL" for r in results)
+        return ValidateOutcome(exit_code=1 if failed and not drop_offending else 0, fixed=fp)
+
+    reduction = reduce_pedigree(ctx)
+    if len(reduction.df_current) == 0:
+        return ValidateOutcome(exit_code=2, blocked="--drop-offending removed every individual (empty pedigree)")
+    # Number phantoms past the input's IDs so none reuses a dropped ID.
+    next_id = _next_free_id(*ctx.require_id_parents())
+    fp, path = _write_fixed(reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write)
+
+    # Self-verify the written file under the invoked flags. It is always
+    # tab-separated whatever the input's separator, so sniff it.
+    verify_kwargs = {k: v for k, v in ctx.rebuild_kwargs().items() if k != "require_birth_year_col"}
+    _n, vresults, _vf, _vctx = validate_pedigree(path, sep="auto", **verify_kwargs)
+    still_failing = sorted(r.name for r in vresults if r.status == "FAIL")
+    if still_failing:
+        raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {still_failing}")
+    return ValidateOutcome(exit_code=1, fixed=fp, reduction=reduction)
+
+
+def _write_fixed(
+    ctx: ValidationContext,
+    *,
+    fill_half_founders: bool,
+    next_id: int | None,
+    write: Callable[[pl.DataFrame, FixedPedigree], Path],
+) -> tuple[FixedPedigree, Path]:
+    fp = fix_pedigree(ctx, fill_half_founders=fill_half_founders, next_id=next_id)
+    frame = render_fixed_pedigree(
+        fp,
+        ctx.df_raw,
+        id_col=ctx.id_col,
+        sex_col=ctx.sex_col,
+        mother_col=ctx.mother_col,
+        father_col=ctx.father_col,
+    )
+    return fp, write(frame, fp)

@@ -19,7 +19,7 @@ from those above it):
 | `pedsum/pedigree_ops.py` | low-level array helpers (parent rows, parent references, sib groups, topological depth, sort-based distinct integers) |
 | `pedsum/parse.py` | delimiter sniffing, column coercion, sex decoding, trait-column reading |
 | `pedsum/checks.py` | per-check finding producers + check metadata (`_CHECK_*`) |
-| `pedsum/validate.py` | `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) + sex imputation |
+| `pedsum/validate.py` | `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) + sex imputation; Fail Policies and `blocking_failures`; `fix_validated` (what `validate` writes, incl. the `--drop-offending` reduction and self-verify) |
 | `pedsum/fixed_pedigree.py` | the Fixed Pedigree: founder synthesis, phantom parents, resolved sex, topological order (`fix_pedigree`), and the string frame `validate` writes (`render_fixed_pedigree`) |
 | `pedsum/pairs.py` | relationship-pair enumeration + `PedigreeGraph` construction |
 | `pedsum/sections.py` | per-section summary computations |
