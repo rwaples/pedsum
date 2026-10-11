@@ -10,6 +10,7 @@ differs from execution order) and stays explicit.
 
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -301,21 +302,12 @@ class ValidationContext:
 
         Rebuilds a context from another frame (a ``--drop-offending`` round)
         under the same columns, flags and bounds, so the tolerances compose.
+        Read off that function's parameters, so a new flag cannot be left out.
         """
-        return {
-            "id_col": self.id_col,
-            "sex_col": self.sex_col,
-            "mother_col": self.mother_col,
-            "father_col": self.father_col,
-            "zero_as_missing": self.zero_as_missing,
-            "allow_missing_sex": self.allow_missing_sex,
-            "override_asserted_sex": self.override_asserted_sex,
-            "birth_year_col": self.birth_year_col,
-            "birth_year_min": self.birth_year_min,
-            "birth_year_max": self.birth_year_max,
-            "require_birth_year_col": False,
-            "no_sex_check": self.no_sex_check,
-        }
+        params = inspect.signature(_build_context_from_df).parameters
+        kwargs = {name: getattr(self, name) for name in params if name != "df"}
+        kwargs["require_birth_year_col"] = False
+        return kwargs
 
     @property
     def by_max(self) -> int:
@@ -1281,7 +1273,8 @@ def fix_validated(
 
     # Self-verify the written file under the invoked flags. It is always
     # tab-separated whatever the input's separator, so sniff it.
-    verify_kwargs = {k: v for k, v in ctx.rebuild_kwargs().items() if k != "require_birth_year_col"}
+    verify_params = inspect.signature(validate_pedigree).parameters
+    verify_kwargs = {k: v for k, v in ctx.rebuild_kwargs().items() if k in verify_params}
     _n, vresults, _vf, _vctx = validate_pedigree(path, sep="auto", **verify_kwargs)
     still_failing = sorted(r.name for r in vresults if r.status == "FAIL")
     if still_failing:

@@ -76,3 +76,20 @@ def test_skipped_and_absent_checks_never_block():
     results = {"required_columns": CheckResult(name="required_columns", status="FAIL")}
     results["id_dtype"] = CheckResult(name="id_dtype", status="SKIP", skip_reason="required_columns failed")
     assert blocking_failures(results, drop_offending=False) == [("required_columns", "required_columns")]
+
+
+def test_rebuild_kwargs_cover_every_validation_option(tmp_path):
+    """The reduction rebuild and the self-verify get every option validate_pedigree takes, but path and sep."""
+    import inspect
+
+    from pedsum.validate import _build_context_from_df, validate_pedigree
+
+    ped = tmp_path / "p.tsv"
+    ped.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n")
+    _n, _results, _findings, ctx = validate_pedigree(ped, allow_missing_sex=True, no_sex_check=True)
+    kwargs = ctx.rebuild_kwargs()
+    assert set(kwargs) == set(inspect.signature(_build_context_from_df).parameters) - {"df"}
+    assert set(inspect.signature(validate_pedigree).parameters) - {"path", "sep"} <= set(kwargs)
+    assert kwargs["allow_missing_sex"] is True
+    assert kwargs["no_sex_check"] is True
+    assert kwargs["require_birth_year_col"] is False
