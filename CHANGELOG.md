@@ -282,6 +282,13 @@ whole command.
   1.44.2's string methods return `None`, so a fresh install failed on its
   first ID column (`AttributeError: 'NoneType' object has no attribute
   'str'`) and 281 of 542 tests failed. polars 2 is the way past the cap.
+- **`scripts/verify/verify_pedsum.sh` checks the install the README
+  describes** ([#19](https://github.com/rwaples/pedsum/issues/19)). It
+  runs `pip install -e .` after creating the conda env, then runs the
+  `pedsum` command and `python -m pedsum` from outside the clone. It
+  reads the expected version from the tag, or from `pedsum/base.py` when
+  the ref is not a `vX.Y.Z` tag; it had expected 0.10.0. `--git-install`
+  also checks `pip install git+URL@REF` in a bare Python env.
 - **`validate.dropped.tsv` rows come in one order on every run**
   ([#15](https://github.com/rwaples/pedsum/issues/15)): by round, then
   id, then check. Each round's reasons were collected in a set of
