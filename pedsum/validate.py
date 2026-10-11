@@ -39,6 +39,7 @@ from pedsum.checks import (
     _check_unknown_sex,
     _summarize_findings,
 )
+from pedsum.fixed_pedigree import fix_pedigree
 from pedsum.ids import parse_ids
 from pedsum.parse import (
     _BIRTH_YEAR_DEFAULT_MIN,
@@ -962,7 +963,9 @@ def load_and_validate(
 
     Rows are topologically sorted (parents before children). pedigree-graph
     accepts rows in any order, so the sort is pedsum's own output contract, not
-    a construction precondition.
+    a construction precondition. The frame is the Fixed Pedigree's
+    (:mod:`pedsum.fixed_pedigree`): the same rows, sex and order ``validate``
+    writes for this input.
     """
     t0 = time.perf_counter()
     ctx = _build_context(
@@ -983,49 +986,12 @@ def load_and_validate(
         no_sex_check=no_sex_check,
     )
     _run_checks(ctx, on_fail="raise")
-    ids, mothers, fathers = ctx.require_id_parents()
-
-    imp = ctx.imputation
-    sex = imp.imputed_sex
-    n = len(ids)
-    n_overridden = int(imp.overridden_mask.sum())
-    n_unresolved = int((sex == SEX_UNKNOWN).sum())
-    if imp.n_imputed > 0 or n_overridden > 0 or n_unresolved > 0:
-        logger.info(
-            "sex imputation: %d from missing, %d overridden from role, "
-            "%d unresolved (sex_source column has per-row detail)",
-            imp.n_imputed,
-            n_overridden,
-            n_unresolved,
-        )
-    if allow_missing_sex:
-        n_ambiguous = int(imp.ambiguous_mask.sum())
-        if n_ambiguous > 0:
-            logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
-        n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-        if n_orphan > 0:
-            logger.info("kept %d row(s) with sex=%d (--allow-missing-sex)", n_orphan, SEX_UNKNOWN)
-
-    # Sort by the depth the acyclic Check computed (parents before children).
-    depth = ctx.depth
-    columns = {"id": ids, "sex": sex, "mother": mothers, "father": fathers, "sex_source": imp.sex_source}
-    if ctx.birth_year is not None:
-        columns["birth_year"] = ctx.birth_year
-    columns["ped_depth"] = depth
-    natural = np.arange(n)
-    order = np.argsort(depth, kind="stable")
-    if not np.array_equal(order, natural):
-        logger.info(
-            "reordering %d/%d row(s) into topological order (parents before children)",
-            int((order != natural).sum()),
-            n,
-        )
-        columns = {name: values[order] for name, values in columns.items()}
-    # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
-    out = pl.DataFrame(columns, schema_overrides={"sex_source": pl.String})
-    logger.info("validated %d rows in %.2fs", n, time.perf_counter() - t0)
-    assert ctx.id_labels is not None
-    return out, ctx.id_labels
+    # Every Check passed, so no parent is missing and no founder is synthesized:
+    # the frame is the input rows of the pedigree validate would write.
+    fp = fix_pedigree(ctx)
+    assert not fp.founders
+    logger.info("validated %d rows in %.2fs", len(fp.ids), time.perf_counter() - t0)
+    return fp.frame(), fp.labels
 
 
 def validate_pedigree(
