@@ -171,12 +171,16 @@ What a **Check**'s `FAIL` does to the pedigree `validate` writes, declared once 
 _Avoid_: severity, droppable (as the whole story)
 
 **Blocking Check**:
-A **Check** whose `FAIL` prevents `validate` from writing a fixed pedigree, surfaced to the user as `BLOCKED`. Whether a Check blocks depends on the mode and is derived from its **Fail Policy**: in plain `validate`, `block` and `block_or_drop` Checks block; under `--drop-offending`, only `block` Checks do. Non-blocking failures still write the fixed output and report **Findings**.
+A **Check** whose `FAIL` prevents `validate` from writing the **Fixed Pedigree**, surfaced to the user as `BLOCKED`. Whether a Check blocks depends on the mode and is derived from its **Fail Policy**: in plain `validate`, `block` and `block_or_drop` Checks block; under `--drop-offending`, only `block` Checks do. Non-blocking failures still write the Fixed Pedigree and report **Findings**.
 _Avoid_: hard error, fatal, fatal error
+
+**Fixed Pedigree**:
+The input pedigree after pedsum's auto-fixes: a **Founder** row synthesized for each missing parent ID, sex resolved from parent role (recorded per row in `sex_source`), rows in topological order, and, with `--fill-half-founders`, a phantom parent for each **Half-Founder**. `validate` writes it as `validate.tsv.gz` (the input's own tokens, sex in PLINK coding); `summarize` and the other commands read the same pedigree, which for them has no synthesized rows because every **Check** passed. Under `--drop-offending`, `validate` writes the Fixed Pedigree of the **Reduced Pedigree**. Built in one place, `pedsum/fixed_pedigree.py` (ADR 0005).
+_Avoid_: cleaned pedigree, corrected pedigree, validated output
 
 **Reduced Pedigree**:
 The pedigree `validate --drop-offending` emits after removing every individual named in a droppable **Finding** — and clearing references to each removed individual — so that the result passes every applicable **Check** under the flags it was produced with. A Reduced Pedigree is a *different* pedigree from the input: it has fewer individuals, individuals that lost a parent become **Half-Founders**, and relationships routed through removed individuals are gone — so relatedness, **F (Inbreeding Coefficient)**, **Effective Population Size (Ne)**, and **Founder** counts computed on it differ from the input. Column/file-level Checks (a missing column, a row without an id) are never resolvable by removal and still `BLOCK`.
-_Avoid_: "cleaned pedigree", "filtered pedigree", "fixed pedigree" (the latter is the un-reduced imputed + founder-added output)
+_Avoid_: "cleaned pedigree", "filtered pedigree", "Fixed Pedigree" alone (that names the auto-fixed output, reduced or not)
 
 ## Relationships
 

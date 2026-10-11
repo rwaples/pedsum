@@ -1,4 +1,4 @@
-# ADR 0005: A Check's Fail Policy decides blocking in both `validate` modes
+# ADR 0005: Check Fail Policies, and one Fixed Pedigree for `validate` and `summarize`
 
 Status: accepted
 
@@ -31,6 +31,14 @@ only half of the information needed to tell them apart:
 | `keep_or_drop` | write the pedigree with the contradiction kept | remove the flagged ids |
 | `autofix` | synthesize founders | synthesize founders |
 
+The pedigree `validate` writes was assembled in `cli.py` (founder rows for
+missing parents, phantom parents, the PLINK sex column and `sex_source`, the
+topological reorder) with helpers in `report.py`, while `load_and_validate`
+repeated the sex-imputation logging and the reorder to build the frame
+`summarize` reads. The `--drop-offending` orchestration and its self-verify
+also lived in the CLI, so both `validate` paths could be tested only through
+argv.
+
 ## Decision
 
 - **Each `Check` declares a `fail_policy: FailPolicy`** with the four values
@@ -52,6 +60,19 @@ only half of the information needed to tell them apart:
   `--no-override-asserted-sex`. The README had said that flag "reverts to
   hard-blocking"; the code never did, and the README is corrected.
 
+- **One Fixed Pedigree.** `pedsum/fixed_pedigree.py` builds it:
+  `fix_pedigree(ctx, fill_half_founders=..., next_id=...)` returns a
+  `FixedPedigree` (ID codes, resolved sex, parents, depth, the input row of
+  each output row, the synthesized founders, labels), and
+  `render_fixed_pedigree` turns it into the string frame `validate` writes.
+  `load_and_validate` returns `fix_pedigree(ctx).frame()`, so `summarize`
+  reads the same rows, sex and order `validate` writes for that input. Every
+  Check has passed there, so no founder is synthesized; an assert holds that.
+- **`fix_validated(ctx, results, ..., write=...)` decides what `validate`
+  writes**: BLOCKED, the Fixed Pedigree, or the Fixed Pedigree of a Reduced
+  Pedigree, which it re-validates from the written file. The CLI passes the
+  writer, prints the outcome, and exits with its code.
+
 ## Considered alternatives
 
 - **Add only a second boolean (`blocks_plain`) next to `droppable`.** Two
@@ -64,6 +85,14 @@ only half of the information needed to tell them apart:
   output still carries the bad token. Rejected: one rule for both modes, and
   the file is only written when it can be read back.
 
+- **Self-verify the Reduced Pedigree in memory**, by rebuilding a context
+  from the rendered frame. It would drop the file round-trip, but then nothing
+  checks that the written TSV reads back the same; the writer is passed in
+  instead.
+- **Let `summarize` accept `keep_or_drop` failures**, as `validate` writes
+  them. Out of scope: `summarize` stays fail-fast, and only the source of its
+  frame changed.
+
 ## Consequences
 
 - A new Check must pick a Fail Policy; the dataclass has no default, and
@@ -74,3 +103,10 @@ only half of the information needed to tell them apart:
   were reading an unvalidated pedigree.
 - The BLOCKED lines of plain `validate` follow registry order rather than the
   old hand-written order. No test or documented interface depended on it.
+- `validate.tsv.gz` and the `summarize` outputs were byte-identical (after
+  decompression) before and after the move to one Fixed Pedigree, on a corpus
+  of 30 `validate` and 6 `summarize` runs. `validate`'s INFO lines now use
+  `summarize`'s wording for sex imputation and reordering.
+- A pedigree with a cycle whose `acyclic` Check SKIPped (because a parent is
+  missing) is still written in input order, as before; the builder leaves the
+  order alone when any depth is -1.
