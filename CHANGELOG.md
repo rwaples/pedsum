@@ -167,6 +167,10 @@ whole command.
   their BLOCKED lists from it
   ([ADR 0005](docs/adr/0005-check-fail-policy.md)). The BLOCKED lines of
   plain `validate` now follow the Check order of the summary.
+- **`validate` removes a `validate.tsv.gz` or `validate.dropped.tsv` left
+  in `--out` by an earlier run** before it starts, so a BLOCKED run, or a
+  plain run after a `--drop-offending` one, leaves no file from another
+  input behind.
 - **IDs are strings** ([#16](https://github.com/rwaples/pedsum/issues/16)).
   Two tokens are the same ID only if they are the same string, and every
   output writes IDs as the input wrote them. Before, `validate` and

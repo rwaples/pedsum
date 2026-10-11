@@ -346,3 +346,21 @@ def test_self_loop_blocks_plain_validate_as_a_cycle(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out")])
     assert r.returncode == 2, r.stderr
     assert "  - cycle detected\n" in r.stderr
+
+
+def test_blocked_run_removes_a_previous_runs_outputs(tmp_path):
+    """A BLOCKED re-run into the same --out leaves no validate.tsv.gz / validate.dropped.tsv from an earlier input."""
+    out = tmp_path / "out"
+    good = tmp_path / "good.tsv"
+    good.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t2\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(good), "--out", str(out), "--drop-offending"])
+    assert r.returncode == 0, r.stderr
+    assert (out / "validate.tsv.gz").exists()
+    assert (out / "validate.dropped.tsv").exists()
+    bad = tmp_path / "bad.tsv"
+    bad.write_text("id\tmother\tsex\n1\t-1\tM\n")
+    r = run_pedsum(["validate", "--in", str(bad), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+    assert not (out / "validate.dropped.tsv").exists()
+    assert (out / "validate.log").exists()

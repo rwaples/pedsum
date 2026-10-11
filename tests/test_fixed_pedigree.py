@@ -108,17 +108,25 @@ def test_frame_matches_the_arrays(tmp_path):
 
 
 def _outcome(path, **kwargs):
+    """Run fix_validated on ``path``; return the outcome and the calls made to its writers, in order."""
     _n, results, _findings, ctx = validate_pedigree(path)
-    written: list = []
+    calls: list = []
 
-    def write(frame, fp):
+    def write_pedigree(frame, fp):
         out = path.parent / "validate.tsv"
         frame.write_csv(out, separator="\t")
-        written.append(frame)
+        calls.append(("pedigree", frame))
         return out
 
-    outcome = fix_validated(ctx, results, write=write, **kwargs)
-    return outcome, written
+    def write_manifest(dropped):
+        calls.append(("manifest", dropped))
+
+    outcome = fix_validated(ctx, results, write_pedigree=write_pedigree, write_manifest=write_manifest, **kwargs)
+    return outcome, calls
+
+
+def _written(calls):
+    return [frame for kind, frame in calls if kind == "pedigree"]
 
 
 _PLAIN = {"drop_offending": False, "fill_half_founders": False}
@@ -126,7 +134,7 @@ _DROP = {"drop_offending": True, "fill_half_founders": False}
 
 
 def test_blocked_writes_nothing(tmp_path):
-    """A BLOCK_OR_DROP FAIL blocks plain validate with its message; write is never called."""
+    """A BLOCK_OR_DROP FAIL blocks plain validate with its message; no writer is called."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -134,16 +142,16 @@ def test_blocked_writes_nothing(tmp_path):
             {"id": 1, "sex": "F", "mother": -1, "father": -1},
         ],
     )
-    outcome, written = _outcome(ped, **_PLAIN)
+    outcome, calls = _outcome(ped, **_PLAIN)
     assert outcome.exit_code == 2
     assert outcome.blocked == "fix the following before re-running:"
     assert outcome.block_lines == ["duplicate IDs detected"]
-    assert written == []
+    assert calls == []
     assert outcome.fixed is None
 
 
 def test_plain_exit_code_follows_findings(tmp_path):
-    """Exit 0 for a clean pedigree, 1 when a non-blocking Check FAILed (here, missing parents)."""
+    """Exit 0 for a clean pedigree, 1 when a non-blocking Check FAILed (here, missing parents); no manifest."""
     clean = _write_ped(
         tmp_path / "clean.tsv",
         [
@@ -151,16 +159,17 @@ def test_plain_exit_code_follows_findings(tmp_path):
             {"id": 2, "sex": "F", "mother": -1, "father": -1},
         ],
     )
-    outcome, written = _outcome(clean, **_PLAIN)
-    assert (outcome.exit_code, len(written)) == (0, 1)
+    outcome, calls = _outcome(clean, **_PLAIN)
+    assert outcome.exit_code == 0
+    assert [kind for kind, _ in calls] == ["pedigree"]
     missing = _write_ped(tmp_path / "missing.tsv", [{"id": 3, "sex": "M", "mother": 1, "father": 2}])
-    outcome, written = _outcome(missing, **_PLAIN)
+    outcome, calls = _outcome(missing, **_PLAIN)
     assert outcome.exit_code == 1
-    assert written[0]["id"].to_list() == ["1", "2", "3"]
+    assert _written(calls)[0]["id"].to_list() == ["1", "2", "3"]
 
 
-def test_drop_offending_reduces_and_self_verifies(tmp_path):
-    """--drop-offending removes the flagged ids, writes the Reduced Pedigree, and reports the reduction."""
+def test_drop_offending_writes_the_manifest_then_the_reduced_pedigree(tmp_path):
+    """--drop-offending records the removals before writing the Reduced Pedigree it then self-verifies."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -169,25 +178,29 @@ def test_drop_offending_reduces_and_self_verifies(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 3},  # self-loop
         ],
     )
-    outcome, written = _outcome(ped, **_DROP)
+    outcome, calls = _outcome(ped, **_DROP)
     assert outcome.exit_code == 1
     assert outcome.reduction is not None
+    assert not outcome.nothing_to_drop
+    assert [kind for kind, _ in calls] == ["manifest", "pedigree"]
     # A self-loop is also a one-node cycle, so acyclic flags it too.
-    assert {(fid, check) for fid, check, _rnd in outcome.reduction.dropped} == {("3", "self_loops"), ("3", "acyclic")}
-    assert written[0]["id"].to_list() == ["1", "2"]
+    assert {(fid, check) for fid, check, _rnd in calls[0][1]} == {("3", "self_loops"), ("3", "acyclic")}
+    assert _written(calls)[0]["id"].to_list() == ["1", "2"]
 
 
 def test_drop_offending_with_nothing_to_drop_exits_zero(tmp_path):
-    """A pedigree with only auto-fixable FAILs needs no reduction under --drop-offending."""
+    """Only auto-fixable FAILs: an empty manifest, the Fixed Pedigree, exit 0, and nothing_to_drop set."""
     ped = _write_ped(tmp_path / "p.tsv", [{"id": 3, "sex": "M", "mother": 1, "father": 2}])
-    outcome, written = _outcome(ped, **_DROP)
-    assert (outcome.exit_code, outcome.reduction, len(written)) == (0, None, 1)
+    outcome, calls = _outcome(ped, **_DROP)
+    assert (outcome.exit_code, outcome.reduction, outcome.nothing_to_drop) == (0, None, True)
+    assert [(kind, payload) for kind, payload in calls if kind == "manifest"] == [("manifest", [])]
+    assert [kind for kind, _ in calls] == ["manifest", "pedigree"]
 
 
 def test_drop_offending_that_empties_the_pedigree_blocks(tmp_path):
     """Dropping every individual is BLOCKED rather than written as an empty file."""
     ped = _write_ped(tmp_path / "p.tsv", [{"id": 1, "sex": "M", "mother": 1, "father": -1}])
-    outcome, written = _outcome(ped, **_DROP)
+    outcome, calls = _outcome(ped, **_DROP)
     assert outcome.exit_code == 2
     assert outcome.blocked == "--drop-offending removed every individual (empty pedigree)"
-    assert written == []
+    assert calls == []

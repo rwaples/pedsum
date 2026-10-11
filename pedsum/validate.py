@@ -1221,8 +1221,10 @@ class ValidateOutcome:
     blocked: str | None = None
     block_lines: list[str] = field(default_factory=list)
     fixed: FixedPedigree | None = None
-    # Set when --drop-offending removed anyone.
+    # --drop-offending only: the reduction when it removed anyone, else
+    # nothing_to_drop (the input already passed).
     reduction: ReductionResult | None = None
+    nothing_to_drop: bool = False
 
 
 def fix_validated(
@@ -1231,16 +1233,19 @@ def fix_validated(
     *,
     drop_offending: bool,
     fill_half_founders: bool,
-    write: Callable[[pl.DataFrame, FixedPedigree], Path],
+    write_pedigree: Callable[[pl.DataFrame, FixedPedigree], Path],
+    write_manifest: Callable[[list[tuple[str, str, int]]], None],
 ) -> ValidateOutcome:
     """Decide what ``validate`` writes for ``ctx`` and its ``results``, and write it.
 
     BLOCKs per each Check's Fail Policy (:func:`blocking_failures`). Otherwise
     builds the Fixed Pedigree, after reducing it to a passing one under
     ``--drop-offending`` (ADR 0003), renders it, and hands the frame to
-    ``write``, which returns the path written. A Reduced Pedigree is then
-    re-validated from that file under the same flags; a FAIL there is a bug and
-    raises ``PedigreeError``.
+    ``write_pedigree``, which returns the path written. Under
+    ``--drop-offending`` the removal manifest goes to ``write_manifest``
+    first, so it is on disk even if the self-verify fails: the Reduced
+    Pedigree is re-validated from the written file under the same flags, and
+    a FAIL there is a bug and raises ``PedigreeError``.
 
     Exit codes: 2 when BLOCKED. Otherwise plain ``validate`` exits 1 when any
     Check FAILed, and ``--drop-offending`` exits 1 when it dropped anyone; else 0.
@@ -1255,17 +1260,25 @@ def fix_validated(
         )
         return ValidateOutcome(exit_code=2, blocked=reason, block_lines=[msg for _name, msg in blocks])
 
-    if not drop_offending or not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
-        fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write)
+    if not drop_offending:
+        fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write_pedigree)
         failed = any(r.status == "FAIL" for r in results)
-        return ValidateOutcome(exit_code=1 if failed and not drop_offending else 0, fixed=fp)
+        return ValidateOutcome(exit_code=1 if failed else 0, fixed=fp)
+
+    if not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
+        write_manifest([])
+        fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write_pedigree)
+        return ValidateOutcome(exit_code=0, fixed=fp, nothing_to_drop=True)
 
     reduction = reduce_pedigree(ctx)
     if len(reduction.df_current) == 0:
         return ValidateOutcome(exit_code=2, blocked="--drop-offending removed every individual (empty pedigree)")
+    write_manifest(reduction.dropped)
     # Number phantoms past the input's IDs so none reuses a dropped ID.
     next_id = _next_free_id(*ctx.require_id_parents())
-    fp, path = _write_fixed(reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write)
+    fp, path = _write_fixed(
+        reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write_pedigree
+    )
 
     # Self-verify the written file under the invoked flags. It is always
     # tab-separated whatever the input's separator, so sniff it.

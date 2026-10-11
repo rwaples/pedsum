@@ -97,6 +97,9 @@ individuals, …) and writes:
 | `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 
+`validate` first removes any `validate.tsv.gz` and `validate.dropped.tsv` an
+earlier run left in `DIR`, so the files there always belong to this run.
+
 When `--birth-year-col NAME` is passed, validate also runs three
 optional checks: `birth_year_dtype` (numeric parsing),
 `birth_year_range` (each year within `[--birth-year-min,

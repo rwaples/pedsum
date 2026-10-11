@@ -1380,11 +1380,8 @@ def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
     return 0
 
 
-def _report_reduction(result: ReductionResult, out_dir: Path) -> None:
-    """Write the ``--drop-offending`` manifest and the reduction summary to stderr."""
-    manifest_path = out_dir / "validate.dropped.tsv"
-    _write_dropped_manifest(result.dropped, manifest_path)
-    sys.stderr.write(f"wrote {manifest_path} ({result.n_distinct_dropped} id(s) dropped)\n")
+def _report_reduction(result: ReductionResult) -> None:
+    """Write the ``--drop-offending`` reduction summary to stderr."""
     pct = 100.0 * result.n_rows_removed / result.n_input_rows
     sys.stderr.write(
         f"--drop-offending: dropped {result.n_distinct_dropped} individual(s) / "
@@ -1398,10 +1395,24 @@ def _report_reduction(result: ReductionResult, out_dir: Path) -> None:
         )
 
 
+def _remove_stale_validate_outputs(out_dir: Path) -> None:
+    """Delete a previous run's ``validate.tsv.gz`` / ``validate.dropped.tsv`` from ``out_dir``.
+
+    This run writes whichever of them applies; a BLOCKED run writes neither,
+    so a leftover file would otherwise pass for this input's result.
+    """
+    for name in ("validate.tsv.gz", "validate.dropped.tsv"):
+        path = out_dir / name
+        if path.is_file():
+            path.unlink()
+            logger.info("removed %s from a previous run", path)
+
+
 def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     _commit_thread_budget(args)
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
+    _remove_stale_validate_outputs(args.out_dir)
     try:
         n_total, results, findings, ctx = validate_pedigree(args.in_path, **_validation_kwargs(args))
     except PedigreeError as e:
@@ -1427,27 +1438,34 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     _write_validate_log(findings, log_path, ctx.id_labels)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
-    def write(frame: pl.DataFrame, fp: FixedPedigree) -> Path:
+    def write_pedigree(frame: pl.DataFrame, fp: FixedPedigree) -> Path:
         out_path = out_dir / "validate.tsv.gz"
         _to_csv_gz(frame, out_path)
         sys.stderr.write(f"wrote {out_path} ({len(frame):,} rows; {len(fp.founders)} founder(s) added)\n")
         return out_path
+
+    def write_manifest(dropped: list[tuple[str, str, int]]) -> None:
+        manifest_path = out_dir / "validate.dropped.tsv"
+        _write_dropped_manifest(dropped, manifest_path)
+        if dropped:
+            n_ids = len({fid for fid, _check, _round in dropped})
+            sys.stderr.write(f"wrote {manifest_path} ({n_ids} id(s) dropped)\n")
 
     outcome = fix_validated(
         ctx,
         results,
         drop_offending=args.drop_offending,
         fill_half_founders=args.fill_half_founders,
-        write=write,
+        write_pedigree=write_pedigree,
+        write_manifest=write_manifest,
     )
     if outcome.blocked is not None:
         sys.stderr.write(f"\nBLOCKED — {outcome.blocked}\n")
         for line in outcome.block_lines:
             sys.stderr.write(f"  - {line}\n")
     elif outcome.reduction is not None:
-        _report_reduction(outcome.reduction, out_dir)
-    elif args.drop_offending:
-        _write_dropped_manifest([], out_dir / "validate.dropped.tsv")
+        _report_reduction(outcome.reduction)
+    elif outcome.nothing_to_drop:
         sys.stderr.write("--drop-offending: nothing to drop; pedigree already passes\n")
     return outcome.exit_code
 
