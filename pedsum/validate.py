@@ -1011,10 +1011,9 @@ def load_and_validate(
         no_sex_check=no_sex_check,
     )
     _run_checks(ctx, on_fail="raise")
-    # Every Check passed, so no parent is missing and no founder is synthesized:
-    # the frame is the input rows of the pedigree validate would write.
-    fp = fix_pedigree(ctx)
-    assert not fp.founders
+    # Every Check passed, so no parent is missing and there is no founder to
+    # synthesize: the frame is the input rows of the pedigree validate would write.
+    fp = fix_pedigree(ctx, synthesize_founders=False)
     logger.info("validated %d rows in %.2fs", len(fp.ids), time.perf_counter() - t0)
     return fp.frame(), fp.labels
 

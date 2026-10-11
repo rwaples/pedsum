@@ -50,6 +50,7 @@ class FixedPedigree:
     birth_year: np.ndarray | None  # int32, sentinel -1; None without a birth-year column
     ped_depth: np.ndarray  # int32 topological depth, founders 0
     input_row: np.ndarray  # each row's position in the input
+    reordered: bool  # False when the input was already parents-first (input_row is the identity)
     filled_mother: np.ndarray  # bool: the mother slot holds a phantom parent
     filled_father: np.ndarray
     # Synthesized founder rows ({"id", "sex"[, "reason"]}): missing parents by ID, then phantoms.
@@ -73,14 +74,19 @@ class FixedPedigree:
 
 
 def fix_pedigree(
-    ctx: ValidationContext, *, fill_half_founders: bool = False, next_id: int | None = None
+    ctx: ValidationContext,
+    *,
+    fill_half_founders: bool = False,
+    next_id: int | None = None,
+    synthesize_founders: bool = True,
 ) -> FixedPedigree:
     """Apply the auto-fixes to a validated context.
 
     ``ctx`` must have parsed IDs and have no Blocking Check failures.
     ``next_id`` numbers the phantom parents; it defaults to one past the
     largest ID in ``ctx``, and ``--drop-offending`` passes the input's so no
-    phantom reuses a dropped ID.
+    phantom reuses a dropped ID. ``synthesize_founders=False`` skips the scan
+    for missing parents, for a caller whose Checks all passed and so has none.
     """
     ids, mothers, fathers = ctx.require_id_parents()
     assert ctx.id_labels is not None
@@ -88,8 +94,9 @@ def fix_pedigree(
     imp = ctx.imputation
     _log_sex_imputation(imp, allow_missing_sex=ctx.allow_missing_sex)
 
-    founders = _build_added_founders(mothers, fathers, ctx.id_index, ctx.no_sex_check)
-    filled_mother = filled_father = np.zeros(len(ids), dtype=bool)
+    n = len(ids)
+    founders = _build_added_founders(mothers, fathers, ctx.id_index, ctx.no_sex_check) if synthesize_founders else []
+    filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:
             next_id = _next_free_id(ids, mothers, fathers)
@@ -106,21 +113,26 @@ def fix_pedigree(
     depth = ctx.depth
     assert (depth >= 0).all(), "fix_pedigree needs an acyclic pedigree"
     order = np.argsort(depth, kind="stable")
-    n_moved = int((order != np.arange(len(ids))).sum())
+    n_moved = int((order != np.arange(n)).sum())
     if n_moved:
-        logger.info("reordering %d/%d row(s) into topological order (parents before children)", n_moved, len(ids))
+        logger.info("reordering %d/%d row(s) into topological order (parents before children)", n_moved, n)
+
+    def take(values: np.ndarray) -> np.ndarray:
+        # Already parents-first (the usual case for pedsum's own output): no copy.
+        return values[order] if n_moved else values
 
     return FixedPedigree(
-        ids=ids[order],
-        sex=imp.imputed_sex[order],
-        mothers=mothers[order],
-        fathers=fathers[order],
-        sex_source=imp.sex_source[order],
-        birth_year=None if ctx.birth_year is None else ctx.birth_year[order],
-        ped_depth=depth[order],
+        ids=take(ids),
+        sex=take(imp.imputed_sex),
+        mothers=take(mothers),
+        fathers=take(fathers),
+        sex_source=take(imp.sex_source),
+        birth_year=None if ctx.birth_year is None else take(ctx.birth_year),
+        ped_depth=take(depth),
         input_row=order,
-        filled_mother=filled_mother[order],
-        filled_father=filled_father[order],
+        reordered=n_moved > 0,
+        filled_mother=take(filled_mother),
+        filled_father=take(filled_father),
         founders=founders,
         labels=labels,
     )
@@ -144,9 +156,10 @@ def render_fixed_pedigree(
     which rows pedsum changed. Founder rows come first, with empty cells
     outside the ID, sex and parent columns.
     """
-    out = raw[fp.input_row].with_columns(
+    out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
         pl.Series(sex_col, plink_sex(fp.sex)).cast(pl.String),
-        pl.Series("sex_source", fp.sex_source.astype(str)),
+        # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
+        pl.Series("sex_source", fp.sex_source, dtype=pl.String),
     )
     if fp.filled_mother.any() or fp.filled_father.any():
         out = out.with_columns(

@@ -46,10 +46,27 @@ def test_rows_go_parents_first_and_keep_extra_columns(tmp_path):
         ],
     )
     fp, out = _fixed(ped)
+    assert fp.reordered
     assert fp.input_row.tolist() == [1, 2, 0]
     assert fp.ped_depth.tolist() == [0, 0, 1]
     assert out["id"].to_list() == ["1", "2", "3"]
     assert out["note"].to_list() == ["dad", "mum", "child"]
+
+
+def test_input_already_in_order_is_not_reordered(tmp_path):
+    """Parents-first input keeps its order; ``reordered`` says so and the rows come out as read."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1},
+            {"id": 3, "sex": "F", "mother": 2, "father": 1},
+        ],
+    )
+    fp, out = _fixed(ped)
+    assert not fp.reordered
+    assert fp.input_row.tolist() == [0, 1, 2]
+    assert out["id"].to_list() == ["1", "2", "3"]
 
 
 def test_sex_is_resolved_from_role(tmp_path):
