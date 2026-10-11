@@ -439,7 +439,7 @@ packages:
   - hypothesis>=6,<7 ; extra == 'test'
   - ruff>=0.16,<0.17 ; extra == 'test'
   - ty==0.0.84 ; extra == 'typecheck'
-  requires_python: '>=3.14'
+  requires_python: '>=3.14,<3.15'
 - pypi: https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl
   name: pytest
   version: 9.1.1

@@ -276,6 +276,12 @@ whole command.
 
 ### Fixed
 
+- **Python is capped below 3.15** in `pyproject.toml` and
+  `environment.yml`. conda-forge released Python 3.15.0 on 2026-10-09,
+  and `python>=3.14` began to resolve to it. With Python 3.15, polars
+  1.44.2's string methods return `None`, so a fresh install failed on its
+  first ID column (`AttributeError: 'NoneType' object has no attribute
+  'str'`) and 281 of 542 tests failed. polars 2 is the way past the cap.
 - **`validate.dropped.tsv` rows come in one order on every run**
   ([#15](https://github.com/rwaples/pedsum/issues/15)): by round, then
   id, then check. Each round's reasons were collected in a set of

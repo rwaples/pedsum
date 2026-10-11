@@ -14,7 +14,8 @@ Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package f
 
 ## Install
 
-Python ≥ 3.14 required. 
+Python 3.14 required. Python 3.15 is not supported yet: with it, polars 1.x
+string methods return `None` and pedsum fails on its first ID column.
 
 ### Get the code
 
