@@ -15,11 +15,11 @@ import sys
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
 from pedsum.checks import CheckResult, Finding, _summarize_findings
 from pedsum.cli import main
+from pedsum.fixed_pedigree import _build_added_founders
 from pedsum.pairs import _build_pedigree_graph
 from pedsum.parse import _decode_sex
 from pedsum.report import (
     _apply_safe_attempt,
-    _build_added_founders,
     _build_individual_data,
     _format_check_summary,
 )

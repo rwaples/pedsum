@@ -154,6 +154,23 @@ whole command.
 
 ### Changed
 
+- **`validate` BLOCKs on every column- or parse-level failure**
+  ([#21](https://github.com/rwaples/pedsum/issues/21)): a missing
+  required column, a row without an id, an unrecognized sex token, a
+  negative id, an out-of-range parent token, an unparsable birth year or
+  an empty pedigree. It exits 2 and writes no `validate.tsv.gz`, as
+  `--drop-offending` already did and as the `--out` help says. Before,
+  plain `validate` wrote the input unchanged and exited 1, so a pedigree
+  it could not parse reached the next step as validated. Each Check now
+  declares what its FAIL does in both modes (a `FailPolicy`:
+  block, block-or-drop, keep-or-drop, or auto-fix), and both modes derive
+  their BLOCKED lists from it
+  ([ADR 0005](docs/adr/0005-check-fail-policy.md)). The BLOCKED lines of
+  plain `validate` now follow the Check order of the summary.
+- **`validate` removes a `validate.tsv.gz` or `validate.dropped.tsv` left
+  in `--out` by an earlier run** before it starts, so a BLOCKED run, or a
+  plain run after a `--drop-offending` one, leaves no file from another
+  input behind.
 - **IDs are strings** ([#16](https://github.com/rwaples/pedsum/issues/16)).
   Two tokens are the same ID only if they are the same string, and every
   output writes IDs as the input wrote them. Before, `validate` and
@@ -276,6 +293,16 @@ whole command.
 
 ### Fixed
 
+- **`validate` finds cycles when a parent ID is missing**
+  ([#22](https://github.com/rwaples/pedsum/issues/22)). `acyclic` was
+  skipped whenever any parent ID was missing from the file, so a cycle was
+  written to `validate.tsv.gz` with exit 1, or with exit 0 and "nothing
+  to drop" under `--drop-offending`, and the written file then failed its
+  own re-validation. `acyclic` now runs on every pedigree whose IDs parse:
+  plain `validate` BLOCKs, and `--drop-offending` drops the cycle members.
+- **`validate --help` describes `--sex-col` as the other commands do**:
+  M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
+  offered the 0=female, 1=male coding that 0.15 removed.
 - **Python is capped below 3.15** in `pyproject.toml` and
   `environment.yml`. conda-forge released Python 3.15.0 on 2026-10-09,
   and `python>=3.14` began to resolve to it. With Python 3.15, polars

@@ -7,8 +7,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
+from pedsum.fixed_pedigree import _build_added_founders
 from pedsum.pedigree_ops import IdIndex
-from pedsum.report import _build_added_founders
 
 FounderReferences = tuple[np.ndarray, np.ndarray, np.ndarray]
 

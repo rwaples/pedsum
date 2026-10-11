@@ -16,9 +16,9 @@ import numpy as np
 import polars as pl
 import yaml
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, VERSION, PedigreeError, logger
+from pedsum.base import VERSION, PedigreeError, logger
 from pedsum.parse import _read_pedigree_table, plink_sex
-from pedsum.pedigree_ops import IdIndex, unique_ints
+from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
 from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
@@ -801,112 +801,3 @@ def _write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path)
     )
     with atomic_output(out_path) as tmp:
         df.write_csv(tmp, separator="\t")
-
-
-def _build_added_founders(
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    id_index: IdIndex,
-    no_sex_check: bool,
-) -> list[dict]:
-    """Synthesize founder rows for missing parent IDs, sorted by ID."""
-    moms_ref = unique_ints(mothers[mothers != -1])
-    dads_ref = unique_ints(fathers[fathers != -1])
-    moms_missing = set(moms_ref[id_index.get_indexer(moms_ref) == -1].tolist())
-    dads_missing = set(dads_ref[id_index.get_indexer(dads_ref) == -1].tolist())
-    conflicts = moms_missing & dads_missing
-    moms_only = moms_missing - conflicts
-    dads_only = dads_missing - conflicts
-
-    def _rows_listing(rows: np.ndarray) -> str:
-        if len(rows) <= 5:
-            return f"row(s) {rows.tolist()}"
-        return f"row(s) {rows[:5].tolist()} (and {len(rows) - 5} more)"
-
-    out: list[dict] = []
-    for mid in sorted(moms_only):
-        rows = np.where(mothers == mid)[0]
-        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {_rows_listing(rows)}"})
-    for did in sorted(dads_only):
-        rows = np.where(fathers == did)[0]
-        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {_rows_listing(rows)}"})
-    if no_sex_check:
-        for cid in sorted(conflicts):
-            rows_m = np.where(mothers == cid)[0]
-            rows_f = np.where(fathers == cid)[0]
-            out.append(
-                {
-                    "id": int(cid),
-                    "sex": SEX_FEMALE,
-                    "reason": (
-                        f"--no-sex-check; conflicting roles "
-                        f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
-                    ),
-                }
-            )
-    out.sort(key=lambda x: x["id"])
-    return out
-
-
-def _next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
-    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
-    return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
-
-
-def _build_phantom_parents(
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    first_id: int,
-) -> tuple[np.ndarray, np.ndarray, list[dict]]:
-    """Give each half-founder its own new founder in its missing parent slot.
-
-    Returns ``(mothers, fathers, phantoms)``: the parent arrays with every
-    half-founder's ``-1`` slot pointing at its phantom, and the phantom founder
-    rows (female for a missing mother, male for a missing father). Phantoms are
-    numbered from ``first_id`` in row order; pass :func:`_next_free_id` of the
-    input pedigree so they collide with no ID, including dropped ones, and
-    sort after every existing or synthesized founder.
-
-    A phantom is unrelated to everyone and not inbred, so kinship and F among
-    the original individuals are unchanged. Founder contributions now sum to 1
-    through every individual, at the cost of one more founder per half-founder.
-    """
-    rows = np.flatnonzero((mothers == -1) ^ (fathers == -1))
-    pids = first_id + np.arange(len(rows), dtype=np.int64)
-    for_mother = mothers[rows] == -1
-    mothers = mothers.copy()
-    fathers = fathers.copy()
-    mothers[rows[for_mother]] = pids[for_mother]
-    fathers[rows[~for_mother]] = pids[~for_mother]
-    phantoms = [
-        {"id": pid, "sex": SEX_FEMALE if m else SEX_MALE}
-        for pid, m in zip(pids.tolist(), for_mother.tolist(), strict=True)
-    ]
-    return mothers, fathers, phantoms
-
-
-def _write_validate_tsv_gz(
-    df_raw: pl.DataFrame,
-    added_founders: list[dict],
-    id_col: str,
-    sex_col: str,
-    mother_col: str,
-    father_col: str,
-    out_path: Path,
-    labels: IdLabels,
-) -> None:
-    """Write input pedigree (gzipped TSV), with new founder rows prepended at top."""
-    if added_founders:
-        n_new = len(added_founders)
-        # Filler cells are nulls (not "") so the CSV writer emits bare empty
-        # fields; polars quotes explicit empty strings as "".
-        data: dict[str, list[str | None]] = {col: [None] * n_new for col in df_raw.columns}
-        data[id_col] = [labels.label(f["id"]) for f in added_founders]
-        data[sex_col] = plink_sex(np.array([f["sex"] for f in added_founders], dtype=np.int8)).astype(str).tolist()
-        data[mother_col] = ["-1"] * n_new
-        data[father_col] = ["-1"] * n_new
-        new_rows = pl.DataFrame(data, schema=dict.fromkeys(df_raw.columns, pl.String))
-        out_df = pl.concat([new_rows, df_raw.cast(pl.String)])
-    else:
-        out_df = df_raw
-    _to_csv_gz(out_df, out_path)

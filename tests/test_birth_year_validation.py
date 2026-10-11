@@ -30,7 +30,7 @@ def test_validate_without_birth_year_col_skips_all_three(tmp_path):
 
 
 def test_birth_year_dtype_check_fails_for_garbage(tmp_path):
-    """Non-numeric birth-year tokens FAIL birth_year_dtype."""
+    """Non-numeric birth-year tokens FAIL birth_year_dtype, which BLOCKs (ADR 0005)."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -50,8 +50,10 @@ def test_birth_year_dtype_check_fails_for_garbage(tmp_path):
             "birth_year",
         ]
     )
-    # Not a hard block — exit 1 because there are findings.
-    assert r.returncode == 1, r.stderr
+    # A parse failure is a hard block: no fixed pedigree with an unparsable year.
+    assert r.returncode == 2, r.stderr
+    assert "BLOCKED" in r.stderr
+    assert not (tmp_path / "out" / "validate.tsv.gz").exists()
     assert "birth_year column parses as numeric ... FAIL" in r.stderr
     # Once dtype fails, range and topology SKIP.
     assert "SKIP (birth_year_dtype failed)" in r.stderr

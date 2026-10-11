@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 
 import polars as pl
+import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
@@ -281,3 +282,85 @@ def test_parent_refs_present_log_counts_references(tmp_path):
     others = log.filter(~pl.col("check").str.starts_with("parent_refs_present"))
     assert "sex_role_consistency" in others["check"].to_list()
     assert others["n_refs"].null_count() == len(others)
+
+
+@pytest.mark.parametrize(
+    ("text", "check"),
+    [
+        # No father column.
+        ("id\tmother\tsex\n1\t-1\tM\n2\t-1\tF\n3\t2\tF\n", "required_columns"),
+        # A row without an id.
+        ("id\tmother\tfather\tsex\n\t-1\t-1\tM\n2\t-1\t-1\tF\n", "id_dtype"),
+        # An unrecognized sex token.
+        ("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tQ\n", "sex_tokens"),
+        # A negative id.
+        ("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n-5\t-1\t-1\tF\n", "negative_ids"),
+    ],
+)
+def test_validate_column_level_failure_blocks(tmp_path, text, check):
+    """A column- or parse-level FAIL BLOCKs plain validate, as under --drop-offending (pedsum#21)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(text)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert "BLOCKED" in r.stderr
+    assert f"  - {check}\n" in r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+    assert (out / "validate.log").exists()
+
+
+# A cycle (1 and 2 are each other's mother) plus a father ID (99) missing from the file.
+_CYCLE_WITH_MISSING_PARENT = "id\tmother\tfather\tsex\n1\t2\t3\tF\n2\t1\t3\tF\n3\t-1\t-1\tM\n4\t-1\t99\tF\n"
+
+
+def test_cycle_blocks_even_with_a_missing_parent(tmp_path):
+    """The cycle Check runs when a parent ID is missing, so the cycle BLOCKs plain validate (pedsum#22)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(_CYCLE_WITH_MISSING_PARENT)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert "  - cycle detected\n" in r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+
+
+def test_drop_offending_drops_a_cycle_with_a_missing_parent(tmp_path):
+    """--drop-offending removes the cycle members and keeps the founder for the missing parent (pedsum#22)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(_CYCLE_WITH_MISSING_PARENT)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
+    assert r.returncode == 1, r.stderr
+    with gzip.open(out / "validate.tsv.gz", "rt") as fh:
+        fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
+    assert sorted(fixed["id"].to_list()) == ["3", "4", "99"]
+    dropped = pl.read_csv(out / "validate.dropped.tsv", separator="\t", infer_schema=False)
+    assert sorted(set(dropped["id"].to_list())) == ["1", "2"]
+
+
+def test_self_loop_blocks_plain_validate_as_a_cycle(tmp_path):
+    """A self-loop is a one-person cycle: acyclic FAILs with self_loops, so plain validate BLOCKs."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t3\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out")])
+    assert r.returncode == 2, r.stderr
+    assert "  - cycle detected\n" in r.stderr
+
+
+def test_blocked_run_removes_a_previous_runs_outputs(tmp_path):
+    """A BLOCKED re-run into the same --out leaves no validate.tsv.gz / validate.dropped.tsv from an earlier input."""
+    out = tmp_path / "out"
+    good = tmp_path / "good.tsv"
+    good.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t2\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(good), "--out", str(out), "--drop-offending"])
+    assert r.returncode == 0, r.stderr
+    assert (out / "validate.tsv.gz").exists()
+    assert (out / "validate.dropped.tsv").exists()
+    bad = tmp_path / "bad.tsv"
+    bad.write_text("id\tmother\tsex\n1\t-1\tM\n")
+    r = run_pedsum(["validate", "--in", str(bad), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+    assert not (out / "validate.dropped.tsv").exists()
+    assert (out / "validate.log").exists()
