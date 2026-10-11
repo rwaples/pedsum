@@ -222,6 +222,7 @@ def compute_assortative_mating(
             bootstrap=bootstrap,
             seed=seed,
             min_stratum_networks=min_stratum_networks,
+            spearman=True,
         )
     except PgPhenotypeError as e:
         raise PedigreeError(f"assortative mating: {e}") from e

@@ -503,8 +503,8 @@ pedsum reads and types the traits, assigns strata and writes the YAML.
 The estimates and their inference come from
 [pg-phenotype](https://github.com/rwaples/pg-phenotype)'s
 `mate_correlation`, the method pedsum#13 designed, ported unchanged. Its
-[reference](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating.md)
-and [design notes](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating-design.md)
+[reference](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/assortative-mating.md)
+and [design notes](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/assortative-mating-design.md)
 give the method in full; this section covers what the command reads and
 writes.
 
@@ -574,13 +574,15 @@ thresholds from its margins, then ρ is fitted. Newton's method on the
 analytic score finds ρ̂. It starts at 0 for `tetrachoric` and
 `polychoric`, and at the ad hoc estimate of Olsson, Drasgow & Dorans
 (1982, eq 38) for `biserial` and `polyserial`. If the curvature is not
-positive, a step leaves (−0.9999, 0.9999), or 12 steps do not converge,
-a bounded Brent search over that interval takes over, so every fit
+positive, a step leaves (−0.9999, 0.9999), a `tetrachoric` or
+`polychoric` step reaches a ρ where a populated cell's probability is
+below 1e-12, or 12 steps do not converge, a bounded Brent search over
+that interval takes over, so every fit
 reaches the optimum Brent would. The bivariate normal CDF comes from
 Owen's T function (Owen 1956), and the thresholds from the AS 241 normal
 quantile (Wichura 1988). Each latent record carries `boundary`, which is
 `true` when the fit ends at a bound; the rule is in pg-phenotype's
-[design notes](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating-design.md)
+[design notes](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/assortative-mating-design.md)
 (threshold estimators). Means, SDs,
 thresholds and the 2×2 table count each Mating Pair once, so a father
 with three mates counts three times.

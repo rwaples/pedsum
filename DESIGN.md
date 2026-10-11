@@ -122,15 +122,17 @@ its Rust row-streaming engine, so neither builds a pair list:
 README covers its use and output. The computation is pg-phenotype's
 `pg_phenotype.assortative.mate_correlation`. The method was designed here
 in pedsum#13 and ported to pg-phenotype 0.1 unchanged. Its
-[design notes](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/assortative-mating-design.md)
+[design notes](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/assortative-mating-design.md)
 give the reasons for every choice (the Mate Network as cluster, the
 two-step sandwich, the one-step bootstrap, the permutation null and its
 sequential stopping, the threshold fits, thin strata, thread
 independence, calibration), and pg-phenotype's
-[ADR 0005](https://github.com/rwaples/pg-phenotype/blob/v0.1.0/docs/adr/0005-assortative-mating-reproduces-pedsums-numerics.md)
-records that the port reproduces pedsum's numbers to the bit. The one
-exception, an SE that pedsum withheld on empty-cell rounding noise, is in
-the CHANGELOG.
+[ADR 0005](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/adr/0005-assortative-mating-reproduces-pedsums-numerics.md)
+records that the port reproduces pedsum's numbers to the bit, with three
+exceptions, each on rounding noise in a near-empty cell: pg-phenotype
+reports an SE that pedsum withheld, and it fixes two pedsum errors, a
+tetrachoric or polychoric Newton that stopped short of the maximum and a
+`boundary` flag at an interior maximum. All three are in the CHANGELOG.
 
 pedsum keeps the shell. `pedsum/assortative_mating.py`:
 

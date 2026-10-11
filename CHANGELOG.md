@@ -167,12 +167,28 @@ whole command.
 - **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
   needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
   longer run the kinship DP.
-- **Requires pg-phenotype 0.1.1** (`>=0.1.1,<0.2`), which computes
-  `assortative-mating`. Its port reproduces the numbers of pedsum#13's own
-  implementation to the bit, except one: in a sparse stratified
-  polychoric cell whose zero-count corner probability came out as
-  rounding noise, pedsum#13 withheld the SE (`sandwich_undefined`), and
-  pg-phenotype reports it, with the sandwich CI when `--bootstrap` is 0.
+- **Requires pg-phenotype 0.3** (`>=0.3,<0.4`), which computes
+  `assortative-mating` ([#20](https://github.com/rwaples/pedsum/issues/20)).
+  Its port reproduces the numbers of pedsum#13's own implementation to
+  the bit, except in three fits where a near-empty cell's probability
+  comes out as rounding noise
+  ([ADR 0005](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/adr/0005-assortative-mating-reproduces-pedsums-numerics.md)):
+  - In a sparse stratified polychoric cell, pedsum#13 withheld the SE
+    (`sandwich_undefined`), and pg-phenotype reports it, with the
+    sandwich CI when `--bootstrap` is 0.
+  - A `tetrachoric` or `polychoric` Newton step could overshoot to such
+    a ρ and stop there, flagged as a boundary: `[[9891, 104], [1, 4]]`
+    gave ρ = 0.9915 where the maximum is 0.7969. About 1 skewed 2 × 2
+    table in 1,000 was affected; polychoric fits get the same fix. Brent
+    now takes over.
+  - A fit at an interior maximum could be flagged `boundary` with its SE
+    withheld, at large n: `[[14045855, 3530593], [1, 6012126]]`. The
+    likelihood at the bound is now computed without the rounding noise.
+
+  A stratified `biserial` or `polyserial` cell whose continuous side
+  spanned more strata than its other side no longer panics while
+  computing its SE. pg-phenotype 0.3 computes Spearman only on request;
+  pedsum asks for it, so the `spearman` record is unchanged.
   The function also refuses a constant trait or more than two traits,
   which the CLI never passes.
 - **Requires numba 0.68** (`>=0.68,<1`), now a hard dependency.

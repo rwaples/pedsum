@@ -20,4 +20,4 @@ dependencies:
   - pip:
       # Match the ranges pyproject.toml declares; both are on PyPI.
       - pedigree-graph>=0.12.1,<0.13
-      - pg-phenotype>=0.1.1,<0.2
+      - pg-phenotype>=0.3,<0.4

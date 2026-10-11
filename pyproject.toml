@@ -32,7 +32,7 @@ dependencies = [
     # assortative-mating computes through pg-phenotype (its Mate Correlation
     # is pedsum#13's method, ported).  Minor-capped like pedigree-graph: before
     # 1.0 the minor is the breaking digit.
-    "pg-phenotype>=0.1.1,<0.2",
+    "pg-phenotype>=0.3,<0.4",
 ]
 
 [project.scripts]
