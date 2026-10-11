@@ -41,7 +41,7 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
     costs ~1.1s of interpreter and import startup per call, which dominated
     the suite.
     """
-    argv = [str(SCRIPT), *args]
+    argv = ["pedsum", *args]
     out, err = io.StringIO(), io.StringIO()
     prev_cwd = os.getcwd()
     os.chdir(cwd or REPO)
