@@ -128,9 +128,11 @@ two-step sandwich, the one-step bootstrap, the permutation null and its
 sequential stopping, the threshold fits, thin strata, thread
 independence, calibration), and pg-phenotype's
 [ADR 0005](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/adr/0005-assortative-mating-reproduces-pedsums-numerics.md)
-records that the port reproduces pedsum's numbers to the bit, with three
-exceptions, each on rounding noise in a near-empty cell: pg-phenotype
-reports an SE that pedsum withheld, and it fixes two pedsum errors, a
+records how closely the port reproduces pedsum's numbers: counts, flags
+and p-values exactly, estimates to the parity tests' 1e-12 (relative) for
+closed-form estimators and 1e-7 for latent fits. Three kinds of fit
+differ, each on rounding noise in a near-empty cell: pg-phenotype reports
+an SE that pedsum withheld, and it fixes two pedsum errors, a
 tetrachoric or polychoric Newton that stopped short of the maximum and a
 `boundary` flag at an interior maximum. All three are in the CHANGELOG.
 

@@ -9,7 +9,10 @@ replicate:
 
 - ``continuous R_mf``: each cell must match simACE's ``compute_mate_correlation``
   (run on the same parquet in simACE's pixi env) to ``TOLERANCE`` with the same
-  pair count.
+  pair count.  Since simACE ``ec3d0a3`` that function calls pg-phenotype's
+  ``mate_correlation`` too, so the check covers pedsum's export, pair set and
+  payload, not the estimator.  Against simACE's NumPy code before that commit,
+  pedsum matched within 5.72e-14 (the results file at pedsum ``1f49295``).
 - ``tetrachoric``: each liability is cut at the ``1 - K`` quantile of its values
   over the pedigree (affected = above it) for each ``K`` in ``PREVALENCES``, and
   pedsum runs again on the two binary traits with its default inference. Each
@@ -410,7 +413,10 @@ def tetrachoric_vs_continuous(ctx: RepContext) -> CheckResult:
 CONTINUOUS_ABOUT = (
     f"pedsum's crude Pearson r of each cell (`--permutations 0 --bootstrap 0`) against simACE's "
     f"`compute_mate_correlation` on the same parquet. Passes when every cell has simACE's pair count and "
-    f"|pedsum - simACE| <= {TOLERANCE:g}."
+    f"|pedsum - simACE| <= {TOLERANCE:g}. Since simACE `ec3d0a3`, `compute_mate_correlation` calls "
+    "pg-phenotype's `mate_correlation` too, so this checks pedsum's export, pair set and payload, not the "
+    "estimator. Against simACE's NumPy code before that commit, pedsum matched within 5.72e-14 (this file at "
+    "pedsum `1f49295`)."
 )
 
 TETRACHORIC_ABOUT = (

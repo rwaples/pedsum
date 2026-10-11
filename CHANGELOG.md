@@ -169,9 +169,14 @@ whole command.
   longer run the kinship DP.
 - **Requires pg-phenotype 0.3** (`>=0.3,<0.4`), which computes
   `assortative-mating` ([#20](https://github.com/rwaples/pedsum/issues/20)).
-  Its port reproduces the numbers of pedsum#13's own implementation to
-  the bit, except in three fits where a near-empty cell's probability
-  comes out as rounding noise
+  Its `mate_correlation` refuses a constant trait or more than two
+  traits, which the CLI never passes. Its port reproduces pedsum#13's
+  own implementation: on 74 golden cases every count, reason, flag and
+  p-value matches, and the parity tests hold estimates to 1e-12
+  (relative) for closed-form estimators and 1e-7 for latent fits; a fit
+  that falls back to Brent can stop up to 3.2e-10 from pedsum's. Three
+  kinds of fit differ, each where a near-empty
+  cell's probability comes out as rounding noise
   ([ADR 0005](https://github.com/rwaples/pg-phenotype/blob/v0.3.0/docs/adr/0005-assortative-mating-reproduces-pedsums-numerics.md)):
   - In a sparse stratified polychoric cell, pedsum#13 withheld the SE
     (`sandwich_undefined`), and pg-phenotype reports it, with the
@@ -189,8 +194,6 @@ whole command.
   spanned more strata than its other side no longer panics while
   computing its SE. pg-phenotype 0.3 computes Spearman only on request;
   pedsum asks for it, so the `spearman` record is unchanged.
-  The function also refuses a constant trait or more than two traits,
-  which the CLI never passes.
 - **Requires numba 0.68** (`>=0.68,<1`), now a hard dependency.
   numba 0.68 caps numpy below 2.6.
   Offspring Sex Concordance permutations, which used numba only when it
