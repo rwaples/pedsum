@@ -166,8 +166,12 @@ _Avoid_: error, issue, warning, problem
 The outcome of a **Check**: `PASS` (ran, no **Findings**), `FAIL` (ran, ≥1 **Finding**), or `SKIP` (did not run — a prerequisite Check did not PASS, the Check is inapplicable to this input, or a flag tolerates it).
 _Avoid_: result, state, outcome (as bare nouns in this sense)
 
+**Fail Policy**:
+What a **Check**'s `FAIL` does to the pedigree `validate` writes, declared once per Check in the registry: `block` (no row removal fixes it: a missing column, a parse failure, a negative id), `block_or_drop` (blocks plain `validate`; `--drop-offending` removes the flagged ids), `keep_or_drop` (plain `validate` writes the contradiction as it is; `--drop-offending` removes the flagged ids), or `autofix` (repaired by founder synthesis). See ADR 0005.
+_Avoid_: severity, droppable (as the whole story)
+
 **Blocking Check**:
-A **Check** whose `FAIL` prevents `validate` from writing a fixed pedigree, surfaced to the user as `BLOCKED`. Non-blocking failures still write the fixed output and report **Findings**.
+A **Check** whose `FAIL` prevents `validate` from writing a fixed pedigree, surfaced to the user as `BLOCKED`. Whether a Check blocks depends on the mode and is derived from its **Fail Policy**: in plain `validate`, `block` and `block_or_drop` Checks block; under `--drop-offending`, only `block` Checks do. Non-blocking failures still write the fixed output and report **Findings**.
 _Avoid_: hard error, fatal, fatal error
 
 **Reduced Pedigree**:

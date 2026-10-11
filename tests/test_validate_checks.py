@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 
 import polars as pl
+import pytest
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
@@ -281,3 +282,29 @@ def test_parent_refs_present_log_counts_references(tmp_path):
     others = log.filter(~pl.col("check").str.starts_with("parent_refs_present"))
     assert "sex_role_consistency" in others["check"].to_list()
     assert others["n_refs"].null_count() == len(others)
+
+
+@pytest.mark.parametrize(
+    ("text", "check"),
+    [
+        # No father column.
+        ("id\tmother\tsex\n1\t-1\tM\n2\t-1\tF\n3\t2\tF\n", "required_columns"),
+        # A row without an id.
+        ("id\tmother\tfather\tsex\n\t-1\t-1\tM\n2\t-1\t-1\tF\n", "id_dtype"),
+        # An unrecognized sex token.
+        ("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tQ\n", "sex_tokens"),
+        # A negative id.
+        ("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n-5\t-1\t-1\tF\n", "negative_ids"),
+    ],
+)
+def test_validate_column_level_failure_blocks(tmp_path, text, check):
+    """A column- or parse-level FAIL BLOCKs plain validate, as under --drop-offending (pedsum#21)."""
+    ped = tmp_path / "p.tsv"
+    ped.write_text(text)
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 2, r.stderr
+    assert "BLOCKED" in r.stderr
+    assert f"  - {check}\n" in r.stderr
+    assert not (out / "validate.tsv.gz").exists()
+    assert (out / "validate.log").exists()

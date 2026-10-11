@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -51,7 +52,7 @@ from pedsum.parse import (
 from pedsum.pedigree_ops import IdIndex, ParentRefs, _parent_rows, _structural_depth
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from pedsum.ids import IdLabels
@@ -299,6 +300,26 @@ class ValidationContext:
         return self.birth_year_max if self.birth_year_max is not None else _birth_year_default_max()
 
 
+class FailPolicy(Enum):
+    """What a Check's ``FAIL`` does to the pedigree ``validate`` writes (ADR 0005).
+
+    The policy decides both modes: whether plain ``validate`` BLOCKs or writes
+    the pedigree as-is, and whether ``--drop-offending`` can resolve the FAIL
+    by removing the flagged individual(s).
+    """
+
+    # No row removal fixes it (missing column, parse failure, negative id):
+    # BLOCKs in both modes.
+    BLOCK = "block"
+    # BLOCKs plain validate; --drop-offending removes the flagged ids.
+    BLOCK_OR_DROP = "block_or_drop"
+    # Plain validate writes the pedigree with the contradiction kept;
+    # --drop-offending removes the flagged ids.
+    KEEP_OR_DROP = "keep_or_drop"
+    # Repaired by founder synthesis; never BLOCKs and is never dropped.
+    AUTOFIX = "autofix"
+
+
 @dataclass(frozen=True)
 class Check:
     """One registry entry: a named integrity test with its prerequisites + display metadata."""
@@ -308,10 +329,10 @@ class Check:
     run: Callable[[ValidationContext], CheckOutcome]
     label: str
     group: str
-    # Whether `validate --drop-offending` can resolve a FAIL by removing the
-    # flagged individual(s). Per-individual checks are droppable; column/file-
-    # level checks (missing column, parse failure, negative id, …) are not.
-    droppable: bool = False
+    fail_policy: FailPolicy
+    # The BLOCKED line plain validate prints for this Check, with any flag that
+    # tolerates it. Defaults to the Check name.
+    block_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -532,18 +553,62 @@ def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
 _IDS = ("id_dtype", "negative_ids", "duplicate_ids")
 
 CHECKS: tuple[Check, ...] = (
-    Check("required_columns", (), _ck_required_columns, "required columns present", "Columns & parsing"),
-    Check("empty_pedigree", ("required_columns",), _ck_empty_pedigree, "pedigree is non-empty", "Columns & parsing"),
-    Check("id_dtype", ("required_columns",), _ck_id_dtype, "every row has an id", "Columns & parsing"),
-    Check("sex_tokens", ("required_columns",), _ck_sex_tokens, "sex column tokens recognized", "Columns & parsing"),
-    Check("negative_ids", ("id_dtype",), _ck_negative_ids, "no negative IDs", "IDs"),
-    Check("duplicate_ids", ("id_dtype",), _ck_duplicate_ids, "no duplicate IDs", "IDs", droppable=True),
+    Check(
+        "required_columns",
+        (),
+        _ck_required_columns,
+        "required columns present",
+        "Columns & parsing",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "empty_pedigree",
+        ("required_columns",),
+        _ck_empty_pedigree,
+        "pedigree is non-empty",
+        "Columns & parsing",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "id_dtype",
+        ("required_columns",),
+        _ck_id_dtype,
+        "every row has an id",
+        "Columns & parsing",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "sex_tokens",
+        ("required_columns",),
+        _ck_sex_tokens,
+        "sex column tokens recognized",
+        "Columns & parsing",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "negative_ids",
+        ("id_dtype",),
+        _ck_negative_ids,
+        "no negative IDs",
+        "IDs",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "duplicate_ids",
+        ("id_dtype",),
+        _ck_duplicate_ids,
+        "no duplicate IDs",
+        "IDs",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="duplicate IDs detected",
+    ),
     Check(
         "parent_token_range_mother",
         ("id_dtype",),
         _ck_parent_token_range_mother,
         "mother IDs in valid range",
         "Parent references",
+        FailPolicy.BLOCK,
     ),
     Check(
         "parent_token_range_father",
@@ -551,6 +616,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_parent_token_range_father,
         "father IDs in valid range",
         "Parent references",
+        FailPolicy.BLOCK,
     ),
     Check(
         "parent_refs_present_mother",
@@ -558,6 +624,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_parent_refs_present_mother,
         "mother IDs present in pedigree",
         "Parent references",
+        FailPolicy.AUTOFIX,
     ),
     Check(
         "parent_refs_present_father",
@@ -565,6 +632,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_parent_refs_present_father,
         "father IDs present in pedigree",
         "Parent references",
+        FailPolicy.AUTOFIX,
     ),
     Check(
         "parent_refs_sex_conflict",
@@ -572,7 +640,8 @@ CHECKS: tuple[Check, ...] = (
         _ck_parent_refs_sex_conflict,
         "no missing-parent sex conflicts",
         "Parent references",
-        droppable=True,
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="sex conflict on missing parent(s); pass --no-sex-check to default to sex=F",
     ),
     Check(
         "sex_role_ambiguity",
@@ -580,16 +649,28 @@ CHECKS: tuple[Check, ...] = (
         _ck_sex_role_ambiguity,
         "no role-ambiguous unsexed individuals",
         "Parent references",
-        droppable=True,
+        FailPolicy.BLOCK_OR_DROP,
+        block_message=(
+            "present individual(s) with unknown sex used as BOTH mother and father "
+            "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
+        ),
     ),
-    Check("self_loops", _IDS, _ck_self_loops, "no self-loops", "Graph structure", droppable=True),
+    Check(
+        "self_loops",
+        _IDS,
+        _ck_self_loops,
+        "no self-loops",
+        "Graph structure",
+        FailPolicy.KEEP_OR_DROP,
+    ),
     Check(
         "parents_distinct",
         _IDS,
         _ck_parents_distinct,
         "mother and father distinct",
         "Parent references",
-        droppable=True,
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="rows with mother == father (cannot disambiguate)",
     ),
     Check(
         "sex_role_consistency",
@@ -597,7 +678,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_sex_role_consistency,
         "sex consistent with parent role",
         "Graph structure",
-        droppable=True,
+        FailPolicy.KEEP_OR_DROP,
     ),
     Check(
         "unknown_sex",
@@ -605,7 +686,8 @@ CHECKS: tuple[Check, ...] = (
         _ck_unknown_sex,
         "all individuals have resolved sex",
         "Graph structure",
-        droppable=True,
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
     ),
     Check(
         "acyclic",
@@ -613,7 +695,8 @@ CHECKS: tuple[Check, ...] = (
         _ck_acyclic,
         "acyclic (no descent cycles)",
         "Graph structure",
-        droppable=True,
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="cycle detected",
     ),
     Check(
         "birth_year_dtype",
@@ -621,6 +704,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_birth_year_dtype,
         "birth_year column parses as numeric",
         "Birth years (optional)",
+        FailPolicy.BLOCK,
     ),
     Check(
         "birth_year_range",
@@ -628,7 +712,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_birth_year_range,
         "birth years within sanity range",
         "Birth years (optional)",
-        droppable=True,
+        FailPolicy.KEEP_OR_DROP,
     ),
     Check(
         "birth_year_topology",
@@ -636,7 +720,7 @@ CHECKS: tuple[Check, ...] = (
         _ck_birth_year_topology,
         "child birth_year >= parent birth_year",
         "Birth years (optional)",
-        droppable=True,
+        FailPolicy.KEEP_OR_DROP,
     ),
 )
 
@@ -648,17 +732,26 @@ _CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
 
 # Checks `validate --drop-offending` can resolve by removing the flagged
 # individual(s). Derived from the registry so the set never drifts.
-DROPPABLE_CHECKS: frozenset[str] = frozenset(c.name for c in CHECKS if c.droppable)
-
-# Non-droppable checks that must still BLOCK even under --drop-offending: no
-# row removal fixes a missing column / parse failure / negative id / etc.
-# parent_refs_present_* is excluded — it is auto-fixed by founder synthesis,
-# neither dropped nor blocking.
-NON_REDUCIBLE_BLOCK_CHECKS: frozenset[str] = frozenset(
-    c.name
-    for c in CHECKS
-    if not c.droppable and c.name not in ("parent_refs_present_mother", "parent_refs_present_father")
+DROPPABLE_CHECKS: frozenset[str] = frozenset(
+    c.name for c in CHECKS if c.fail_policy in (FailPolicy.BLOCK_OR_DROP, FailPolicy.KEEP_OR_DROP)
 )
+
+
+def blocking_failures(results: Mapping[str, CheckResult], *, drop_offending: bool) -> list[tuple[str, str]]:
+    """The FAILed Checks that stop ``validate`` writing a pedigree, as ``(name, message)``.
+
+    In registry order. Under ``--drop-offending`` only ``FailPolicy.BLOCK``
+    Checks block (the rest are removed); in plain ``validate``
+    ``BLOCK_OR_DROP`` Checks block too. The message is the Check's
+    ``block_message``, else its name.
+    """
+    blocking = {FailPolicy.BLOCK} if drop_offending else {FailPolicy.BLOCK, FailPolicy.BLOCK_OR_DROP}
+    return [
+        (c.name, c.block_message or c.name)
+        for c in CHECKS
+        if c.fail_policy in blocking and c.name in results and results[c.name].status == "FAIL"
+    ]
+
 
 # Drop fraction (rows removed / input rows) above which --drop-offending warns.
 DROP_FRACTION_WARN: float = 0.10

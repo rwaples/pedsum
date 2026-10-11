@@ -81,7 +81,7 @@ from pedsum.sex_concordance import compute_offspring_sex_concordance
 from pedsum.validate import (
     DROP_FRACTION_WARN,
     DROPPABLE_CHECKS,
-    NON_REDUCIBLE_BLOCK_CHECKS,
+    blocking_failures,
     load_and_validate,
     reduce_pedigree,
     validate_pedigree,
@@ -520,7 +520,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sex-col",
         default="sex",
         metavar="NAME",
-        help="column name for sex; accepts M/F or 0/1 with 0=female, 1=male (default: %(default)s)",
+        help="column name for sex; accepts M/F (any case), Male/Female, or "
+        "PLINK's 1=male, 2=female, 0=unknown (default: %(default)s).",
     )
     p_val.add_argument(
         "--mother-col",
@@ -1473,21 +1474,14 @@ def _write_fixed_pedigree(
 
 
 def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, ctx: ValidationContext) -> int:
-    """``--drop-offending``: reduce the pedigree to a passing one (or BLOCK).
+    """``--drop-offending``: reduce the pedigree to a passing one.
 
-    Column/parse-level failures still BLOCK (no row removal fixes them).
-    Otherwise iterate to a fixpoint, write the removal manifest + reduced
+    The caller has already BLOCKed on column/parse-level failures (no row
+    removal fixes them). Iterate to a fixpoint, write the removal manifest + reduced
     pedigree, self-verify the result passes under the invoked flags, and exit 1
     if anything was dropped (0 if nothing needed dropping).
     """
     manifest_path = out_dir / "validate.dropped.tsv"
-    blocking = sorted(n for n in NON_REDUCIBLE_BLOCK_CHECKS if n in by_check and by_check[n].status == "FAIL")
-    if blocking:
-        sys.stderr.write("\nBLOCKED — --drop-offending cannot fix these by removing individuals:\n")
-        for n in blocking:
-            sys.stderr.write(f"  - {n}\n")
-        return 2
-
     if not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
         _write_dropped_manifest([], manifest_path)
         _write_fixed_pedigree(ctx, args, out_dir)
@@ -1552,23 +1546,6 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
 
     by_check = {r.name: r for r in results}
 
-    blocks: list[str] = []
-    if by_check["duplicate_ids"].status == "FAIL":
-        blocks.append("duplicate IDs detected")
-    if by_check["acyclic"].status == "FAIL":
-        blocks.append("cycle detected")
-    if by_check["parents_distinct"].status == "FAIL":
-        blocks.append("rows with mother == father (cannot disambiguate)")
-    if by_check["parent_refs_sex_conflict"].status == "FAIL":
-        blocks.append("sex conflict on missing parent(s); pass --no-sex-check to default to sex=F")
-    if by_check["sex_role_ambiguity"].status == "FAIL":
-        blocks.append(
-            "present individual(s) with unknown sex used as BOTH mother and father "
-            "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
-        )
-    if by_check["unknown_sex"].status == "FAIL":
-        blocks.append("rows with unresolved sex; pass --allow-missing-sex to tolerate")
-
     sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
 
     out_dir = args.out_dir
@@ -1576,14 +1553,18 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     _write_validate_log(findings, log_path, ctx.id_labels)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
+    blocks = blocking_failures(by_check, drop_offending=args.drop_offending)
+    if blocks:
+        if args.drop_offending:
+            sys.stderr.write("\nBLOCKED — --drop-offending cannot fix these by removing individuals:\n")
+        else:
+            sys.stderr.write("\nBLOCKED — fix the following before re-running:\n")
+        for _name, message in blocks:
+            sys.stderr.write(f"  - {message}\n")
+        return 2
+
     if args.drop_offending:
         return _run_validate_drop(args, by_check, out_dir, ctx)
-
-    if blocks:
-        sys.stderr.write("\nBLOCKED — fix the following before re-running:\n")
-        for b in blocks:
-            sys.stderr.write(f"  - {b}\n")
-        return 2
 
     _write_fixed_pedigree(ctx, args, out_dir)
     return 0 if not findings else 1

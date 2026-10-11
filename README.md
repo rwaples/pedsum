@@ -127,9 +127,20 @@ adds one founder, and founder-based statistics shift with them. Under
 `--drop-offending` the fill also covers the half-founders that dropping
 creates.
 
-Hard-blocks (cycles, duplicates, sex conflicts on missing parents,
-unresolved sex without `--allow-missing-sex`, sex-role ambiguity)
-cause the fixed TSV to be skipped — fix the source data first.
+Hard-blocks cause the fixed TSV to be skipped (exit 2) — fix the source
+data first. Two kinds of failure hard-block:
+
+- column- and parse-level failures: a missing required column, a row
+  without an id, an unrecognized sex token, a negative id, an
+  out-of-range parent token, an unparsable birth year, an empty
+  pedigree;
+- cycles, duplicate IDs, a mother equal to the father, sex conflicts on
+  missing parents, unresolved sex without `--allow-missing-sex`, and
+  sex-role ambiguity.
+
+The other failures (self-loops, sex-role contradictions, birth years out
+of range or out of order) are written to `DIR/validate.tsv.gz` as they
+are, with exit 1; `--drop-offending` removes them.
 
 **`--drop-offending`** turns those hard-blocks into a passing pedigree by
 *removing* the offending individuals rather than refusing. It iteratively drops
@@ -224,8 +235,10 @@ Flags:
 - `--no-override-asserted-sex` — disable the default behavior of
   overriding asserted sex when topology unambiguously implies the
   opposite (asserted M used only as mother → F; asserted F used only
-  as father → M). The missing→F/M imputation is unaffected. Reverts
-  to hard-blocking on sex/role contradictions.
+  as father → M). The missing→F/M imputation is unaffected. A
+  contradiction then fails `sex_role_consistency`: `validate` reports it
+  and writes the asserted sex as it is (exit 1), `--drop-offending`
+  removes the individual, and `summarize` refuses to run.
 
 ### Offspring Sex Concordance (`--sex-concordance`)
 
