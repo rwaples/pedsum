@@ -23,12 +23,15 @@ class Finding:
     """A single per-individual validation finding.
 
     ``id`` is the int64 ID code; ``detail`` names IDs as the input wrote them.
+    ``n_refs`` is set only by ``parent_refs_present_*``: how many rows name the
+    missing id in that parent column.
     """
 
     check: str
     id: int | None = None
     row: int | None = None
     detail: str = ""
+    n_refs: int | None = None
 
 
 @dataclass
@@ -99,14 +102,16 @@ def _check_parent_refs_present(arr: np.ndarray, role: str, refs: ParentRefs, *, 
     missing = refs.ids[refs.rows == -1]
     if len(missing) == 0:
         return []
+    named = np.sort(arr[arr != -1])
+    counts = np.searchsorted(named, missing, side="right") - np.searchsorted(named, missing, side="left")
     findings = []
-    for mid in missing:
-        n_refs = int((arr == mid).sum())
+    for mid, n in zip(missing, counts, strict=True):
+        n_refs = int(n)
         name = label(mid)
         detail = f"id={name} referenced as {role} {n_refs} time(s) but no row has this id"
         if name == "0":
             detail += " (if file uses 0/NA/blank as missing token, convert to -1)"
-        findings.append(Finding(check=f"parent_refs_present_{role}", id=int(mid), detail=detail))
+        findings.append(Finding(check=f"parent_refs_present_{role}", id=int(mid), detail=detail, n_refs=n_refs))
     return findings
 
 

@@ -250,3 +250,34 @@ def test_validate_writes_imputed_sex_in_fixed_output(tmp_path):
         fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
     row2 = fixed.filter(pl.col("id").cast(pl.Int64) == 2).row(0, named=True)
     assert row2["sex"] == "2"
+
+
+def test_parent_refs_present_log_counts_references(tmp_path):
+    """validate.log's n_refs counts the rows naming each missing parent; other checks leave it empty.
+
+    Father 900 is named in rows 2 and 3, mother 800 in row 4; id=1 (sex F) is
+    also used as a father, so a sex_role_consistency finding shares the log.
+    """
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "F", "mother": -1, "father": -1},
+            {"id": 2, "sex": "M", "mother": -1, "father": -1},
+            {"id": 5, "sex": "F", "mother": 1, "father": 900},
+            {"id": 6, "sex": "M", "mother": 1, "father": 900},
+            {"id": 7, "sex": "M", "mother": 800, "father": 1},
+        ],
+    )
+    base = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
+    assert r.returncode == 1, r.stderr
+    log = pl.read_csv(base / "validate.log", separator="\t")
+    assert log.schema["n_refs"] == pl.Int64
+    refs = log.filter(pl.col("check").str.starts_with("parent_refs_present"))
+    assert sorted(refs.select("check", "id", "n_refs").rows()) == [
+        ("parent_refs_present_father", 900, 2),
+        ("parent_refs_present_mother", 800, 1),
+    ]
+    others = log.filter(~pl.col("check").str.starts_with("parent_refs_present"))
+    assert "sex_role_consistency" in others["check"].to_list()
+    assert others["n_refs"].null_count() == len(others)

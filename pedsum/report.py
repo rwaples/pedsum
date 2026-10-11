@@ -757,7 +757,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
 
 
 def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
-    """Tab-separated log: one row per finding (check / id / row / detail).
+    """Tab-separated log: one row per finding (check / id / row / detail / n_refs).
 
     ``labels`` is None when the id column did not parse, so no finding has an id.
     """
@@ -769,8 +769,9 @@ def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabel
             "id": [None if f.id is None or labels is None else labels.label(f.id) for f in findings],
             "row": [None if f.row is None else str(f.row) for f in findings],
             "detail": [f.detail for f in findings],
+            "n_refs": [f.n_refs for f in findings],
         },
-        schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String},
+        schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String, "n_refs": pl.Int64},
     )
     with atomic_output(out_path) as tmp:
         df.write_csv(tmp, separator="\t")

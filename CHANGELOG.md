@@ -142,6 +142,15 @@ whole command.
 - **`assortative_mating.yaml`** rounds floats to 4 decimal places, or to
   4 significant digits below 0.1, so a small p-value, SE or share is not
   written as 0. Other YAML outputs keep 4 decimal places.
+- **`validate.log` gains an `n_refs` column**
+  ([#17](https://github.com/rwaples/pedsum/issues/17)): for a
+  `parent_refs_present_mother` or `_father` finding, the number of rows
+  that name the missing id in that parent column. It is empty for every
+  other check. The count was only in the `detail` text before, so a tool
+  that applies a rule to it had to parse the sentence. The new column is
+  last; `detail` is unchanged. The counts now come from one sort of the
+  parent column, not one scan per missing id: on 1M rows with 100k
+  missing fathers, the check took 0.15 s instead of 75 s.
 
 ### Changed
 

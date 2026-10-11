@@ -188,3 +188,17 @@ def test_drop_offending_keeps_string_mode_when_the_last_string_id_is_dropped(tmp
     assert sorted(fixed["id"].to_list()) == ["2", "3", f"{PHANTOM_PREFIX}1"]
     assert fixed.filter(pl.col("id") == "3")["father"][0] == f"{PHANTOM_PREFIX}1"
     assert r.stderr.count("(e.g. ['x'])") == 1  # the rounds reuse the input's labels
+
+
+def test_parent_refs_present_counts_string_ids(tmp_path):
+    """n_refs counts references to a missing string parent; ``P`` and ``p`` are counted apart."""
+    ped = _write(
+        tmp_path / "p.tsv",
+        "id\tsex\tmother\tfather\nA\tF\tNA\tNA\nB\tM\tA\tP\nC\tF\tA\tP\nD\tM\tA\tP\nE\tF\tA\tp\n",
+    )
+    out = tmp_path / "out"
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
+    assert r.returncode == 1, r.stderr
+    log = pl.read_csv(out / "validate.log", separator="\t", infer_schema=False)
+    refs = log.filter(pl.col("check") == "parent_refs_present_father")
+    assert sorted(refs.select("id", "n_refs").rows()) == [("P", "3"), ("p", "1")]

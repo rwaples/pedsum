@@ -92,7 +92,7 @@ individuals, …) and writes:
 
 | File | Contents |
 |---|---|
-| `DIR/validate.log` | per-finding TSV (one row per issue) |
+| `DIR/validate.log` | per-finding TSV (one row per issue): `check`, `id`, `row`, `detail`, and `n_refs`, the number of rows naming a missing parent (`parent_refs_present_*` findings only) |
 | `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 
