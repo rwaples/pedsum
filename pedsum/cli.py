@@ -36,31 +36,29 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.ids import PHANTOM_PREFIX, IdLabels
+from pedsum.fixed_pedigree import _next_free_id, fix_pedigree, render_fixed_pedigree
+from pedsum.ids import PHANTOM_PREFIX
 from pedsum.memory import GiB, MemoryWatchdog, parse_size, resolve_limit
 from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
-from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, plink_sex, read_reference_mask, read_trait_columns
+from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES, read_reference_mask, read_trait_columns
 from pedsum.pedigree_ops import _group_mating_pairs
 from pedsum.progress import relationship_progress
 from pedsum.report import (
     ASSORTATIVE_MATING_FIGURES,
     SAFE_MIN_CELL,
     _apply_safe_attempt,
-    _build_added_founders,
     _build_assortative_mating_data,
     _build_effective_size_data,
     _build_individual_data,
     _build_pedigree_data,
-    _build_phantom_parents,
     _build_summary_data,
     _format_check_summary,
-    _next_free_id,
     _prepare_out_dir,
+    _to_csv_gz,
     _write_annotated_tsv,
     _write_dropped_manifest,
     _write_long_tsv,
     _write_validate_log,
-    _write_validate_tsv_gz,
     _write_yaml,
     atomic_output,
 )
@@ -1401,76 +1399,25 @@ def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
 def _write_fixed_pedigree(
     ctx: ValidationContext, args: argparse.Namespace, out_dir: Path, *, next_id: int | None = None
 ) -> int:
-    """Write ``validate.tsv.gz`` from ``ctx``; return total rows written.
+    """Write the Fixed Pedigree of ``ctx`` to ``validate.tsv.gz``; return total rows written.
 
-    Synthesizes founder rows for missing parents (and, with
-    ``--fill-half-founders``, phantom parents numbered from ``next_id``), folds
-    sex imputation into the sex column, topo-reorders (parents before
-    children), and writes the gzipped TSV. Shared by the normal validate path
-    and ``--drop-offending`` (which passes the reduced context, and the input's
-    ``next_id`` so no phantom reuses a dropped ID).
+    Shared by the normal validate path and ``--drop-offending`` (which passes
+    the reduced context, and the input's ``next_id`` so no phantom reuses a
+    dropped ID).
     """
-    n_total = len(ctx.df_raw)
-    added_founders: list[dict] = []
-    df_out = ctx.df_raw
-    labels = IdLabels()  # no ids parsed, so no founder row to name
-    if ctx.ids is not None and ctx.mothers is not None and ctx.fathers is not None:
-        assert ctx.id_labels is not None
-        labels = ctx.id_labels
-        added_founders = _build_added_founders(ctx.mothers, ctx.fathers, ctx.id_index, args.no_sex_check)
-        # Write every row's resolved sex (after imputation and role overrides)
-        # in PLINK's coding, 1=male, 2=female, 0=unknown, whatever tokens the
-        # input used, so the column holds one encoding. sex_source records
-        # which rows pedsum changed.
-        sex_imp = ctx.get_imputation()
-        if sex_imp is not None:
-            if sex_imp.n_imputed > 0:
-                logger.info("validate: imputed sex for %d row(s) from parent role", int(sex_imp.n_imputed))
-            n_unresolved = int((sex_imp.imputed_sex == SEX_UNKNOWN).sum())
-            if n_unresolved > 0:
-                logger.info("validate: wrote %d unresolved-sex row(s) as 0 in fixed output", n_unresolved)
-            # Stamp sex and sex_source BEFORE the topological reorder so they
-            # are reordered along with the rest.
-            df_out = df_out.with_columns(
-                pl.Series(args.sex_col, plink_sex(sex_imp.imputed_sex)).cast(pl.String),
-                pl.Series("sex_source", sex_imp.sex_source.astype(str)),
-            )
-        if args.fill_half_founders:
-            if next_id is None:
-                next_id = _next_free_id(ctx.ids, ctx.mothers, ctx.fathers)
-            labels = labels.with_phantoms(next_id)
-            mothers, fathers, phantoms = _build_phantom_parents(ctx.mothers, ctx.fathers, next_id)
-            filled_m = mothers != ctx.mothers
-            filled_f = fathers != ctx.fathers
-            df_out = df_out.with_columns(
-                pl.when(pl.Series(filled_m))
-                .then(labels.strings(mothers))
-                .otherwise(pl.col(args.mother_col).cast(pl.String))
-                .alias(args.mother_col),
-                pl.when(pl.Series(filled_f))
-                .then(labels.strings(fathers))
-                .otherwise(pl.col(args.father_col).cast(pl.String))
-                .alias(args.father_col),
-            )
-            added_founders += phantoms
-            logger.info("validate: added %d phantom parent(s) for half-founders", len(phantoms))
-        # Reorder so the fixed file is parents-before-children and feeds back
-        # into pedsum without further auto-fixes.
-        depth = ctx.depth
-        if (depth >= 0).all():  # else the acyclic FAIL already surfaced; skip reorder
-            order = np.argsort(depth, kind="stable")
-            natural = np.arange(len(order))
-            if not np.array_equal(order, natural):
-                logger.info("validate: reordering %d row(s) into topological order", int((order != natural).sum()))
-                df_out = df_out[order]
-
-    out_path = out_dir / "validate.tsv.gz"
-    _write_validate_tsv_gz(
-        df_out, added_founders, args.id_col, args.sex_col, args.mother_col, args.father_col, out_path, labels
+    fp = fix_pedigree(ctx, fill_half_founders=args.fill_half_founders, next_id=next_id)
+    out = render_fixed_pedigree(
+        fp,
+        ctx.df_raw,
+        id_col=args.id_col,
+        sex_col=args.sex_col,
+        mother_col=args.mother_col,
+        father_col=args.father_col,
     )
-    n_total_out = n_total + len(added_founders)
-    sys.stderr.write(f"wrote {out_path} ({n_total_out:,} rows; {len(added_founders)} founder(s) added)\n")
-    return n_total_out
+    out_path = out_dir / "validate.tsv.gz"
+    _to_csv_gz(out, out_path)
+    sys.stderr.write(f"wrote {out_path} ({len(out):,} rows; {len(fp.founders)} founder(s) added)\n")
+    return len(out)
 
 
 def _run_validate_drop(args: argparse.Namespace, by_check: dict, out_dir: Path, ctx: ValidationContext) -> int:

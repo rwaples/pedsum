@@ -11,7 +11,7 @@ import pytest
 from conftest import parent_rows
 from relationship_summary_oracle import compute_relationship_summary
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError
+from pedsum.base import PedigreeError
 from pedsum.checks import (
     Finding,
     _check_birth_year_topology,
@@ -41,7 +41,6 @@ from pedsum.report import (
     _round_floats,
     _write_annotated_tsv,
     _write_dropped_manifest,
-    _write_validate_tsv_gz,
 )
 from pedsum.schema import (
     SectionSpec,
@@ -434,26 +433,6 @@ class TestReportEdgeCases:
             {"id": 1, "check": "self_loops", "round": 1},
             {"id": 2, "check": "negative_ids", "round": 2},
         ]
-
-    def test_write_validate_tsv_prepends_added_founders(self, tmp_path) -> None:
-        """Validate TSV writing prepends synthesized founder rows when present."""
-        df_raw = pl.DataFrame({"id": [3], "sex": ["M"], "mother": [1], "father": [2]})
-        out = tmp_path / "validate.tsv.gz"
-        _write_validate_tsv_gz(
-            df_raw,
-            [{"id": 1, "sex": SEX_FEMALE}, {"id": 2, "sex": SEX_MALE}],
-            "id",
-            "sex",
-            "mother",
-            "father",
-            out,
-            IdLabels(),
-        )
-        with gzip.open(out, "rt") as fh:
-            fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
-        assert fixed["id"].to_list() == ["1", "2", "3"]
-        assert fixed["mother"].to_list() == ["-1", "-1", "1"]
-        assert fixed["sex"].to_list() == ["2", "1", "M"]  # founders in PLINK coding
 
     def test_write_annotated_tsv_detects_true_row_mismatch(self, tmp_path) -> None:
         """Annotated TSV writing raises when the input rows cannot realign to the individual table."""
