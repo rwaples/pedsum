@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import functools
 import math
-from contextlib import nullcontext
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
@@ -52,10 +51,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pedsum.base import SEX_MALE, logger
+from pedsum.progress import timed
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from contextlib import AbstractContextManager
 
     import polars as pl
 
@@ -660,18 +659,11 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
 # ---------------------------------------------------------------------------
 
 
-def _null_timer(label: str) -> AbstractContextManager[None]:
-    """No-op stand-in for the CLI's ``_timed`` phase logger; ``label`` is ignored."""
-    del label
-    return nullcontext()
-
-
 def compute_offspring_sex_concordance(
     df: pl.DataFrame,
     *,
     permutations: int = 0,
     seed: int = 0,
-    timer=None,
 ) -> dict:
     """Offspring Sex Concordance across the three canonical groupings.
 
@@ -685,15 +677,12 @@ def compute_offspring_sex_concordance(
         permutations: ``B``, permutation draws for the headline analysis of
             each grouping. ``0`` runs the analytical test only.
         seed: Permutation seed; meaningful only when ``permutations > 0``.
-        timer: Optional ``label -> context manager`` used to attribute phases
-            (the CLI passes its ``_timed``).
 
     Returns:
         The ``offspring_sex_concordance`` report section: a ``null_model``
         block plus one block per grouping. Aggregate only — no per-parent,
         per-Mating-Pair or per-Sibship record is emitted.
     """
-    timed = timer or _null_timer
     # ``sex_source`` already encodes resolution — validate.py stamps every
     # still-unknown row "unresolved" in its final pass — so admitting by
     # provenance admits only rows whose sex is resolved.

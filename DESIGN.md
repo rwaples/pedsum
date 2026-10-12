@@ -15,12 +15,13 @@ from those above it):
 | Module | Responsibility |
 |---|---|
 | `pedsum/base.py` | shared constants, the `pedigree_summary` logger, `PedigreeError` |
-| `pedsum/progress.py` | `relationship_progress`: the terminal progress bar for pedigree-graph's long relationship calls |
+| `pedsum/progress.py` | `timed` phase logging (and the phase stack the memory watchdog and the benchmark profiler read); `relationship_progress`, the terminal progress bar for pedigree-graph's long relationship calls |
 | `pedsum/pedigree_ops.py` | low-level array helpers (parent rows, parent references, sib groups, topological depth, sort-based distinct integers) |
 | `pedsum/parse.py` | delimiter sniffing, column coercion, sex decoding, trait-column reading |
-| `pedsum/checks.py` | per-check finding producers + check metadata (`_CHECK_*`) |
-| `pedsum/validate.py` | `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) + sex imputation; Fail Policies and `blocking_failures`; `fix_validated` (what `validate` writes, incl. the `--drop-offending` reduction and self-verify) |
+| `pedsum/checks.py` | the Check registry: each Check as one `(ctx) -> CheckResult` function, its Fail Policy, `blocking_failures`, and the constants derived from the registry |
+| `pedsum/validate.py` | `ValidationConfig`, `ValidationContext`, sex imputation, the runner, `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) |
 | `pedsum/fixed_pedigree.py` | the Fixed Pedigree: founder synthesis, phantom parents, resolved sex, topological order (`fix_pedigree`), and the string frame `validate` writes (`render_fixed_pedigree`) |
+| `pedsum/reduce.py` | `fix_validated` (what `validate` writes: BLOCKED, or the Fixed Pedigree, after the `--drop-offending` reduction and its self-verify) and `reduce_pedigree` |
 | `pedsum/pairs.py` | relationship-pair enumeration + `PedigreeGraph` construction |
 | `pedsum/sections.py` | per-section summary computations |
 | `pedsum/sex_concordance.py` | Offspring Sex Concordance: group projection, exact conditional moments, Holm, permutation samplers |
@@ -28,7 +29,7 @@ from those above it):
 | `pedsum/schema.py` | categorised YAML schema + slim/extra split machinery |
 | `pedsum/memory.py` | the best-effort memory limit: `MemoryWatchdog`, default-limit discovery, `--max-memory` parsing |
 | `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers, `atomic_output` |
-| `pedsum/cli.py` | argparse, the `summarize` / `validate` / `effective-size` / `epimight-input` / `assortative-mating` runners, `main` |
+| `pedsum/cli/` | `parser.py` (argparse), `common.py` (logging, thread budget, `load_or_fail`), one runner module per subcommand, and `main` in `__init__.py` |
 
 ## CLI design rationale
 
@@ -90,7 +91,7 @@ its Rust row-streaming engine, so neither builds a pair list:
 - F kernel (Meuwissen-Luo): logs a WARNING when rows times the largest
   possible ancestor set, `min(2^(depth+1) - 2, rows)`, passes 4e9, so
   large or deep runs don't silently hang. See `_F_WALK_WARN_VISITS`
-  (`pedsum/base.py`) and its use in `_run_summarize` (`pedsum/cli.py`).
+  (`pedsum/base.py`) and its use in `run_summarize` (`pedsum/cli/summarize.py`).
 - Descendant path counts run right after the graph build: they cost one
   pass, and an int64 overflow on a deep pedigree then exits 1 before any
   expensive phase.
@@ -148,7 +149,7 @@ pedsum keeps the shell. `pedsum/assortative_mating.py`:
   unchanged so the description cannot drift from the code), the counts,
   the cells, the Within-Person Cross-Trait Correlation, then `NOTES`.
 
-**Threads.** `cli._set_assortative_threads` hands `--threads` to numba,
+**Threads.** `pedsum.cli.assortative_mating._set_assortative_threads` hands `--threads` to numba,
 which caps it at `NUMBA_NUM_THREADS`, then passes numba's count to
 `pg_phenotype.configure_threads`. pg-phenotype commits one budget per
 process, as pedigree-graph does, so a later run in the same process (the

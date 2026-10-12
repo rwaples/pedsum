@@ -7,7 +7,8 @@ from conftest import write_ped as _write_ped
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.fixed_pedigree import fix_pedigree, render_fixed_pedigree
-from pedsum.validate import ValidationConfig, fix_validated, validate_pedigree
+from pedsum.reduce import fix_validated
+from pedsum.validate import ValidationConfig, validate_pedigree
 
 _COLS = {"id_col": "id", "sex_col": "sex", "mother_col": "mother", "father_col": "father"}
 

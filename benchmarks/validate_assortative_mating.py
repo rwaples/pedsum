@@ -80,6 +80,7 @@ from scipy.stats import multivariate_normal
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pedsum import cli as pedsum_cli
+from pedsum.cli import assortative_mating as pedsum_am
 from pedsum.report import ASSORTATIVE_MATING_FIGURES, _round_floats
 
 if TYPE_CHECKING:
@@ -223,13 +224,13 @@ def run_pedsum(tsv: Path, out_dir: Path, traits: tuple[str, ...], *inference: st
         "-q",
     ]
     written: list[dict] = []
-    write_yaml = pedsum_cli._write_yaml
+    write_yaml = pedsum_am._write_yaml
 
     def capture(data: dict, path: Path, figures: int = 0) -> None:
         written.append(data)
         write_yaml(data, path, figures)
 
-    with mock.patch.object(pedsum_cli, "_write_yaml", capture):
+    with mock.patch.object(pedsum_am, "_write_yaml", capture):
         code = pedsum_cli.main(argv)
     if code != 0:
         raise SystemExit(f"pedsum assortative-mating exited {code} on {tsv}")

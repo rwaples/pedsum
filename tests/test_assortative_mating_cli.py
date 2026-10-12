@@ -13,7 +13,8 @@ import pytest
 import yaml
 from conftest import EXAMPLE, run_pedsum
 
-from pedsum.cli import _parse_args, physical_cores
+from pedsum.cli.assortative_mating import physical_cores
+from pedsum.cli.parser import parse_args
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -260,7 +261,7 @@ def test_usage_errors_exit_2(tmp_path, traits_tsv, flags, message):
 def test_cli_import_and_parser_leave_numba_unloaded():
     """Importing the CLI and building every subcommand's parser load neither numba, SciPy's optimisers, pg-phenotype nor the assortative-mating module."""
     code = (
-        "import sys; from pedsum.cli import _parse_args; _parse_args(['summarize', '--in', 'x', '--out', 'y']); "
+        "import sys; from pedsum.cli.parser import parse_args; parse_args(['summarize', '--in', 'x', '--out', 'y']); "
         "print([m for m in ('numba', 'scipy.optimize', 'pg_phenotype', 'pedsum.assortative_mating') if m in sys.modules])"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
@@ -279,7 +280,7 @@ def test_seed_takes_the_int64_range(tmp_path, traits_tsv):
 
 def test_trait_type_column_may_contain_equals():
     """``--trait-type`` splits at the last ``=``, so a column name may contain one."""
-    args = _parse_args(
+    args = parse_args(
         ["assortative-mating", "--in", "x", "--out", "y", "--trait", "a=b", "--trait-type", "a=b=ordinal"]
     )
     assert args.trait_type == {"a=b": "ordinal"}
@@ -363,14 +364,12 @@ def test_physical_cores_falls_back_without_topology(tmp_path, monkeypatch):
 
 def test_threads_default_is_physical_cores_and_explicit_wins(tmp_path, traits_tsv):
     """Without ``--threads`` pg-phenotype runs on the physical cores (capped by ``NUMBA_NUM_THREADS``); ``--threads N`` sets N; other subcommands keep 1."""
-    assert _parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx"]).threads is None
-    assert (
-        _parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx", "--threads", "3"]).threads == 3
-    )
-    assert _parse_args(["summarize", "--in", "x", "--out", "y"]).threads == 1
+    assert parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx"]).threads is None
+    assert parse_args(["assortative-mating", "--in", "x", "--out", "y", "--trait", "dx", "--threads", "3"]).threads == 3
+    assert parse_args(["summarize", "--in", "x", "--out", "y"]).threads == 1
     env = os.environ | {"NUMBA_NUM_THREADS": "4"}
     code = (
-        "import sys; from pedsum.cli import main, physical_cores; sys.argv = ['pedsum', *sys.argv[1:]]; "
+        "import sys; from pedsum.cli import main; from pedsum.cli.assortative_mating import physical_cores; sys.argv = ['pedsum', *sys.argv[1:]]; "
         "print(physical_cores()); main()"
     )
 

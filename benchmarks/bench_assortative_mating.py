@@ -53,7 +53,7 @@ SCOPE = (
     'echo "memory_peak $(cat /sys/fs/cgroup$cg/memory.peak)" >&2; exit $status'
 )
 GATE = 1.05
-# The CLI's per-stage INFO lines (``cli._timed``).
+# The CLI's per-stage INFO lines (``pedsum.progress.timed``).
 STAGE = re.compile(r"(load\+validate|assortative mating) in ([0-9.]+)s")
 
 

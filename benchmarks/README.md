@@ -14,7 +14,7 @@ merged before its before/after peak-RSS delta is recorded in
 - `profile_memory.py` — wall-time and peak-RSS profiler for any subcommand.
   Each repeat runs in a child process; peak RSS is `wait4`'s `ru_maxrss`, and
   a sampler in the child attributes approximate per-phase peaks via
-  `pedsum.cli._current_profile_phase()`. `--compare BASELINE.json` exits 1
+  `pedsum.progress.current_profile_phase()`. `--compare BASELINE.json` exits 1
   when the median wall time or median peak RSS exceeds 1.05x the baseline's.
 - `bench_pytest_workers.sh` — repeatable pytest-xdist worker/thread sweep. It
   compares the serial suite with pinned and unpinned parallel cells and samples
@@ -100,6 +100,6 @@ total peak or runtime.
 - The profiler reports medians and the observed range; RSS varies with
   allocator/cache state, so compare medians. Check the CPU clock and load
   before measuring.
-- Per-phase peaks attribute RSS to the active `_timed` block. Samples taken
+- Per-phase peaks attribute RSS to the active `timed` block. Samples taken
   outside any block (e.g. YAML serialization) land under `(unprofiled)`. This
   intentionally prioritizes phase attribution over CLI startup/import RSS.

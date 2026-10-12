@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from conftest import EXAMPLE, run_pedsum, write_ped
 
-import pedsum.cli
+import pedsum.cli.summarize
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ def test_f_warning_depends_on_walk_budget(tmp_path, monkeypatch):
     assert quiet.returncode == 0
     assert "computing F on" not in quiet.stderr
 
-    monkeypatch.setattr(pedsum.cli, "_F_WALK_WARN_VISITS", 0)
+    monkeypatch.setattr(pedsum.cli.summarize, "_F_WALK_WARN_VISITS", 0)
     loud = run_pedsum(["summarize", "--in", str(EXAMPLE), "--out", str(tmp_path / "loud")])
     assert loud.returncode == 0
     assert "WARNING" in loud.stderr

@@ -86,10 +86,10 @@ def test_validation_config_carries_every_option():
     """from_args reads every validation option, so the reduction rounds and the self-verify get them all."""
     from dataclasses import fields
 
-    from pedsum.cli import _parse_args
+    from pedsum.cli.parser import parse_args
     from pedsum.validate import ValidationConfig
 
-    args = _parse_args(
+    args = parse_args(
         [
             "validate", "--in", "p.tsv", "--out", "o",
             "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",

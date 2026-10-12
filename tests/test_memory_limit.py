@@ -151,13 +151,13 @@ def test_failing_phase_lookup_still_exits_3():
 
 
 def test_current_profile_phase_reads_the_innermost_label():
-    """The phase lookup returns the innermost ``_timed`` label, or None outside any block."""
-    from pedsum.cli import _current_profile_phase, _timed
+    """The phase lookup returns the innermost ``timed`` label, or None outside any block."""
+    from pedsum.progress import current_profile_phase, timed
 
-    assert _current_profile_phase() is None
-    with _timed("outer"), _timed("inner"):
-        assert _current_profile_phase() == "inner"
-    assert _current_profile_phase() is None
+    assert current_profile_phase() is None
+    with timed("outer"), timed("inner"):
+        assert current_profile_phase() == "inner"
+    assert current_profile_phase() is None
 
 
 def test_failing_callback_is_logged_and_skipped(caplog):

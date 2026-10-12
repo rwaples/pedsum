@@ -5,8 +5,8 @@ Each repeat runs the command in its own child process. The parent times the
 child and reads its peak RSS from ``wait4``'s ``ru_maxrss``, the exact meter
 (in-process ``ru_maxrss`` only grows, so one process cannot measure several
 runs). Inside the child a background thread samples ``/proc/self/statm`` every
-~20 ms and attributes each sample to the ``_timed`` block active when it was
-taken, via ``pedsum.cli._current_profile_phase()``; those per-phase peaks are
+~20 ms and attributes each sample to the ``timed`` block active when it was
+taken, via ``pedsum.progress.current_profile_phase()``; those per-phase peaks are
 approximate and diagnostic only.
 
 The report gives the median and range of wall time and peak RSS over the
@@ -102,9 +102,10 @@ class _Sampler:
 
 def _child(phases_out: Path, argv: list[str]) -> int:
     """Run ``pedsum <argv>`` in this process under the phase sampler; write the phases to ``phases_out``."""
-    from pedsum.cli import _current_profile_phase, main
+    from pedsum.cli import main
+    from pedsum.progress import current_profile_phase
 
-    with _Sampler(_current_profile_phase) as sampler:
+    with _Sampler(current_profile_phase) as sampler:
         rc = main(argv)
     phases_out.write_text(
         json.dumps(
