@@ -203,13 +203,14 @@ because the two programs cleaned the pedigree differently, not because the
 statistic differs. The table compares `pedsum validate` with the cleaners of
 eight R packages: optiSel `prePed`, visPedigree `tidyped`, nadiv `prepPed`,
 kinship2 `pedigree`/`fixParents`, purgeR `ped_rename`/`ped_sort`, pedtools
-`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. Every
-cell comes from running the programs on the same fixtures; the fixtures,
+`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. The R
+cells come from running the programs on the same fixtures; the fixtures,
 outputs and versions are in
-[pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners).
-[ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)
-records changes planned for several rows
-([#25](https://github.com/rwaples/pedsum/issues/25)).
+[pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners),
+which ran pedsum 542ef12. The pedsum cells describe this version, which
+changed several rows after that run
+([ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md),
+[#25](https://github.com/rwaples/pedsum/issues/25)).
 
 | Problem | pedsum | The R cleaners |
 |---|---|---|
@@ -229,9 +230,12 @@ records changes planned for several rows
 On optiSel's `PedigWithErrors` (10,863 rows), `prePed` keeps every row: it
 adds 2 founders, clears 4 parent links to break two cycles, reads a father
 written `0` as missing and changes 1 sex.
-`validate --drop-offending` removes 7 rows (cycle members, a self-loop and
-children born before a parent) and adds 3 founders, one of them for a father
-written `0`.
+Plain `validate` blocks on the father written `0` and on the cycles. With
+`--missing-parent-token 0 --drop-offending` it removes 7 rows (cycle
+members, a self-loop and children born before a parent) and adds 2
+founders. Adding `--break-cycles` instead clears 2 links, a mother born 28
+years after her child and a self-link, and removes only the 2 children
+born before a parent.
 
 ### Summarize a pedigree
 

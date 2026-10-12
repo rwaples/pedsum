@@ -1,6 +1,8 @@
 # ADR 0006: `validate`'s repairs, compared with the R pedigree cleaners
 
-Status: accepted; not yet implemented ([pedsum#25](https://github.com/rwaples/pedsum/issues/25))
+Status: accepted; implemented ([pedsum#25](https://github.com/rwaples/pedsum/issues/25)). Two points went
+past the decisions below in implementation, both recorded under Consequences: each link `--break-cycles`
+clears is a Finding of a Check, and `summarize` reads the `sex_source` column of its input.
 
 ## Context
 
@@ -31,7 +33,7 @@ one role was synthesized as a founder: optiSel's `PedigWithErrors` has one fathe
 - `validate` writes a parent read as missing through such a token as missing (blank) in
   `validate.tsv.gz`. The **Fixed Pedigree** then needs no option downstream: `summarize` and
   `effective-size` read the same pedigree `validate` wrote (ADR 0005) without repeating the flag.
-- A new Check, Fail Policy `block`, FAILs when a parent ID `0` has no row of its own, in any role. Its
+- A new Check, `zero_parent_present`, Fail Policy `block`, FAILs when a parent ID `0` has no row of its own, in any role. Its
   BLOCKED line names the option. Being `block`, it also stops `--drop-offending`, which no longer removes
   founders over it.
 
@@ -73,7 +75,7 @@ line on stderr that `-q` hides, and in the `sex_source` column; `validate.log` h
 `validate` exited 0. `summarize`, reading `validate.tsv.gz`, never saw it.
 
 - The override stays the default, and `--no-override-asserted-sex` still turns it off.
-- Each override is a Finding of a new Check with Fail Policy `autofix`, so it is in `validate.log` and
+- Each override is a Finding of a new Check, `sex_role_override`, with Fail Policy `autofix`, so it is in `validate.log` and
   counts as a repair like a synthesized founder: plain `validate` exits 1. It is not a `sex_role_consistency` Finding: that Check
   is `keep_or_drop`, and `--drop-offending` would remove every overridden individual.
 - `summarize` counts `sex_source` values in `summary.yaml` when its input carries the column, so a summary
@@ -157,8 +159,16 @@ difference.
 
 ## Consequences
 
-- Two new Checks with Fail Policy `autofix` (`duplicate_rows`, and one for sex overridden from role) and one
-  with `block` (absent parent `0`); `unknown_sex` is removed. `tests/test_fail_policy.py` pins them.
+- Three new Checks with Fail Policy `autofix` (`duplicate_rows`, `sex_role_override` and `cycle_breaks`) and
+  one with `block` (`zero_parent_present`); `unknown_sex` is removed. `tests/test_fail_policy.py` pins them.
+- `cycle_breaks` was added in implementation: each link `--break-cycles` clears is one of its Findings, so a
+  run that clears links exits 1 like any other repair and `validate.log` lists them, beside the manifest
+  `validate.cleared_links.tsv`. It SKIPs without the flag.
+- `summarize` reads its input's `sex_source` column, when there is one, as the provenance of each sex, for
+  `annotated.tsv.gz` and `--sex-concordance` as well as the counts. Loading `validate.tsv.gz` again finds
+  every sex resolved, so without the column a sex `validate` filled or overrode passed for a recorded one.
+- Findings after a collapsed duplicate row name the input's row numbers: the context keeps each remaining
+  row's input position.
 - Plain `validate` exits 1, not 0, when it overrides a recorded sex or collapses duplicate rows. Under
   `--drop-offending`, a run whose only FAILs are `autofix` Checks exits 0, as it already does for a
   synthesized founder.
