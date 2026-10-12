@@ -18,7 +18,7 @@ from conftest import load_summary_extra_yaml as _load_extra
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
 
-from pedsum.schema import _split_summary
+from pedsum.schema import split_summary
 
 # --------------------------------------------------------------------------
 # File set & line-budget
@@ -89,7 +89,7 @@ def test_empty_categories_omitted(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Direct unit tests on _split_summary
+# Direct unit tests on split_summary
 # --------------------------------------------------------------------------
 
 
@@ -103,7 +103,7 @@ def test_list_of_dict_split_zips_by_index():
             ],
         },
     }
-    slim, extra = _split_summary(nested)
+    slim, extra = split_summary(nested)
     # Slim rows keep only the slim_keys ("depth", "n").
     assert slim["strata"]["depth_summary"] == [
         {"depth": 0, "n": 50},

@@ -8,26 +8,26 @@ import polars as pl
 from pedigree_graph import ResourceError
 
 from pedsum.base import (
-    _F_WALK_WARN_VISITS,
+    F_WALK_WARN_VISITS,
     logger,
 )
 from pedsum.cli.common import commit_thread_budget, load_or_fail
-from pedsum.pairs import _augment_pair_counts, _build_pedigree_graph
-from pedsum.pedigree_ops import _group_mating_pairs
+from pedsum.pairs import augment_pair_counts, build_pedigree_graph
+from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
 from pedsum.report import (
     SAFE_MIN_CELL,
-    _apply_safe_attempt,
-    _build_individual_data,
-    _build_pedigree_data,
-    _build_summary_data,
-    _prepare_out_dir,
-    _write_annotated_tsv,
-    _write_long_tsv,
-    _write_yaml,
+    apply_safe_attempt,
+    build_individual_data,
+    build_pedigree_data,
+    build_summary_data,
+    prepare_out_dir,
+    write_annotated_tsv,
+    write_long_tsv,
+    write_yaml,
 )
 from pedsum.sections import (
-    _build_inbreeding_summary,
+    build_inbreeding_summary,
     build_individual_df,
     compute_aggregate_sections,
     compute_founder_summary,
@@ -38,6 +38,7 @@ from pedsum.sections import (
     equivalent_complete_generations,
 )
 from pedsum.sex_concordance import compute_offspring_sex_concordance
+from pedsum.validate import ValidationConfig
 
 if TYPE_CHECKING:
     import argparse
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
 
 def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs."""
-    if _prepare_out_dir(args.out_dir) != 0:
+    if prepare_out_dir(args.out_dir) != 0:
         return 1
     commit_thread_budget(args)
     loaded = load_or_fail(args)
@@ -62,7 +63,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     # needs it (relationship pairs, F, lineage counts). Its graph rows are
     # df's rows, so its parent rows index df directly.
     with timed("built PedigreeGraph"):
-        pg = _build_pedigree_graph(df)
+        pg = build_pedigree_graph(df)
     mother_rows, father_rows = pg.mother_rows, pg.father_rows
     n_indiv = len(df)
     max_depth = int(df["ped_depth"].to_numpy().max()) if n_indiv else 0
@@ -87,7 +88,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
 
     with timed("mating pairs grouped"):
-        mating = _group_mating_pairs(df, mother_rows, father_rows)
+        mating = group_mating_pairs(df, mother_rows, father_rows)
 
     with timed("sibship sizes"):
         sibships = compute_sibship_sizes(mating.sizes)
@@ -109,7 +110,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         with timed("relationship burden"):
             with relationship_progress("relationship_burden") as progress:
                 burden = pg.relationship_burden(progress=progress)
-            pairs = _augment_pair_counts(burden.category_counts)
+            pairs = augment_pair_counts(burden.category_counts)
             pairs["_engine"] = "rust_streaming_burden"
             relationship_summary = compute_relationship_summary_from_burden(df, burden)
     else:
@@ -121,7 +122,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # The Rust row-streaming engine counts every pair under its closest
         # category without materialising pair lists, so the 23 counts are
         # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
-        pairs = _augment_pair_counts(counts)
+        pairs = augment_pair_counts(counts)
         pairs["_engine"] = "rust_streaming"
         relationship_summary = {
             "computed": False,
@@ -130,7 +131,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         }
 
     if args.inbreeding:
-        if n_indiv * min(2 ** (max_depth + 1) - 2, n_indiv) > _F_WALK_WARN_VISITS:
+        if n_indiv * min(2 ** (max_depth + 1) - 2, n_indiv) > F_WALK_WARN_VISITS:
             logger.warning(
                 "computing F on %s rows at max depth %d; its time grows with rows and steeply "
                 "with depth (README 'Deep pedigrees') — pass --no-inbreeding to skip",
@@ -140,7 +141,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         with timed("inbreeding (F + n_ancestors)"):
             F_vec = pg.inbreeding()
             n_anc = pg.distinct_ancestor_counts()
-            inb_summary: dict | None = _build_inbreeding_summary(F_vec)
+            inb_summary: dict | None = build_inbreeding_summary(F_vec)
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
         inb_summary = None
@@ -170,7 +171,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     with timed("aggregate pedigree sections"):
         aggregates = compute_aggregate_sections(idf, founder_summary=founder_summary)
 
-    tsv_payload = _build_pedigree_data(
+    tsv_payload = build_pedigree_data(
         args.in_path,
         cmd,
         size,
@@ -184,23 +185,23 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         max_degree=args.max_degree,
     )
 
-    ind_data = _build_individual_data(idf, args.in_path, cmd)
+    ind_data = build_individual_data(idf, args.in_path, cmd)
 
     if args.safe_attempt:
-        _apply_safe_attempt(tsv_payload, ind_data)
+        apply_safe_attempt(tsv_payload, ind_data)
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
 
-    slim_yaml, extra_yaml = _build_summary_data(tsv_payload, ind_data)
-    _write_yaml(slim_yaml, out_dir / "summary.yaml")
-    _write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
+    slim_yaml, extra_yaml = build_summary_data(tsv_payload, ind_data)
+    write_yaml(slim_yaml, out_dir / "summary.yaml")
+    write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
     logger.info(
         "wrote %s/{summary.yaml, summary.extra.yaml}",
         out_dir,
     )
 
     if args.tsv:
-        _write_long_tsv(tsv_payload, out_dir / "summary.pedigree.tsv")
-        _write_long_tsv(ind_data, out_dir / "summary.individual.tsv")
+        write_long_tsv(tsv_payload, out_dir / "summary.pedigree.tsv")
+        write_long_tsv(ind_data, out_dir / "summary.individual.tsv")
         logger.info(
             "wrote %s/{summary.pedigree.tsv, summary.individual.tsv}",
             out_dir,
@@ -216,6 +217,8 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         # aggregate this phase across repeats; out_dir is already in the
         # summary.yaml log line above.
         with timed("wrote annotated.tsv.gz"):
-            _write_annotated_tsv(args.in_path, args, idf, out_dir / "annotated.tsv.gz", labels)
+            write_annotated_tsv(
+                args.in_path, ValidationConfig.from_args(args), args.sep, idf, out_dir / "annotated.tsv.gz", labels
+            )
 
     return 0

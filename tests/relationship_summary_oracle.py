@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pedigree_graph import RELATIONSHIPS
 
-from pedsum.sections import _numeric_distribution
+from pedsum.sections import numeric_distribution
 
 if TYPE_CHECKING:
     import polars as pl
@@ -47,8 +47,8 @@ def compute_relationship_summary(
             "related_pair_density": 0.0,
             "related_pairs_by_closest_degree": {str(d): 0 for d in range(1, 6)},
             "closest_relationship_per_individual": {"none": 0, **{str(d): 0 for d in range(1, 6)}},
-            "relatives_by_degree": {str(d): _numeric_distribution(np.array([], dtype=np.int64)) for d in range(1, 6)},
-            "relatives_total": _numeric_distribution(np.array([], dtype=np.int64)),
+            "relatives_by_degree": {str(d): numeric_distribution(np.array([], dtype=np.int64)) for d in range(1, 6)},
+            "relatives_total": numeric_distribution(np.array([], dtype=np.int64)),
             "related_pair_density_by_depth": [],
         }
 
@@ -85,8 +85,8 @@ def compute_relationship_summary(
                 "none": int((closest_degree == 0).sum()),
                 **{str(d): 0 for d in range(1, 6)},
             },
-            "relatives_by_degree": {str(d): _numeric_distribution(np.zeros(n, dtype=np.int64)) for d in range(1, 6)},
-            "relatives_total": _numeric_distribution(np.zeros(n, dtype=np.int64)),
+            "relatives_by_degree": {str(d): numeric_distribution(np.zeros(n, dtype=np.int64)) for d in range(1, 6)},
+            "relatives_total": numeric_distribution(np.zeros(n, dtype=np.int64)),
             "related_pair_density_by_depth": [],
         }
 
@@ -109,7 +109,7 @@ def compute_relationship_summary(
     for degree in range(1, 6):
         mask = min_degrees == degree
         degree_counts = (np.bincount(lo[mask], minlength=n) + np.bincount(hi[mask], minlength=n)).astype(np.int64)
-        counts_by_degree[str(degree)] = _numeric_distribution(degree_counts)
+        counts_by_degree[str(degree)] = numeric_distribution(degree_counts)
         total_relatives += degree_counts
 
     for degree in range(5, 0, -1):
@@ -154,6 +154,6 @@ def compute_relationship_summary(
         "related_pairs_by_closest_degree": related_by_closest_degree,
         "closest_relationship_per_individual": closest_dist,
         "relatives_by_degree": counts_by_degree,
-        "relatives_total": _numeric_distribution(total_relatives),
+        "relatives_total": numeric_distribution(total_relatives),
         "related_pair_density_by_depth": depth_rows,
     }

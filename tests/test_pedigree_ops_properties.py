@@ -13,7 +13,7 @@ import polars as pl
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from pedsum.pedigree_ops import IdIndex, _group_mating_pairs, _parent_rows, _structural_depth
+from pedsum.pedigree_ops import IdIndex, group_mating_pairs, rows_of_parents, structural_depth
 
 
 @st.composite
@@ -39,7 +39,7 @@ def _depth_by_id(order: list[int], mothers: np.ndarray, fathers: np.ndarray) -> 
     pos = {id_: row for row, id_ in enumerate(order)}
     m_rows = np.array([pos[int(mothers[i])] if mothers[i] != -1 else -1 for i in order], dtype=np.int64)
     f_rows = np.array([pos[int(fathers[i])] if fathers[i] != -1 else -1 for i in order], dtype=np.int64)
-    depth = _structural_depth(m_rows, f_rows)
+    depth = structural_depth(m_rows, f_rows)
     return {id_: int(depth[row]) for row, id_ in enumerate(order)}
 
 
@@ -68,7 +68,7 @@ def test_depth_marks_cycle_and_descendants() -> None:
     # rows 0 and 1 are each other's mother; row 3 has row 0 as mother and founder row 2 as father.
     mothers = np.array([1, 0, -1, 0], dtype=np.int64)
     fathers = np.array([-1, -1, -1, 2], dtype=np.int64)
-    np.testing.assert_array_equal(_structural_depth(mothers, fathers), [-1, -1, 0, -1])
+    np.testing.assert_array_equal(structural_depth(mothers, fathers), [-1, -1, 0, -1])
 
 
 @settings(deadline=None)
@@ -79,9 +79,9 @@ def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> 
     order = data.draw(st.permutations(ids))
     df = pl.DataFrame({"id": ids, "mother": mothers, "father": fathers})[order]
     id_index = IdIndex(df["id"].to_numpy())
-    m_rows, _ = _parent_rows(df["mother"].to_numpy(), id_index)
-    f_rows, _ = _parent_rows(df["father"].to_numpy(), id_index)
-    mating = _group_mating_pairs(df, m_rows, f_rows)
+    m_rows, _ = rows_of_parents(df["mother"].to_numpy(), id_index)
+    f_rows, _ = rows_of_parents(df["father"].to_numpy(), id_index)
+    mating = group_mating_pairs(df, m_rows, f_rows)
 
     both = np.flatnonzero((m_rows >= 0) & (f_rows >= 0))
     assert sorted(mating.children.tolist()) == both.tolist()
@@ -104,7 +104,7 @@ def test_parent_rows_mask_and_index(ped: tuple) -> None:
     id_index = IdIndex(ids)
     n = len(ids)
     for parents in (mothers, fathers):
-        rows, mask = _parent_rows(parents, id_index)
+        rows, mask = rows_of_parents(parents, id_index)
         assert (mask == (parents != -1)).all()
         assert (rows[~mask] == -1).all()
         present = rows[mask]

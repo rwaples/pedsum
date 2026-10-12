@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from pedsum.cli import main
-from pedsum.pedigree_ops import IdIndex, _parent_rows
-from pedsum.validate import ValidationConfig, ValidationContext, _run_checks
+from pedsum.pedigree_ops import IdIndex, rows_of_parents
+from pedsum.validate import ValidationConfig, ValidationContext, run_checks
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
@@ -54,7 +54,7 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
 def run_check(name: str, rows: list[dict], config: ValidationConfig | None = None) -> CheckResult:
     """Check ``name``'s result when the whole registry runs over ``rows`` in validate's accumulating mode."""
     df = pl.DataFrame(rows, schema=dict.fromkeys(rows[0], pl.String))
-    results, _ = _run_checks(ValidationContext(df, config or ValidationConfig()))
+    results, _ = run_checks(ValidationContext(df, config or ValidationConfig()))
     return results[name]
 
 
@@ -99,8 +99,8 @@ def load_summary_tsv(out_dir: Path) -> list[list[str]]:
 def parent_rows(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Each row's (mother row, father row), ``-1`` when unknown, as summarize reads them off the graph."""
     id_index = IdIndex(df["id"].to_numpy())
-    mother_rows, _ = _parent_rows(df["mother"].to_numpy(), id_index)
-    father_rows, _ = _parent_rows(df["father"].to_numpy(), id_index)
+    mother_rows, _ = rows_of_parents(df["mother"].to_numpy(), id_index)
+    father_rows, _ = rows_of_parents(df["father"].to_numpy(), id_index)
     return mother_rows, father_rows
 
 

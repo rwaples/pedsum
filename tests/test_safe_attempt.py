@@ -2,7 +2,7 @@
 
 The subprocess test pins the CLI contract (no annotated.tsv.gz written,
 INFO lines on stderr). The direct unit test pins the headline branches
-of ``_apply_safe_attempt`` — size_structure / relationship_pairs /
+of ``apply_safe_attempt`` — size_structure / relationship_pairs /
 sex_summary / inbreeding / ind_data.distributions. Sections deliberately
 not covered: sibship_size, mating_pairs, reproduction, genealogy,
 founder_contribution, founder_summary, components, depth_summary.
@@ -13,7 +13,7 @@ from __future__ import annotations
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
-from pedsum.report import _apply_safe_attempt
+from pedsum.report import apply_safe_attempt
 
 
 def test_safe_attempt_summarize_outputs(tmp_path):
@@ -78,7 +78,7 @@ def test_apply_safe_attempt_headline_branches():
         },
     }
 
-    _apply_safe_attempt(ped_data, ind_data, min_cell=5)
+    apply_safe_attempt(ped_data, ind_data, min_cell=5)
 
     # size_structure: small components dropped; small depth counts nulled;
     # small largest_component nulled.

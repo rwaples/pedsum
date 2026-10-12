@@ -1,8 +1,8 @@
 """Direct unit tests for the validate stderr summary formatter.
 
-Covers the four rendering branches of ``_format_check_summary`` (PASS /
+Covers the four rendering branches of ``format_check_summary`` (PASS /
 PASS-with-note / FAIL / SKIP-with-note), the finding-total
-accounting (only FAIL contributes), and the ``_summarize_findings``
+accounting (only FAIL contributes), and the ``summarize_findings``
 >5-finding truncation.
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pedsum.checks import CheckResult, CheckStatus, Finding, _summarize_findings
-from pedsum.report import _format_check_summary
+from pedsum.checks import CheckResult, CheckStatus, Finding, summarize_findings
+from pedsum.report import format_check_summary
 
 
 def test_format_check_summary_renders_all_status_combinations():
@@ -30,7 +30,7 @@ def test_format_check_summary_renders_all_status_combinations():
             note="id_dtype failed",
         ),
     ]
-    out = _format_check_summary(Path("p.tsv"), n_total=5, results=results)
+    out = format_check_summary(Path("p.tsv"), n_total=5, results=results)
     # PASS line carries no parenthetical.
     assert "required columns present" in out
     assert " PASS\n" in out  # plain PASS row exists somewhere
@@ -58,14 +58,14 @@ def test_format_check_summary_total_findings_only_counts_fail():
             note="parent dtype failed",
         ),
     ]
-    out = _format_check_summary(Path("p.tsv"), n_total=5, results=results)
+    out = format_check_summary(Path("p.tsv"), n_total=5, results=results)
     assert "result: 2 finding(s)" in out
 
 
 def test_summarize_findings_truncates_above_five():
     """8 findings → sample shows first 5 plus ``(and 3 more)`` suffix."""
     findings = [Finding(check="negative_ids", id=i, row=i - 1, detail=f"id={i}") for i in range(1, 9)]
-    out = _summarize_findings(findings, str)
+    out = summarize_findings(findings, str)
     assert out.startswith("negative_ids: 8 finding(s) — ")
     # First five rows present.
     for i in range(1, 6):

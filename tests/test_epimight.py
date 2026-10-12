@@ -83,12 +83,12 @@ _SKIPPED_GENERATION = [
 
 def _load_graph(rows, tmp_path):
     """Write ``rows`` to a TSV, run pedsum's validator, and build the PedigreeGraph."""
-    from pedsum.pairs import _build_pedigree_graph
+    from pedsum.pairs import build_pedigree_graph
     from pedsum.validate import ValidationConfig, load_and_validate
 
     ped = write_ped(tmp_path / "ped.tsv", rows)
     df, _labels = load_and_validate(ped, ValidationConfig())
-    return df, _build_pedigree_graph(df)
+    return df, build_pedigree_graph(df)
 
 
 def _skeleton_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:

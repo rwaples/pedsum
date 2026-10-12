@@ -31,8 +31,8 @@ continuous estimates for information only: simACE targets a slot-level Pearson
 weighted by mating count, so neither side is expected to hit them exactly.
 
 pedsum runs in this process through ``pedsum.cli.main``, the console entry
-point, because ``_write_yaml`` rounds every float (to 4 dp, or 4 significant
-digits below 0.1). The payload is captured on its way into ``_write_yaml``, and
+point, because ``write_yaml`` rounds every float (to 4 dp, or 4 significant
+digits below 0.1). The payload is captured on its way into ``write_yaml``, and
 the YAML written to disk must equal it after that rounding, so the
 full-precision values are the ones the CLI reported.
 
@@ -224,13 +224,13 @@ def run_pedsum(tsv: Path, out_dir: Path, traits: tuple[str, ...], *inference: st
         "-q",
     ]
     written: list[dict] = []
-    write_yaml = pedsum_am._write_yaml
+    write_yaml = pedsum_am.write_yaml
 
     def capture(data: dict, path: Path, figures: int = 0) -> None:
         written.append(data)
         write_yaml(data, path, figures)
 
-    with mock.patch.object(pedsum_am, "_write_yaml", capture):
+    with mock.patch.object(pedsum_am, "write_yaml", capture):
         code = pedsum_cli.main(argv)
     if code != 0:
         raise SystemExit(f"pedsum assortative-mating exited {code} on {tsv}")

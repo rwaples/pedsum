@@ -19,11 +19,11 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.pairs import _build_pedigree_graph
+from pedsum.pairs import build_pedigree_graph
 from pedsum.progress import timed
 from pedsum.report import (
-    _prepare_out_dir,
     atomic_output,
+    prepare_out_dir,
 )
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parq
 def run_epimight_input(args: argparse.Namespace) -> int:
     """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
     commit_thread_budget(args)
-    if _prepare_out_dir(args.out_dir) != 0:
+    if prepare_out_dir(args.out_dir) != 0:
         return 1
     try:
         rels = validate_relationship_codes([r.strip() for r in args.rels.split(",") if r.strip()])
@@ -91,7 +91,7 @@ def run_epimight_input(args: argparse.Namespace) -> int:
     df, labels = loaded
 
     with timed("built PedigreeGraph"):
-        pg = _build_pedigree_graph(df)
+        pg = build_pedigree_graph(df)
 
     # The skeleton counts relatives without a pair list. --pairs extracts the
     # list for its own export, after the skeleton's counts are freed.

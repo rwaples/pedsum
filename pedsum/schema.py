@@ -142,7 +142,7 @@ KNOWN_YAML_DROPS: frozenset[str] = frozenset(
 )
 
 
-def _categorise_pedigree(flat_ped: dict) -> dict:
+def categorise_pedigree(flat_ped: dict) -> dict:
     """Wrap the flat pedigree dict into the category structure.
 
     Pure function. Reads ``SUMMARY_SCHEMA`` to bucket sections by
@@ -150,7 +150,7 @@ def _categorise_pedigree(flat_ped: dict) -> dict:
     ``pairs_engine`` into ``relationship_pairs.engine`` so it lives
     inside the relatedness.relationship_pairs subtree.
 
-    Does NOT apply slim/extra splitting — that is ``_split_summary``'s
+    Does NOT apply slim/extra splitting — that is ``split_summary``'s
     job. Does NOT apply ``KNOWN_YAML_DROPS`` — splitter handles them.
     """
     sections = dict(flat_ped)
@@ -266,7 +266,7 @@ def _drop_dotted_path(d: dict, parts: tuple[str, ...]) -> None:
         _drop_dotted_path(sub, parts[1:])
 
 
-def _split_summary(nested_ped: dict) -> tuple[dict, dict]:
+def split_summary(nested_ped: dict) -> tuple[dict, dict]:
     """Split a categorised pedigree dict into (slim, extra) per ``SUMMARY_SCHEMA``.
 
     Implements the split contract: every leaf key in ``nested_ped``
@@ -302,7 +302,7 @@ def _split_summary(nested_ped: dict) -> tuple[dict, dict]:
     return slim, extra
 
 
-def _split_individual_distributions(
+def split_individual_distributions(
     dists: dict,
 ) -> tuple[dict, dict]:
     """Split per-individual distributions into (slim, extra) residues.

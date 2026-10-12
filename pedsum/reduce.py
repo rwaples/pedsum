@@ -14,8 +14,8 @@ import polars as pl
 
 from pedsum.base import PedigreeError, logger
 from pedsum.checks import DROPPABLE_CHECKS, CheckStatus, blocking_failures
-from pedsum.fixed_pedigree import _next_free_id, fix_pedigree, render_fixed_pedigree
-from pedsum.validate import ValidationContext, _run_checks, validate_pedigree
+from pedsum.fixed_pedigree import fix_pedigree, next_free_id, render_fixed_pedigree
+from pedsum.validate import ValidationContext, run_checks, validate_pedigree
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -88,7 +88,7 @@ def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]
 def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     """Iteratively drop offending individuals until the pedigree passes (fixpoint).
 
-    Each round runs the registry (`_run_checks`, which re-imputes sex via a fresh
+    Each round runs the registry (`run_checks`, which re-imputes sex via a fresh
     context), collects droppable Findings, drops the flagged ids (deletes their
     rows and sets references to them to -1), and rebuilds the context from the
     reduced frame. The full `df_current` is carried so extra columns survive and
@@ -111,7 +111,7 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
         rnd += 1
         if rnd > n_input_rows + 1:
             raise PedigreeError("drop-offending failed to converge")
-        _results, findings = _run_checks(ctx)
+        _results, findings = run_checks(ctx)
         droppable = [f for f in findings if f.check in DROPPABLE_CHECKS and f.id is not None]
         drop_ids = _round_drop_ids(droppable, ctx)
         if not drop_ids:
@@ -234,7 +234,7 @@ def fix_validated(
         return ValidateOutcome(exit_code=2, blocked="--drop-offending removed every individual (empty pedigree)")
     write_manifest(reduction.dropped)
     # Number phantoms past the input's IDs so none reuses a dropped ID.
-    next_id = _next_free_id(*ctx.require_id_parents())
+    next_id = next_free_id(*ctx.require_id_parents())
     fp, path = _write_fixed(
         reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write_pedigree
     )

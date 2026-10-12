@@ -10,7 +10,7 @@ from conftest import parent_rows, run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
-from pedsum.parse import _decode_sex
+from pedsum.parse import decode_sex
 from pedsum.sections import compute_size_structure
 from pedsum.validate import ValidationConfig, load_and_validate
 
@@ -22,7 +22,7 @@ from pedsum.validate import ValidationConfig, load_and_validate
 def test_decode_plink_numeric_codes():
     """1/2/0 decode as male/female/unknown with no WARNING when a 2 is present."""
     s = pl.Series(["0", "1", "2", "0"])
-    out = _decode_sex(s)
+    out = decode_sex(s)
     assert out.tolist() == [SEX_UNKNOWN, SEX_MALE, SEX_FEMALE, SEX_UNKNOWN]
 
 
@@ -30,7 +30,7 @@ def test_decode_only_ones_reads_plink_without_warning(caplog):
     """A column of 1s is all male, with no WARNING: there is one numeric coding."""
     s = pl.Series(["1", "1", "1", "1"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        out = _decode_sex(s)
+        out = decode_sex(s)
     assert (out == SEX_MALE).all()
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
@@ -73,7 +73,7 @@ def test_decode_words_only_no_warning(caplog):
     """Word-only sex columns produce NO WARNING."""
     s = pl.Series(["M", "F", "Male", "Female"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        _decode_sex(s)
+        decode_sex(s)
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
@@ -90,7 +90,7 @@ def test_removed_sex_encoding_flags_exit_2(tmp_path, flag):
 def test_sex_missing_tokens_recognized():
     """Empty / NA / -1 / 0 / U / Unknown all decode to SEX_UNKNOWN."""
     s = pl.Series(["M", "F", "", "NA", "-1", "0", "U", "Unknown"])
-    out = _decode_sex(s)
+    out = decode_sex(s)
     assert out.tolist() == [SEX_MALE, SEX_FEMALE, *[SEX_UNKNOWN] * 6]
 
 

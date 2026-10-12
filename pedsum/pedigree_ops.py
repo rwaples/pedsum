@@ -78,7 +78,7 @@ class ParentRefs:
         return cls(ids, id_index.get_indexer(ids))
 
 
-def _parent_rows(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:
+def rows_of_parents(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:
     """Map parent IDs to row indices; -1 for missing. Returns (row_index, present_mask)."""
     out = np.full(len(parents), -1, dtype=np.int64)
     mask = parents != -1
@@ -102,7 +102,7 @@ class MatingPairs:
     father_rows: np.ndarray  # father row of each pair
 
 
-def _group_mating_pairs(df: pl.DataFrame, mother_rows: np.ndarray, father_rows: np.ndarray) -> MatingPairs:
+def group_mating_pairs(df: pl.DataFrame, mother_rows: np.ndarray, father_rows: np.ndarray) -> MatingPairs:
     """Group the children of ``df`` by (mother, father); parent rows are ``-1`` when unknown."""
     # Sorting by parent id rather than row keeps the per-pair order, and with
     # it every float summed over ``sizes``, independent of row order.
@@ -124,7 +124,7 @@ def _group_mating_pairs(df: pl.DataFrame, mother_rows: np.ndarray, father_rows: 
     )
 
 
-def _build_children_csr(mother_rows: np.ndarray, father_rows: np.ndarray) -> sp.csr_matrix | None:
+def build_children_csr(mother_rows: np.ndarray, father_rows: np.ndarray) -> sp.csr_matrix | None:
     """Build the parent→child CSR from parent rows (``-1`` when unknown). None if no edges."""
     n = len(mother_rows)
     has_mom = mother_rows >= 0
@@ -145,7 +145,7 @@ def _concat_ranges(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
     return np.arange(lengths.sum()) + np.repeat(starts - (np.cumsum(lengths) - lengths), lengths)
 
 
-def _structural_depth(mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
+def structural_depth(mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
     """Per-row topological depth, tolerant of any input row order.
 
     Founders have depth 0, other rows ``max(parent_depth) + 1``.  Kahn's

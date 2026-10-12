@@ -13,11 +13,11 @@ from pedsum.cli.common import commit_thread_budget
 from pedsum.ids import PHANTOM_PREFIX
 from pedsum.reduce import DROP_FRACTION_WARN, fix_validated
 from pedsum.report import (
-    _format_check_summary,
-    _prepare_out_dir,
-    _to_csv_gz,
-    _write_dropped_manifest,
-    _write_validate_log,
+    format_check_summary,
+    prepare_out_dir,
+    to_csv_gz,
+    write_dropped_manifest,
+    write_validate_log,
 )
 from pedsum.validate import ValidationConfig, validate_pedigree
 
@@ -62,7 +62,7 @@ def _remove_stale_validate_outputs(out_dir: Path) -> None:
 def run_validate(args: argparse.Namespace, cmd: str) -> int:
     """``validate``: run every Check, write ``validate.log``, then BLOCK or write ``validate.tsv.gz``."""
     commit_thread_budget(args)
-    if _prepare_out_dir(args.out_dir) != 0:
+    if prepare_out_dir(args.out_dir) != 0:
         return 1
     _remove_stale_validate_outputs(args.out_dir)
     try:
@@ -85,22 +85,22 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
         )
         return 2
 
-    sys.stderr.write(_format_check_summary(args.in_path, n_total, results))
+    sys.stderr.write(format_check_summary(args.in_path, n_total, results))
 
     out_dir = args.out_dir
     log_path = out_dir / "validate.log"
-    _write_validate_log(findings, log_path, ctx.id_labels)
+    write_validate_log(findings, log_path, ctx.id_labels)
     sys.stderr.write(f"wrote {log_path} ({len(findings)} finding(s))\n")
 
     def write_pedigree(frame: pl.DataFrame, fp: FixedPedigree) -> Path:
         out_path = out_dir / "validate.tsv.gz"
-        _to_csv_gz(frame, out_path)
+        to_csv_gz(frame, out_path)
         sys.stderr.write(f"wrote {out_path} ({len(frame):,} rows; {len(fp.founders)} founder(s) added)\n")
         return out_path
 
     def write_manifest(dropped: list[tuple[str, str, int]]) -> None:
         manifest_path = out_dir / "validate.dropped.tsv"
-        _write_dropped_manifest(dropped, manifest_path)
+        write_dropped_manifest(dropped, manifest_path)
         if dropped:
             n_ids = len({fid for fid, _check, _round in dropped})
             sys.stderr.write(f"wrote {manifest_path} ({n_ids} id(s) dropped)\n")

@@ -1,7 +1,7 @@
 """Validation: one dual-mode runner over the Check registry in ``pedsum.checks``.
 
 `load_and_validate` (summarize, fail-fast) and `validate_pedigree` (validate,
-accumulating) share the `CHECKS` registry and the `_run_checks` runner — see
+accumulating) share the `CHECKS` registry and the `run_checks` runner — see
 `docs/adr/0002-validation-check-registry.md`. This module also holds the
 validation config and context and sex imputation; `pedsum.reduce` decides what
 `validate` writes.
@@ -16,16 +16,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
-from pedsum.checks import CHECKS, CheckResult, CheckStatus, _summarize_findings
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, SexSource, logger
+from pedsum.checks import CHECKS, CheckResult, CheckStatus, summarize_findings
 from pedsum.fixed_pedigree import fix_pedigree
 from pedsum.parse import (
-    _BIRTH_YEAR_DEFAULT_MIN,
-    _birth_year_default_max,
-    _maybe_warn_csv,
-    _read_pedigree_table,
+    BIRTH_YEAR_DEFAULT_MIN,
+    birth_year_default_max,
+    maybe_warn_csv,
+    read_pedigree_table,
 )
-from pedsum.pedigree_ops import IdIndex, ParentRefs, _parent_rows, _structural_depth
+from pedsum.pedigree_ops import IdIndex, ParentRefs, rows_of_parents, structural_depth
 
 if TYPE_CHECKING:
     import argparse
@@ -89,12 +89,12 @@ def _impute_sex_from_roles(
     / father (``ParentRefs.ids``).
 
     Returns a `_SexImputation` whose `sex_source` is a per-row `dtype=object`
-    array tagging each row's provenance: ``"input"`` / ``"imputed_from_missing"``
-    / ``"imputed_from_role"`` / ``"unresolved"``.
+    array tagging each row's provenance with a ``SexSource`` value (plain
+    strings, which polars converts fastest).
     """
     original_unknown_mask = (sex == SEX_UNKNOWN).copy()
     imputed = sex.copy()
-    sex_source = np.full(len(sex), "input", dtype=object)
+    sex_source = np.full(len(sex), SexSource.INPUT.value, dtype=object)
 
     # Membership by id, not by ParentRefs.rows: with duplicate ids every copy
     # of a referenced id takes the role, not just the first row.
@@ -108,7 +108,7 @@ def _impute_sex_from_roles(
     imputed[impute_f] = SEX_FEMALE
     imputed[impute_m] = SEX_MALE
     imputed_from_missing = impute_f | impute_m
-    sex_source[imputed_from_missing] = "imputed_from_missing"
+    sex_source[imputed_from_missing] = SexSource.IMPUTED_FROM_MISSING.value
     n_imputed = int(imputed_from_missing.sum())
 
     # Pass 2: asserted → role (when topology is unambiguous).
@@ -118,12 +118,12 @@ def _impute_sex_from_roles(
         imputed[override_to_f] = SEX_FEMALE
         imputed[override_to_m] = SEX_MALE
         overridden_mask = override_to_f | override_to_m
-        sex_source[overridden_mask] = "imputed_from_role"
+        sex_source[overridden_mask] = SexSource.IMPUTED_FROM_ROLE.value
     else:
         overridden_mask = np.zeros(len(sex), dtype=bool)
 
     # Final pass: anything still SEX_UNKNOWN is unresolved.
-    sex_source[imputed == SEX_UNKNOWN] = "unresolved"
+    sex_source[imputed == SEX_UNKNOWN] = SexSource.UNRESOLVED.value
 
     return _SexImputation(
         imputed_sex=imputed,
@@ -149,12 +149,12 @@ class ValidationConfig:
     mother_col: str = "mother"
     father_col: str = "father"
     birth_year_col: str | None = None
-    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN
+    birth_year_min: int = BIRTH_YEAR_DEFAULT_MIN
     birth_year_max: int | None = None
     allow_missing_sex: bool = False
     override_asserted_sex: bool = True
     # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
-    # not as a CLI post-filter, so the tolerance composes wherever _run_checks
+    # not as a CLI post-filter, so the tolerance composes wherever run_checks
     # runs: validate, the drop-offending loop, and its self-verify.
     no_sex_check: bool = False
 
@@ -177,7 +177,7 @@ class ValidationConfig:
     @property
     def by_max(self) -> int:
         """Resolved birth-year upper bound (default: current calendar year + 1)."""
-        return self.birth_year_max if self.birth_year_max is not None else _birth_year_default_max()
+        return self.birth_year_max if self.birth_year_max is not None else birth_year_default_max()
 
 
 @dataclass
@@ -234,9 +234,9 @@ class ValidationContext:
         """Topological depth per parsed row, -1 in or below a cycle; built once."""
         assert self.mothers is not None
         assert self.fathers is not None
-        m_row, _ = _parent_rows(self.mothers, self.id_index)
-        f_row, _ = _parent_rows(self.fathers, self.id_index)
-        return _structural_depth(m_row, f_row)
+        m_row, _ = rows_of_parents(self.mothers, self.id_index)
+        f_row, _ = rows_of_parents(self.fathers, self.id_index)
+        return structural_depth(m_row, f_row)
 
     @cached_property
     def imputation(self) -> _SexImputation:
@@ -259,7 +259,7 @@ class ValidationContext:
         """Return the parsed ``(ids, mothers, fathers)``.
 
         Asserts the id/parent parse Checks populated them — guaranteed for any
-        consuming Check by the ``requires`` gating in :func:`_run_checks`. One
+        consuming Check by the ``requires`` gating in :func:`run_checks`. One
         guarded accessor for the Checks that need the full pedigree.
         """
         assert self.ids is not None
@@ -273,7 +273,7 @@ class ValidationContext:
 # ---------------------------------------------------------------------------
 
 
-def _run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Finding]]:
+def run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Finding]]:
     """Run every Check in registry order against ``ctx``.
 
     A Check whose prerequisite did not ``PASS`` is auto-``SKIP``ped: a FAILed
@@ -299,7 +299,7 @@ def _run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Fi
             if ctx.fail_fast:
                 # The id parse Check runs before any Check that names an id.
                 label = ctx.label if ctx.id_labels is not None else str
-                raise PedigreeError(_summarize_findings(result.findings, label))
+                raise PedigreeError(summarize_findings(result.findings, label))
             findings.extend(result.findings)
         results[check.name] = result
     return results, findings
@@ -327,11 +327,11 @@ def load_and_validate(path: Path, config: ValidationConfig, *, sep: str = "auto"
     writes for this input.
     """
     t0 = time.perf_counter()
-    df = _read_pedigree_table(path, sep=sep, dtype=str)
+    df = read_pedigree_table(path, sep=sep, dtype=str)
     logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
-    _maybe_warn_csv(df)
+    maybe_warn_csv(df)
     ctx = ValidationContext(df, config, fail_fast=True)
-    _run_checks(ctx)
+    run_checks(ctx)
     # Every Check passed, so no parent is missing and there is no founder to
     # synthesize: the frame is the input rows of the pedigree validate would write.
     fp = fix_pedigree(ctx, synthesize_founders=False)
@@ -349,8 +349,8 @@ def validate_pedigree(
     every per-individual finding, and ``ctx`` carries the coerced arrays and raw
     DataFrame for ``_run_validate``'s auto-fix.
     """
-    df = _read_pedigree_table(path, sep=sep, dtype=str)
-    _maybe_warn_csv(df)
+    df = read_pedigree_table(path, sep=sep, dtype=str)
+    maybe_warn_csv(df)
     ctx = ValidationContext(df, config)
-    results, findings = _run_checks(ctx)
+    results, findings = run_checks(ctx)
     return len(ctx.df_raw), list(results.values()), findings, ctx

@@ -21,7 +21,7 @@ from pedsum.assortative_mating import (
 )
 from pedsum.base import PedigreeError
 from pedsum.parse import read_trait_columns
-from pedsum.report import ASSORTATIVE_MATING_FIGURES, _write_yaml
+from pedsum.report import ASSORTATIVE_MATING_FIGURES, write_yaml
 from pedsum.validate import ValidationConfig, load_and_validate
 
 
@@ -757,7 +757,7 @@ def test_odds_ratio_inf_is_a_value_and_the_ci_is_never_nan():
 
 def _write_yaml_tmp(payload: dict) -> Path:
     path = Path(tempfile.mkdtemp()) / "am.yaml"
-    _write_yaml({"assortative_mating": payload}, path, ASSORTATIVE_MATING_FIGURES)
+    write_yaml({"assortative_mating": payload}, path, ASSORTATIVE_MATING_FIGURES)
     return path
 
 

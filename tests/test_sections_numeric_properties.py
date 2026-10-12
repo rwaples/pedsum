@@ -1,6 +1,6 @@
 """Property-based tests for numeric summaries in ``pedsum.sections``.
 
-``_numeric_distribution`` must produce ordered quantiles with the mean inside the
+``numeric_distribution`` must produce ordered quantiles with the mean inside the
 support and be permutation-invariant; ``_effective_count_from_weights`` must obey
 its closed form ``1 / sum(p^2)`` and the bound ``0 <= Ne <= n_positive``. Inputs
 are bounded, finite numeric arrays so NumPy reductions cannot overflow.
@@ -13,7 +13,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from pedsum.sections import _effective_count_from_weights, _numeric_distribution
+from pedsum.sections import _effective_count_from_weights, numeric_distribution
 
 _FINITE_FLOATS = st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False)
 _NONNEG_FLOATS = st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False)
@@ -37,10 +37,10 @@ def _assert_distribution_invariants(d: dict, n: int) -> None:
 def test_numeric_distribution_float(vals: list[float]) -> None:
     """Float distributions are ordered, bounded, and invariant to input order."""
     arr = np.array(vals, dtype=float)
-    d = _numeric_distribution(arr)
+    d = numeric_distribution(arr)
     _assert_distribution_invariants(d, len(vals))
 
-    reversed_d = _numeric_distribution(arr[::-1])
+    reversed_d = numeric_distribution(arr[::-1])
     for key, value in d.items():
         assert reversed_d[key] == pytest.approx(value)
 
@@ -50,7 +50,7 @@ def test_numeric_distribution_float(vals: list[float]) -> None:
 def test_numeric_distribution_int(vals: list[int]) -> None:
     """Integer distributions keep the quantile ordering despite truncating casts."""
     arr = np.array(vals, dtype=np.int64)
-    _assert_distribution_invariants(_numeric_distribution(arr), len(vals))
+    _assert_distribution_invariants(numeric_distribution(arr), len(vals))
 
 
 @settings(deadline=None)

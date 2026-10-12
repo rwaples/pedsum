@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import polars as pl
 
 
-def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
+def augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     """Add ``PO`` (= MO + FO) and ``by_degree`` aggregates to a named-codes dict.
 
     Shared by the default counts and the ``--per-individual-burden`` category
@@ -43,7 +43,7 @@ def _augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     return out
 
 
-def _build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
+def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     """Compact arbitrary IDs to ``0..n-1`` and build a full ``PedigreeGraph``.
 
     Threads ``sex`` through to ``PedigreeGraph.from_arrays`` so downstream

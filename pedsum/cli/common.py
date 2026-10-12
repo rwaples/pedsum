@@ -14,7 +14,7 @@ from pedsum.base import (
 )
 from pedsum.progress import timed
 from pedsum.report import (
-    _write_validate_log,
+    write_validate_log,
 )
 from pedsum.validate import ValidationConfig, load_and_validate, validate_pedigree
 
@@ -72,7 +72,7 @@ def write_validation_failure_log(args: argparse.Namespace, config: ValidationCon
     log_path = args.out_dir / "validate.log"
     try:
         _, _, findings, ctx = validate_pedigree(args.in_path, config, sep=args.sep)
-        _write_validate_log(findings, log_path, ctx.id_labels)
+        write_validate_log(findings, log_path, ctx.id_labels)
     except (PedigreeError, FileNotFoundError, OSError) as e:
         logger.error("could not write %s: %s", log_path, e)
         return

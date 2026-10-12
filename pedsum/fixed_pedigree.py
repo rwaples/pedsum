@@ -102,7 +102,7 @@ def fix_pedigree(
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:
-            next_id = _next_free_id(ids, mothers, fathers)
+            next_id = next_free_id(ids, mothers, fathers)
         labels = labels.with_phantoms(next_id)
         new_mothers, new_fathers, phantoms = _build_phantom_parents(mothers, fathers, next_id)
         filled_mother = new_mothers != mothers
@@ -250,7 +250,7 @@ def _build_added_founders(
     return out
 
 
-def _next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
+def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
     """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
     return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
 
@@ -265,7 +265,7 @@ def _build_phantom_parents(
     Returns ``(mothers, fathers, phantoms)``: the parent arrays with every
     half-founder's ``-1`` slot pointing at its phantom, and the phantom founder
     rows (female for a missing mother, male for a missing father). Phantoms are
-    numbered from ``first_id`` in row order; pass :func:`_next_free_id` of the
+    numbered from ``first_id`` in row order; pass :func:`next_free_id` of the
     input pedigree so they collide with no ID, including dropped ones, and
     sort after every existing or synthesized founder.
 

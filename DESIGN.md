@@ -49,7 +49,7 @@ See [CHANGELOG.md](CHANGELOG.md). Notable:
 - `validate --drop-offending` emits a **Reduced Pedigree** (0.11; see
   [docs/adr/0003](docs/adr/0003-drop-offending-reduction.md)). `--no-sex-check`
   now lives in the registry (`ValidationContext.no_sex_check`) so the tolerance
-  composes inside `_run_checks` rather than as a cli post-filter.
+  composes inside `run_checks` rather than as a cli post-filter.
 - `--allow-unknown-sex` → `--allow-missing-sex` (0.8)
 - `ped_depth` sourced from `PedigreeGraph.depth` (0.4; the attribute was
   named `generation` before pedigree-graph 0.8)
@@ -90,7 +90,7 @@ its Rust row-streaming engine, so neither builds a pair list:
 
 - F kernel (Meuwissen-Luo): logs a WARNING when rows times the largest
   possible ancestor set, `min(2^(depth+1) - 2, rows)`, passes 4e9, so
-  large or deep runs don't silently hang. See `_F_WALK_WARN_VISITS`
+  large or deep runs don't silently hang. See `F_WALK_WARN_VISITS`
   (`pedsum/base.py`) and its use in `run_summarize` (`pedsum/cli/summarize.py`).
 - Descendant path counts run right after the graph build: they cost one
   pass, and an int64 overflow on a deep pedigree then exits 1 before any

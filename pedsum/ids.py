@@ -18,7 +18,7 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import PedigreeError, logger
-from pedsum.parse import _PARENT_MISSING_TOKENS
+from pedsum.parse import PARENT_MISSING_TOKENS
 
 #: Prefix of the IDs that ``--fill-half-founders`` gives phantom parents in
 #: string mode. validate refuses the fill when an input ID starts with it.
@@ -176,7 +176,7 @@ class _Column:
 
 
 #: Longest missing-parent token, in bytes; longer tokens skip the lookup.
-_MISSING_MAX_LEN = max(len(t) for t in _PARENT_MISSING_TOKENS)
+_MISSING_MAX_LEN = max(len(t) for t in PARENT_MISSING_TOKENS)
 
 
 def _scan(series: pl.Series, *, ints: bool) -> _Column:
@@ -195,7 +195,7 @@ def _scan(series: pl.Series, *, ints: bool) -> _Column:
     else:
         rows = np.flatnonzero(lengths <= _MISSING_MAX_LEN)
     sub = tokens.gather(rows)
-    sub_missing = (sub.is_null() | sub.str.to_uppercase().is_in(sorted(_PARENT_MISSING_TOKENS))).fill_null(False)
+    sub_missing = (sub.is_null() | sub.str.to_uppercase().is_in(sorted(PARENT_MISSING_TOKENS))).fill_null(False)
     missing = np.zeros(len(tokens), dtype=bool)
     missing[rows[sub_missing.to_numpy()]] = True
     if nonplain is None:

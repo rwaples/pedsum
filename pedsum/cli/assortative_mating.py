@@ -15,9 +15,9 @@ from pedsum.parse import read_trait_columns
 from pedsum.progress import timed
 from pedsum.report import (
     ASSORTATIVE_MATING_FIGURES,
-    _build_assortative_mating_data,
-    _prepare_out_dir,
-    _write_yaml,
+    build_assortative_mating_data,
+    prepare_out_dir,
+    write_yaml,
 )
 
 if TYPE_CHECKING:
@@ -83,7 +83,7 @@ def run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
     """``assortative-mating``: type the trait columns and write ``assortative_mating.yaml``."""
     from pedsum.assortative_mating import classify_trait, compute_assortative_mating
 
-    if _prepare_out_dir(args.out_dir) != 0:
+    if prepare_out_dir(args.out_dir) != 0:
         return 1
     commit_thread_budget(args)
     _set_assortative_threads(physical_cores() if args.threads is None else args.threads)
@@ -127,7 +127,7 @@ def run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
         logger.error("%s", e)
         return 1
     out_path = args.out_dir / "assortative_mating.yaml"
-    data = _build_assortative_mating_data(args.in_path, cmd, len(df), payload)
-    _write_yaml(data, out_path, figures=ASSORTATIVE_MATING_FIGURES)
+    data = build_assortative_mating_data(args.in_path, cmd, len(df), payload)
+    write_yaml(data, out_path, figures=ASSORTATIVE_MATING_FIGURES)
     logger.info("wrote %s", out_path)
     return 0

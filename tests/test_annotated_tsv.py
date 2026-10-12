@@ -1,6 +1,6 @@
 """Tests for ``annotated.tsv.gz`` topological realignment and column collisions.
 
-Pins two behaviours of ``_write_annotated_tsv``:
+Pins two behaviours of ``write_annotated_tsv``:
 - when the input pedigree is not in topological order, rows are realigned
   to match the topologically-ordered ``idf`` table and arbitrary input
   columns ride along by id;

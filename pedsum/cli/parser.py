@@ -19,7 +19,7 @@ from pedsum.epimight import (
     EPIMIGHT_RELATIONSHIP_ORDER,
 )
 from pedsum.memory import parse_size
-from pedsum.parse import _BIRTH_YEAR_DEFAULT_MIN, _SEP_CHOICES
+from pedsum.parse import BIRTH_YEAR_DEFAULT_MIN, SEP_CHOICES
 
 
 class _FullHelpParser(argparse.ArgumentParser):
@@ -128,7 +128,7 @@ def _add_memory_args(p: argparse.ArgumentParser) -> None:
 def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sep",
-        choices=_SEP_CHOICES,
+        choices=SEP_CHOICES,
         default="auto",
         help="input column delimiter. 'auto' (default) sniffs the first "
         "non-empty line for tab/comma/semicolon/pipe; falls back to "
@@ -208,7 +208,7 @@ def _add_input_args(
     p.add_argument(
         "--birth-year-min",
         type=int,
-        default=_BIRTH_YEAR_DEFAULT_MIN,
+        default=BIRTH_YEAR_DEFAULT_MIN,
         metavar="YEAR",
         help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
         "No-op without --birth-year-col.",

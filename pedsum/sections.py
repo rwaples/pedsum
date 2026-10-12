@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pedsum.pedigree_ops import MatingPairs
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import _build_children_csr, unique_ints
+from pedsum.pedigree_ops import build_children_csr, unique_ints
 
 #: The individual-table columns only the inbreeding computation fills; ``--no-inbreeding`` omits them.
 INBREEDING_COLUMNS: tuple[str, ...] = ("F", "n_distinct_ancestors")
@@ -54,7 +54,7 @@ def compute_size_structure(
     max_depth = int(gen.max()) if n > 0 else 0
     gen_counts = np.bincount(gen).tolist() if n > 0 else []
 
-    children_csr = _build_children_csr(mother_rows, father_rows)
+    children_csr = build_children_csr(mother_rows, father_rows)
     if children_csr is not None:
         n_components, comp_labels = csgraph.connected_components(children_csr, directed=False)
     else:
@@ -92,7 +92,7 @@ def compute_size_structure(
     return summary, comp_labels
 
 
-def _numeric_distribution(values: pl.Series | np.ndarray) -> dict:
+def numeric_distribution(values: pl.Series | np.ndarray) -> dict:
     """Compact distribution summary for pedigree-level aggregate sections."""
     arr = values.to_numpy() if isinstance(values, pl.Series) else np.asarray(values)
     n = len(arr)
@@ -137,7 +137,7 @@ def compute_mating_pair_summary(pair_sizes: np.ndarray) -> dict | None:
         "n_pairs": n_pairs,
         "n_pairs_with_multiple_children": n_multi_child_pairs,
         "frac_pairs_with_multiple_children": n_multi_child_pairs / n_pairs,
-        "children_per_pair": _numeric_distribution(pair_sizes),
+        "children_per_pair": numeric_distribution(pair_sizes),
         "effective_pairs_by_children": _effective_count_from_weights(pair_sizes),
     }
 
@@ -248,7 +248,7 @@ def compute_founder_summary(
                 "active_founders": len(active),
                 "active_founder_frac": len(active) / n_founders,
                 "effective_founders_by_descendants": _effective_count_from_weights(active_counts),
-                "founder_ancestors": _numeric_distribution(line_counts),
+                "founder_ancestors": numeric_distribution(line_counts),
             }
         )
 
@@ -332,25 +332,25 @@ def compute_aggregate_sections(
         "n_terminal": n_terminal,
         "frac_terminal": n_terminal / n,
         "frac_with_full_sib": frac_with_full_sib,
-        "offspring_count": _numeric_distribution(n_offspring_arr),
+        "offspring_count": numeric_distribution(n_offspring_arr),
         "offspring_count_hist": _offspring_dist(n_offspring_arr, n),
         "offspring_count_hist_male": _offspring_dist(n_offspring_arr[male_mask], n_male),
         "offspring_count_hist_female": _offspring_dist(n_offspring_arr[female_mask], n_female),
         # mate_count_* are over ALL males / ALL females (zero-included), a
         # behavior change from 0.9's `female_mate_count` / `male_mate_count`
         # which only summed over parents-with-children. See CHANGELOG 0.10.0.
-        "mate_count": _numeric_distribution(n_mates_arr),
-        "mate_count_male": _numeric_distribution(n_mates_arr[male_mask]) if n_male else None,
-        "mate_count_female": _numeric_distribution(n_mates_arr[female_mask]) if n_female else None,
+        "mate_count": numeric_distribution(n_mates_arr),
+        "mate_count_male": numeric_distribution(n_mates_arr[male_mask]) if n_male else None,
+        "mate_count_female": numeric_distribution(n_mates_arr[female_mask]) if n_female else None,
     }
 
     # Per-individual ancestry. Asymmetric semantics today (paths for
     # descendants, distinct for ancestors) — see CONTEXT.md.
     genealogy = {
-        "descendant_paths": _numeric_distribution(descendant_paths_arr),
+        "descendant_paths": numeric_distribution(descendant_paths_arr),
     }
     if "n_distinct_ancestors" in idf.columns:
-        genealogy["distinct_ancestors"] = _numeric_distribution(idf["n_distinct_ancestors"])
+        genealogy["distinct_ancestors"] = numeric_distribution(idf["n_distinct_ancestors"])
     else:
         genealogy["distinct_ancestors"] = None
 
@@ -360,11 +360,11 @@ def compute_aggregate_sections(
         "n_founders_with_descendants": founders_with_desc,
         "n_founders_without_descendants": n_founders - founders_with_desc,
         "frac_founders_with_descendants": (founders_with_desc / n_founders) if n_founders else 0.0,
-        "descendant_paths_per_founder": _numeric_distribution(descendant_path_counts),
+        "descendant_paths_per_founder": numeric_distribution(descendant_path_counts),
         "effective_founders_by_descendant_paths": _effective_count_from_weights(descendant_path_counts),
     }
     _, sizes = np.unique(idf["component_id"].to_numpy(), return_counts=True)
-    component_dist = _numeric_distribution(sizes)
+    component_dist = numeric_distribution(sizes)
     singletons = int((sizes == 1).sum())
     n_comp = len(sizes)
     components = {
@@ -398,12 +398,12 @@ def compute_aggregate_sections(
             "n_reproductive": int(sx_reproductive.sum()),
             "frac_reproductive": float(sx_reproductive.sum()) / n_sub,
             "n_terminal": int((~sx_reproductive).sum()),
-            "offspring_count": _numeric_distribution(sub_off),
-            "mate_count": _numeric_distribution(n_mates_arr[mask]),
-            "depth": _numeric_distribution(depth_col[mask]),
+            "offspring_count": numeric_distribution(sub_off),
+            "mate_count": numeric_distribution(n_mates_arr[mask]),
+            "depth": numeric_distribution(depth_col[mask]),
         }
         if F_arr is not None:
-            row["F"] = _numeric_distribution(F_arr[mask])
+            row["F"] = numeric_distribution(F_arr[mask])
             row["n_inbred"] = int((F_arr[mask] > INBRED_TOL).sum())
         sex_summary[label] = row
 
@@ -424,9 +424,9 @@ def compute_aggregate_sections(
             "n_reproductive": int(d_reproductive.sum()),
             "frac_reproductive": float(d_reproductive.sum()) / n_sub,
             "n_terminal": int((~d_reproductive).sum()),
-            "offspring_count": _numeric_distribution(sub_off),
+            "offspring_count": numeric_distribution(sub_off),
             "offspring_count_hist": _offspring_dist(sub_off, n_sub),
-            "mate_count": _numeric_distribution(n_mates_arr[mask]),
+            "mate_count": numeric_distribution(n_mates_arr[mask]),
             "mean_distinct_ancestors": None,
             "mean_descendant_paths": float(descendant_paths_arr[mask].mean()),
         }
@@ -491,7 +491,7 @@ def compute_relationship_summary_from_burden(df: pl.DataFrame, burden: Relations
     for degree in range(5, 0, -1):
         values = per_person[:, degree - 1]
         closest[values > 0] = degree
-        distributions[str(degree)] = _numeric_distribution(values)
+        distributions[str(degree)] = numeric_distribution(values)
     closest_dist = {"none": int((closest == 0).sum())}
     closest_dist.update({str(d): int((closest == d).sum()) for d in range(1, 6)})
 
@@ -522,7 +522,7 @@ def compute_relationship_summary_from_burden(df: pl.DataFrame, burden: Relations
         "related_pairs_by_closest_degree": by_degree,
         "closest_relationship_per_individual": closest_dist,
         "relatives_by_degree": distributions,
-        "relatives_total": _numeric_distribution(per_person.sum(axis=1, dtype=np.int64)),
+        "relatives_total": numeric_distribution(per_person.sum(axis=1, dtype=np.int64)),
         "related_pair_density_by_depth": depth_rows,
     }
 
@@ -620,7 +620,7 @@ def _effective_size_record(name: str, raw: dict) -> dict:
     return {"ne": None, "reason": "no_estimate", "code": _NO_ESTIMATE_CODES[name](record), **record}
 
 
-def _build_inbreeding_summary(F: np.ndarray) -> dict:
+def build_inbreeding_summary(F: np.ndarray) -> dict:
     """Aggregate a per-individual F vector into the YAML-shaped summary.
 
     F itself is computed by ``pedigree_graph.PedigreeGraph.inbreeding()``

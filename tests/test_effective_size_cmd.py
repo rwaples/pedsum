@@ -288,7 +288,7 @@ def test_breach_during_final_publication_keeps_the_complete_file(tmp_path, monke
             sampled_high.set()
         return rss[0]
 
-    real_write = effective_size._write_yaml
+    real_write = effective_size.write_yaml
 
     def slow_write(data, path):
         if data["status"] == "complete":
@@ -296,7 +296,7 @@ def test_breach_during_final_publication_keeps_the_complete_file(tmp_path, monke
             assert release.wait(timeout=30)
         real_write(data, path)
 
-    monkeypatch.setattr(effective_size, "_write_yaml", slow_write)
+    monkeypatch.setattr(effective_size, "write_yaml", slow_write)
     args = _args(tmp_path)
     wd = MemoryWatchdog(GiB, poll_s=0.01, rss_reader=reader, exit_fn=exits.append)
     with caplog.at_level(logging.INFO), wd:

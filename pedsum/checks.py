@@ -19,7 +19,7 @@ import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.ids import parse_ids
-from pedsum.parse import _as_birth_year_col, _decode_sex, _format_id_sample
+from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -90,7 +90,7 @@ def rows_phrase(rows: np.ndarray, limit: int = 5) -> str:
     return f"row(s) {listed}{suffix}"
 
 
-def _summarize_findings(findings: list[Finding], label: Label) -> str:
+def summarize_findings(findings: list[Finding], label: Label) -> str:
     """Build a human-readable error message from a list of findings."""
     if not findings:
         return ""
@@ -142,7 +142,7 @@ def _id_dtype(ctx: ValidationContext) -> CheckResult:
         )
     except PedigreeError as e:
         return _failed(str(e))
-    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids, ctx.label))
+    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), format_id_sample(ctx.ids, ctx.label))
     return _verdict([])
 
 
@@ -170,7 +170,7 @@ def _warn_zero_female_coding(ctx: ValidationContext) -> None:
 
 def _sex_tokens(ctx: ValidationContext) -> CheckResult:
     try:
-        ctx.sex = _decode_sex(ctx.df_raw[ctx.config.sex_col])
+        ctx.sex = decode_sex(ctx.df_raw[ctx.config.sex_col])
     except PedigreeError as e:
         return _failed(str(e))
     _warn_zero_female_coding(ctx)
@@ -418,7 +418,7 @@ def _unknown_sex(ctx: ValidationContext) -> CheckResult:
 
 
 def _acyclic(ctx: ValidationContext) -> CheckResult:
-    """One Finding per row in or below a cycle (``depth == -1``; see ``_structural_depth``)."""
+    """One Finding per row in or below a cycle (``depth == -1``; see ``structural_depth``)."""
     ids, _, _ = ctx.require_id_parents()
     return _verdict(
         [
@@ -444,7 +444,7 @@ def _birth_year_dtype(ctx: ValidationContext) -> CheckResult:
     if column not in ctx.df_raw.columns:
         return CheckResult(CheckStatus.SKIP, note=f"column {column!r} not present in file")
     try:
-        ctx.birth_year = _as_birth_year_col(ctx.df_raw[column], column)
+        ctx.birth_year = as_birth_year_col(ctx.df_raw[column], column)
     except PedigreeError as e:
         return _failed(str(e))
     return _verdict([])
@@ -705,7 +705,7 @@ CHECKS: tuple[Check, ...] = (
 
 # Derived from the registry (single source of truth).
 _CHECK_ORDER: tuple[str, ...] = tuple(c.name for c in CHECKS)
-_CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
+CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
 
 # Checks `validate --drop-offending` can resolve by removing the flagged
 # individual(s). Derived from the registry so the set never drifts.
@@ -733,7 +733,7 @@ def blocking_failures(results: Mapping[str, CheckResult], *, drop_offending: boo
 # Curated *display* grouping for the stderr summary. Order within a group
 # intentionally differs from execution order (e.g. parents_distinct), so this
 # stays an explicit constant rather than a derivation of _CHECK_ORDER.
-_CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Columns & parsing",
         (

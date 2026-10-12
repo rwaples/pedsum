@@ -18,10 +18,10 @@ from pedsum.schema import (
     _SEX_SUMMARY_SLIM_KEYS,
     INDIVIDUAL_SLIM_COLS,
     INDIVIDUAL_SLIM_DIST_KEYS,
-    _split_individual_distributions,
     _split_offspring_sex_concordance,
     _split_sex_summary,
-    _split_summary,
+    split_individual_distributions,
+    split_summary,
 )
 
 _SCALARS = st.integers(min_value=-1000, max_value=1000)
@@ -131,7 +131,7 @@ def test_split_offspring_sex_concordance_partitions_keys(conc: dict) -> None:
 @given(dists=_dist_dicts())
 def test_split_individual_distributions_partitions_with_fmax_drop(dists: dict) -> None:
     """Per column, slim keeps mean/median for headline cols; extra holds the rest, less F.max."""
-    slim, extra = _split_individual_distributions(dists)
+    slim, extra = split_individual_distributions(dists)
     slim_cols = set(INDIVIDUAL_SLIM_COLS)
     slim_dist_keys = set(INDIVIDUAL_SLIM_DIST_KEYS)
     for col, dist in dists.items():
@@ -161,7 +161,7 @@ def test_split_summary_relationship_pairs_split_and_by_degree_drop(rp: dict, siz
         "relatedness": {"relationship_pairs": dict(rp)},
         "structure": {"size_structure": dict(size)},
     }
-    slim, extra = _split_summary(nested)
+    slim, extra = split_summary(nested)
     pairs_slim_set = set(_PAIRS_SLIM_KEYS)
 
     expected_slim = {k: v for k, v in rp.items() if k in pairs_slim_set}

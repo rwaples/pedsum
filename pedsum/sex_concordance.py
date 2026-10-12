@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pedsum.base import SEX_MALE, logger
+from pedsum.base import SEX_MALE, SexSource, logger
 from pedsum.progress import timed
 
 if TYPE_CHECKING:
@@ -70,13 +70,13 @@ GROUPINGS: tuple[tuple[str, tuple[str, ...]], ...] = (
 MIN_GROUP_SIZE = 2
 
 #: ``sex_source`` values admitted by the headline analysis.
-HEADLINE_SEX_SOURCES: tuple[str, ...] = ("input",)
+HEADLINE_SEX_SOURCES: tuple[SexSource, ...] = (SexSource.INPUT,)
 
 #: ``sex_source`` values admitted by the all-resolved sensitivity analysis.
-ALL_RESOLVED_SEX_SOURCES: tuple[str, ...] = (
-    "input",
-    "imputed_from_missing",
-    "imputed_from_role",
+ALL_RESOLVED_SEX_SOURCES: tuple[SexSource, ...] = (
+    SexSource.INPUT,
+    SexSource.IMPUTED_FROM_MISSING,
+    SexSource.IMPUTED_FROM_ROLE,
 )
 
 #: Analytical p below this needs permutations before it may be claimed.
@@ -88,13 +88,7 @@ ANALYTICAL_P_WARN = 0.01
 # exact-integer ceiling (measured: fine at 1e15, broken at 1e16).
 _NUMBA_SAMPLER_MAX_N = 2**53
 
-_SEX_SOURCE_ORDER: tuple[str, ...] = (
-    "input",
-    "imputed_from_missing",
-    "imputed_from_role",
-    "unresolved",
-)
-_SEX_SOURCE_CODE = {name: i for i, name in enumerate(_SEX_SOURCE_ORDER)}
+_SEX_SOURCE_CODE = {source: i for i, source in enumerate(SexSource)}
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +367,7 @@ class _GroupIndex:
     """Sorted male indicator (int64 0/1); meaningless where sex is unresolved."""
 
     sex_source_code: np.ndarray
-    """Sorted ``sex_source`` codes, indices into ``_SEX_SOURCE_ORDER``."""
+    """Sorted ``sex_source`` codes, indices into ``SexSource``."""
 
 
 def _build_group_index(keys: tuple[np.ndarray, ...], is_male: np.ndarray, sex_source_code: np.ndarray) -> _GroupIndex:
@@ -480,7 +474,7 @@ def _project(index: _GroupIndex, admitted: np.ndarray) -> _Projection:
 def _proportion_distribution(values: np.ndarray) -> dict:
     """Unweighted distribution of per-group male proportions.
 
-    Same key set as ``sections._numeric_distribution`` so the safe-attempt
+    Same key set as ``sections.numeric_distribution`` so the safe-attempt
     extrema drop recognises it. ``nz`` counts groups holding at least one male.
     """
     n = values.size
@@ -588,8 +582,8 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
     # ``minlength`` is what makes the lookup safe: without it bincount sizes its
     # result to max(code) + 1, so a pedigree of purely input sex would return a
     # length-1 tally and IndexError on the imputed slots.
-    tally = np.bincount(index.sex_source_code[projection.eligible_row], minlength=len(_SEX_SOURCE_ORDER))
-    by_source = {name: int(tally[_SEX_SOURCE_CODE[name]]) for name in ALL_RESOLVED_SEX_SOURCES}
+    tally = np.bincount(index.sex_source_code[projection.eligible_row], minlength=len(SexSource))
+    by_source = {source.value: int(tally[_SEX_SOURCE_CODE[source]]) for source in ALL_RESOLVED_SEX_SOURCES}
 
     n_male = int(male_counts.sum())
     n_total = int(sizes.sum())
@@ -688,9 +682,9 @@ def compute_offspring_sex_concordance(
     # provenance admits only rows whose sex is resolved.
     is_male = (df["sex"].to_numpy() == SEX_MALE).astype(np.int64)
     source_raw = df["sex_source"].to_numpy()
-    sex_source_code = np.full(len(df), _SEX_SOURCE_CODE["unresolved"], dtype=np.int8)
-    for name, code in _SEX_SOURCE_CODE.items():
-        sex_source_code[source_raw == name] = code
+    sex_source_code = np.full(len(df), _SEX_SOURCE_CODE[SexSource.UNRESOLVED], dtype=np.int8)
+    for source, code in _SEX_SOURCE_CODE.items():
+        sex_source_code[source_raw == source.value] = code
 
     headline_codes = np.array(sorted(_SEX_SOURCE_CODE[s] for s in HEADLINE_SEX_SOURCES), dtype=np.int8)
     all_resolved_codes = np.array(sorted(_SEX_SOURCE_CODE[s] for s in ALL_RESOLVED_SEX_SOURCES), dtype=np.int8)

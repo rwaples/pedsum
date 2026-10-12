@@ -14,7 +14,7 @@ import polars as pl
 from conftest import parent_rows
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
-from pedsum.report import _build_individual_data
+from pedsum.report import build_individual_data
 from pedsum.sections import INBREEDING_COLUMNS, compute_aggregate_sections, compute_founder_summary
 
 
@@ -63,7 +63,7 @@ def test_default_individual_data_omits_ancestor_distribution() -> None:
     """Without the inbreeding columns, the distribution block omits ``F`` and ``n_distinct_ancestors``."""
     idf = _individual_df().drop(INBREEDING_COLUMNS)
 
-    out = _build_individual_data(
+    out = build_individual_data(
         idf,
         Path("ped.tsv"),
         "pedigree_summary.py summarize --in ped.tsv --out out",
@@ -82,7 +82,7 @@ def test_inbreeding_mode_reports_ancestor_stats() -> None:
         idf,
         founder_summary=founder_summary,
     )
-    out = _build_individual_data(
+    out = build_individual_data(
         idf,
         Path("ped.tsv"),
         "pedigree_summary.py summarize --in ped.tsv --out out --inbreeding",

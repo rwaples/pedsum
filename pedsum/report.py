@@ -17,19 +17,19 @@ import polars as pl
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
-from pedsum.checks import _CHECK_GROUPS, _CHECK_LABELS
-from pedsum.parse import _read_pedigree_table, plink_sex
+from pedsum.checks import CHECK_GROUPS, CHECK_LABELS
+from pedsum.parse import plink_sex, read_pedigree_table
 from pedsum.pedigree_ops import IdIndex
-from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
-from pedsum.sections import INBREEDING_COLUMNS, _numeric_distribution
+from pedsum.schema import categorise_pedigree, split_individual_distributions, split_summary
+from pedsum.sections import INBREEDING_COLUMNS, numeric_distribution
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Iterator
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
     from pedsum.ids import IdLabels
+    from pedsum.validate import ValidationConfig
 
 #: One value in the ``relationship_pairs`` section: a count (``None`` when the
 #: code was not computed) or the ``by_degree`` rollup.
@@ -55,7 +55,7 @@ _NUMERIC_COLS = (
 # pedsum's own provenance columns that ride along in a re-ingestible
 # ``validate.tsv.gz``.  When such a file is later summarized they collide with
 # the freshly derived columns; the stale copy is regenerated, so it is dropped
-# rather than preserved under an ``_input`` suffix (see _write_annotated_tsv).
+# rather than preserved under an ``_input`` suffix (see write_annotated_tsv).
 _RESERVED_PROVENANCE_COLS = frozenset({"sex_source"})
 
 
@@ -124,7 +124,7 @@ def _meta(path: Path, cmd: str, n_total: int | None) -> dict:
     }
 
 
-def _build_effective_size_data(
+def build_effective_size_data(
     path: Path,
     cmd: str,
     n_total: int | None,
@@ -146,12 +146,12 @@ def _build_effective_size_data(
 ASSORTATIVE_MATING_FIGURES = 4
 
 
-def _build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
+def build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
     """The ``assortative_mating.yaml`` payload: the summary's meta block, then the Mate Correlation section."""
     return {**_meta(path, cmd, n_total), "assortative_mating": assortative_mating}
 
 
-def _build_pedigree_data(
+def build_pedigree_data(
     path: Path,
     cmd: str,
     size: dict,
@@ -167,8 +167,8 @@ def _build_pedigree_data(
 ) -> dict:
     """Build the flat pedigree-level payload.
 
-    ``_write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
-    ``_build_summary_data`` categorises it into the two summary YAMLs. Each
+    ``write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
+    ``build_summary_data`` categorises it into the two summary YAMLs. Each
     section arrives as YAML-ready native types; a None section is absent.
     """
     return {
@@ -209,13 +209,13 @@ def _serialise_pair_entry(value: PairEntry) -> object:
     return int(value)
 
 
-def _build_individual_data(
+def build_individual_data(
     idf: pl.DataFrame,
     path: Path,
     cmd: str,
 ) -> dict:
     """Canonical nested dict for the per-individual distribution report."""
-    distributions = {col: _numeric_distribution(idf[col]) for col in _NUMERIC_COLS if col in idf.columns}
+    distributions = {col: numeric_distribution(idf[col]) for col in _NUMERIC_COLS if col in idf.columns}
     return {**_meta(path, cmd, len(idf)), "distributions": distributions}
 
 
@@ -335,7 +335,7 @@ def _redact_concordance_block(block: dict, min_cell: int) -> None:
         _redact_concordance_block(nested, min_cell)
 
 
-def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
+def apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
     - Pedigree-level: nulls ``relationship_pairs`` codes and ``inbreeding``
@@ -453,26 +453,26 @@ def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN
         _null_below(dist, ("nz",), min_cell)
 
 
-def _build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:
+def build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:
     """Build the (slim, extra) categorised YAML payloads from flat dicts.
 
     Pipeline: strip meta → categorise → split per ``SUMMARY_SCHEMA``.
     The same meta block sits at the top
     of both files so each is self-identifying. Per-individual
     ``distributions`` gets its own slim/extra split via
-    ``_split_individual_distributions``.
+    ``split_individual_distributions``.
 
     ``ped_data`` is left untouched (the TSV writers read it directly).
     """
     meta = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
 
     flat_ped = {k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS}
-    nested_ped = _categorise_pedigree(flat_ped)
-    slim_ped, extra_ped = _split_summary(nested_ped)
+    nested_ped = categorise_pedigree(flat_ped)
+    slim_ped, extra_ped = split_summary(nested_ped)
 
     ind_payload = {k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS}
     dists = ind_payload.get("distributions", {})
-    slim_dists, extra_dists = _split_individual_distributions(dists)
+    slim_dists, extra_dists = split_individual_distributions(dists)
     base_ind = {k: v for k, v in ind_payload.items() if k != "distributions"}
     slim_ind = dict(base_ind)
     extra_ind = dict(base_ind)
@@ -519,7 +519,7 @@ def _round_floats(obj: object, ndigits: int = 4, figures: int = 0) -> object:
     return obj
 
 
-def _write_yaml(data: dict, path: Path, figures: int = 0) -> None:
+def write_yaml(data: dict, path: Path, figures: int = 0) -> None:
     """Write data as YAML to path (creates parent dirs); floats rounded as ``_round_floats`` does."""
     with atomic_output(path) as tmp, tmp.open("w") as fh:
         yaml.safe_dump(_round_floats(data, figures=figures), fh, sort_keys=False, default_flow_style=False)
@@ -537,7 +537,7 @@ def _render_cell(value: object) -> str | None:
     return str(value)
 
 
-def _write_long_tsv(data: dict, path: Path) -> None:
+def write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
     rows = list(_flatten_long(_round_floats(data)))
     df = pl.DataFrame(
@@ -553,7 +553,7 @@ def _write_long_tsv(data: dict, path: Path) -> None:
         df.write_csv(tmp, separator="\t")
 
 
-def _prepare_out_dir(path: Path) -> int:
+def prepare_out_dir(path: Path) -> int:
     """Create ``path`` as a directory if needed; refuse if it is a file.
 
     Returns 0 on success, 1 if the path exists as a non-directory.
@@ -583,7 +583,7 @@ def _csv_ready(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
+def to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
     """Write ``df`` as gzipped TSV; uses pigz when available, else gzip level 1.
 
     Output is standard .gz either way.
@@ -612,9 +612,10 @@ def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
         df.write_csv(fh, separator="\t")  # ty: ignore[no-matching-overload]
 
 
-def _write_annotated_tsv(
+def write_annotated_tsv(
     in_path: Path,
-    args: argparse.Namespace,
+    config: ValidationConfig,
+    sep: str,
     idf: pl.DataFrame,
     out_path: Path,
     labels: IdLabels,
@@ -628,12 +629,12 @@ def _write_annotated_tsv(
     PLINK's coding (1=male, 2=female, 0=unknown). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
-    raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"), dtype=str if labels.is_string else None)
+    raw = read_pedigree_table(in_path, sep=sep, dtype=str if labels.is_string else None)
     rename_map = {
-        args.id_col: "id",
-        args.sex_col: "sex",
-        args.mother_col: "mother",
-        args.father_col: "father",
+        config.id_col: "id",
+        config.sex_col: "sex",
+        config.mother_col: "mother",
+        config.father_col: "father",
     }
     rename_map = {k: v for k, v in rename_map.items() if k != v}
     if rename_map:
@@ -681,10 +682,10 @@ def _write_annotated_tsv(
     idf = idf.with_columns(pl.Series("sex", plink_sex(idf["sex"].to_numpy())))
     idf = labels.relabel(idf, "id", "mother", "father")
     annotated = pl.concat([idf, extras], how="horizontal", strict=True)
-    _to_csv_gz(annotated, out_path)
+    to_csv_gz(annotated, out_path)
 
 
-def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
+def format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
     """Render the validate summary as grouped sections with friendly labels.
 
     The internal check names remain in ``.validate.log``; only the on-screen
@@ -692,17 +693,17 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     are skipped defensively rather than crashing the formatter.
     """
     by_check = {r.name: r for r in results}
-    width = max(len(label) for label in _CHECK_LABELS.values()) + 1
+    width = max(len(label) for label in CHECK_LABELS.values()) + 1
     lines = [f"pedsum: validating {path} (N={n_total:,})"]
     total_findings = 0
-    for group_name, check_names in _CHECK_GROUPS:
+    for group_name, check_names in CHECK_GROUPS:
         lines.append("")
         lines.append(group_name)
         for name in check_names:
             r = by_check.get(name)
             if r is None:
                 continue  # defensive: tolerate missing check names
-            label = _CHECK_LABELS.get(name, name)
+            label = CHECK_LABELS.get(name, name)
             line = f"  {label} {'.' * (width - len(label))} {r.status}"
             if r.status == "FAIL":
                 line += f" ({r.count})"
@@ -715,7 +716,7 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     return "\n".join(lines) + "\n"
 
 
-def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
+def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
     """Tab-separated log: one row per finding (check / id / row / detail / n_refs).
 
     ``labels`` is None when the id column did not parse, so no finding has an id.
@@ -736,7 +737,7 @@ def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabel
         df.write_csv(tmp, separator="\t")
 
 
-def _write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
+def write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
     """Tab-separated manifest of `validate --drop-offending` removals.
 
     One row per ``(id, check, round)``, which ``reduce_pedigree`` emits distinct: the id removed, the Check that

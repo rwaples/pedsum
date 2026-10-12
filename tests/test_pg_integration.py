@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import SEX_MALE
-from pedsum.pairs import _build_pedigree_graph
+from pedsum.pairs import build_pedigree_graph
 from pedsum.validate import ValidationConfig, load_and_validate
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"
@@ -39,7 +39,7 @@ _SNAPSHOT = {
 
 def _build_pg_and_df():
     df, _labels = load_and_validate(EXAMPLE, ValidationConfig())
-    pg = _build_pedigree_graph(df)
+    pg = build_pedigree_graph(df)
     df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
     return pg, df
 
@@ -78,7 +78,7 @@ def test_distinct_ancestor_counts_snapshot():
 
 
 def test_sex_preserved_through_compaction():
-    """`_build_pedigree_graph` must thread `sex` through to the graph."""
+    """`build_pedigree_graph` must thread `sex` through to the graph."""
     pg, df = _build_pg_and_df()
     # Compact ordering matches input ordering (compaction preserves
     # row order, only IDs are remapped to 0..n-1).

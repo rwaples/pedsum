@@ -14,13 +14,13 @@ from pedsum.base import (
 )
 from pedsum.cli.common import commit_thread_budget, load_or_fail
 from pedsum.memory import GiB
-from pedsum.pairs import _build_pedigree_graph
+from pedsum.pairs import build_pedigree_graph
 from pedsum.parse import read_reference_mask
 from pedsum.progress import timed
 from pedsum.report import (
-    _build_effective_size_data,
-    _prepare_out_dir,
-    _write_yaml,
+    build_effective_size_data,
+    prepare_out_dir,
+    write_yaml,
 )
 from pedsum.sections import (
     compute_effective_size,
@@ -44,7 +44,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
     A stop at the memory limit still publishes ``effective_size.yaml``, with
     the estimators that were running marked ``memory_limit`` (ADR 0004 §4).
     """
-    if _prepare_out_dir(args.out_dir) != 0:
+    if prepare_out_dir(args.out_dir) != 0:
         return 1
     commit_thread_budget(args)
 
@@ -68,8 +68,8 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
             name: dict(stopped) if name in requested and record.get("reason") == "not_requested" else record
             for name, record in results.items()
         }
-        data = _build_effective_size_data(args.in_path, cmd, n_total, "stopped_memory_limit", requested, partial)
-        _write_yaml(data, out_path)
+        data = build_effective_size_data(args.in_path, cmd, n_total, "stopped_memory_limit", requested, partial)
+        write_yaml(data, out_path)
         logger.error("wrote %s with the estimators that finished", out_path)
 
     watchdog.on_breach(publish_partial)
@@ -105,7 +105,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
             logger.warning("--reference-col only affects ne_individual_delta_f, which was not requested")
 
     with timed("built PedigreeGraph"):
-        pg = _build_pedigree_graph(df)
+        pg = build_pedigree_graph(df)
     n_total = len(df)
     with timed(f"effective size ({', '.join(requested)})"):
         computed = compute_effective_size(pg, requested)
@@ -134,7 +134,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
 
     with watchdog.disarm() as owns_output:
         if owns_output:
-            data = _build_effective_size_data(args.in_path, cmd, len(df), "complete", requested, results)
-            _write_yaml(data, out_path)
+            data = build_effective_size_data(args.in_path, cmd, len(df), "complete", requested, results)
+            write_yaml(data, out_path)
             logger.info("wrote %s", out_path)
     return 0
