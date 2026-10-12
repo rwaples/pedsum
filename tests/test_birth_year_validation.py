@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import gzip
-
 import polars as pl
 import pytest
-from conftest import run_pedsum
+from conftest import EXAMPLE, load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import PedigreeError
@@ -241,9 +239,27 @@ def test_birth_year_fixed_output_includes_topological_reorder(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rb") as fh:
-        fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
+    fixed = load_validate_tsv_gz(tmp_path / "out")
     assert "birth_year" in fixed.columns
     ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(1) < ids_in_order.index(3)
     assert ids_in_order.index(2) < ids_in_order.index(3)
+
+
+def test_birth_year_missing_column_errors(tmp_path):
+    """Naming a non-existent column fails with the standard missing-cols error."""
+    base = tmp_path / "p"
+    res = run_pedsum(
+        [
+            "summarize",
+            "--in",
+            str(EXAMPLE),
+            "--out",
+            str(base),
+            "--birth-year-col",
+            "does_not_exist",
+        ]
+    )
+    assert res.returncode == 1
+    assert "missing required columns" in res.stderr
+    assert "does_not_exist" in res.stderr

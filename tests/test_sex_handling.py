@@ -6,7 +6,7 @@ import logging
 
 import polars as pl
 import pytest
-from conftest import parent_rows, run_pedsum
+from conftest import ambig_pedigree, parent_rows, run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
@@ -173,30 +173,16 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
     assert summary["n_unknown_sex"] == 1
 
 
-def _ambig_pedigree(path):
-    """Pedigree where id=7 is unsexed and used as both mother and father."""
-    return _write_ped(
-        path,
-        [
-            {"id": 7, "sex": "", "mother": -1, "father": -1},
-            {"id": 8, "sex": "M", "mother": -1, "father": -1},
-            {"id": 9, "sex": "F", "mother": -1, "father": -1},
-            {"id": 10, "sex": "F", "mother": 7, "father": 8},  # uses 7 as mother
-            {"id": 11, "sex": "M", "mother": 9, "father": 7},  # uses 7 as father
-        ],
-    )
-
-
 def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
     """Without --allow-missing-sex, ambiguity blocks load_and_validate."""
-    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    ped = ambig_pedigree(tmp_path / "p.tsv")
     with pytest.raises(PedigreeError, match="sex_role_ambiguity"):
         load_and_validate(ped, ValidationConfig())
 
 
 def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
     """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
-    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    ped = ambig_pedigree(tmp_path / "p.tsv")
     df, _labels = load_and_validate(ped, ValidationConfig(allow_missing_sex=True))
     row = df.filter(pl.col("id") == 7).row(0, named=True)
     assert int(row["sex"]) == SEX_UNKNOWN
@@ -240,7 +226,7 @@ def test_summarize_writes_validate_log_on_role_conflict(tmp_path):
 
 def test_summarize_writes_validate_log_on_sex_ambiguity(tmp_path):
     """The unsexed both-roles variant (sex_role_ambiguity) also persists the log."""
-    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    ped = ambig_pedigree(tmp_path / "p.tsv")
     out = tmp_path / "s"
     r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out)])
     assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"

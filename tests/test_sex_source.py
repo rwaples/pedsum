@@ -1,6 +1,6 @@
-"""Tests for the 0.9 ``sex_source`` per-row column and override behaviour.
+"""The per-row ``sex_source`` column and the asserted-sex override, end to end.
 
-Verifies the four sex_source categories end-to-end:
+The four sex_source categories:
 - ``input`` — assertion preserved.
 - ``imputed_from_missing`` — was unsexed; role implied F or M.
 - ``imputed_from_role`` — asserted but topology disagreed; override fired.
@@ -9,15 +9,13 @@ Verifies the four sex_source categories end-to-end:
 
 from __future__ import annotations
 
-import gzip
-
 import polars as pl
 import pytest
-from conftest import run_pedsum
+from conftest import load_annotated_tsv_gz, load_validate_tsv_gz, read_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
-def _mixed_pedigree(path):
+def _all_sex_sources_pedigree(path):
     """Pedigree exercising all four sex_source categories.
 
     id=1 input M; id=2 input F; id=3 input M (used as child).
@@ -42,7 +40,7 @@ def _mixed_pedigree(path):
 
 def test_annotated_tsv_has_sex_source_column(tmp_path):
     """Summarize emits a per-row sex_source column in annotated.tsv.gz."""
-    ped = _mixed_pedigree(tmp_path / "ped.tsv")
+    ped = _all_sex_sources_pedigree(tmp_path / "ped.tsv")
     out_dir = tmp_path / "out"
     r = run_pedsum(
         [
@@ -56,8 +54,7 @@ def test_annotated_tsv_has_sex_source_column(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(out_dir / "annotated.tsv.gz", "rb") as fh:
-        ann = pl.read_csv(fh.read(), separator="\t")
+    ann = load_annotated_tsv_gz(out_dir)
     assert "sex_source" in ann.columns
     by_id = dict(zip(ann["id"].to_list(), ann["sex_source"].to_list(), strict=True))
     assert by_id[1] == "input"
@@ -68,7 +65,7 @@ def test_annotated_tsv_has_sex_source_column(tmp_path):
 
 def test_validate_tsv_has_sex_source_column(tmp_path):
     """Validate emits sex_source in validate.tsv.gz."""
-    ped = _mixed_pedigree(tmp_path / "ped.tsv")
+    ped = _all_sex_sources_pedigree(tmp_path / "ped.tsv")
     out_dir = tmp_path / "out"
     r = run_pedsum(
         [
@@ -81,8 +78,7 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
         ]
     )
     assert r.returncode == 0, r.stderr
-    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
-        fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
+    fixed = load_validate_tsv_gz(out_dir)
     assert "sex_source" in fixed.columns
     by_id = dict(zip(fixed["id"].cast(pl.Int64).to_list(), fixed["sex_source"].to_list(), strict=True))
     assert by_id[1] == "input"
@@ -174,8 +170,7 @@ def test_validate_tsv_writes_one_sex_encoding(tmp_path, encoding):
     out_dir = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--allow-missing-sex"])
     assert r.returncode == 1, r.stderr  # the missing parent is a finding
-    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
-        fixed = pl.read_csv(fh.read(), separator="\t")
+    fixed = read_tsv_gz(out_dir / "validate.tsv.gz")
     assert fixed["sex"].dtype.is_integer()
     by_id = dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True))
     assert by_id == {1: 1, 2: 2, 5: 2, 6: 1, 8: 0, 3: 1, 7: 2, 9: 2, 100: 2}
@@ -197,6 +192,5 @@ def test_drop_offending_self_verifies_plink_input(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir), "--drop-offending"])
     assert r.returncode == 1, r.stderr  # exit 1 because something was dropped
     assert "self-verify failed" not in r.stderr
-    with gzip.open(out_dir / "validate.tsv.gz", "rb") as fh:
-        fixed = pl.read_csv(fh.read(), separator="\t")
+    fixed = read_tsv_gz(out_dir / "validate.tsv.gz")
     assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 2, 2: 1, 4: 2, 5: 1}

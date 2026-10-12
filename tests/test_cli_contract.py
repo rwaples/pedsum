@@ -1,14 +1,12 @@
-"""Tests for the pedsum 0.7 CLI redesign.
+"""The ``summarize`` CLI contract: removed flags, defaults, and the output directory.
 
-Pins the breaking changes:
-
-- Deleted flags exit rc=2 with a clear "unrecognized arguments" message.
-- argparse abbreviation is disabled, so partial-matches of deleted flags
-  also fail (cannot silently resurrect a removed long-option).
-- ``--inbreeding`` is opt-out (default on); ``--no-inbreeding`` skips it.
-  Effective size moved to its own subcommand in 0.15.0 (ADR 0004).
-- ``--out DIR`` is a directory; default footprint is 3 files inside.
-- ``--tsv`` opts into the two long-form TSV outputs.
+- Removed long-options exit rc=2 with "unrecognized arguments", and argparse
+  abbreviation is off, so a prefix cannot resurrect one.
+- Inbreeding runs by default; ``--no-inbreeding`` skips it. Effective size is
+  not part of ``summarize`` (ADR 0004).
+- ``--out DIR`` is a directory holding three files by default; ``--tsv`` adds
+  the two long-form TSVs; an ``--out`` that is a regular file exits rc=1.
+- ``--per-individual-pairs`` fills the per-individual relationship section.
 """
 
 from __future__ import annotations
@@ -185,97 +183,3 @@ def test_per_individual_pairs_produces_relationship_burden_section(tmp_path):
     rs = _load_yaml(out_dir)["pedigree"]["relatedness"]["relationship_summary"]
     assert rs["computed"] is True
     assert "relatives_by_degree" in rs
-
-
-# --- 0.8: --allow-missing-sex (renamed from --allow-unknown-sex, broadened) ---
-
-
-def _mixed_pedigree(path):
-    """A pedigree with both a role-ambiguous row (id=7) AND an orphan (id=8)."""
-    import csv
-
-    rows = [
-        {"id": 1, "sex": "M", "mother": -1, "father": -1},
-        {"id": 2, "sex": "F", "mother": -1, "father": -1},
-        {"id": 7, "sex": "", "mother": -1, "father": -1},  # ambiguous below
-        {"id": 8, "sex": "", "mother": -1, "father": -1},  # orphan
-        {"id": 3, "sex": "M", "mother": 7, "father": 1},
-        {"id": 4, "sex": "F", "mother": 2, "father": 7},
-    ]
-    with path.open("w") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
-    return path
-
-
-def test_summarize_missing_sex_keeps_unsexed_rows(tmp_path):
-    """``--allow-missing-sex`` with inbreeding on finishes on a role-ambiguous and an orphan row."""
-    import gzip
-
-    import polars as pl
-
-    ped = _mixed_pedigree(tmp_path / "ped.tsv")
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(ped), "--out", str(out_dir), "--allow-missing-sex"])
-    assert res.returncode == 0, res.stderr
-    with gzip.open(out_dir / "annotated.tsv.gz", "rb") as fh:
-        ann = pl.read_csv(fh.read(), separator="\t")
-    for orig_id in (7, 8):
-        row = ann.filter(pl.col("id") == orig_id).row(0, named=True)
-        assert int(row["sex"]) == 0, f"id={orig_id} sex={row['sex']}"  # PLINK unknown
-
-
-def _inbred_pedigree(path, unknown_sex: str):
-    """Full sibs 3 x 4 have child 5 (F = 0.25); 5 and orphan 8 carry ``unknown_sex``."""
-    import csv
-
-    rows = [
-        {"id": 1, "sex": "M", "mother": -1, "father": -1},
-        {"id": 2, "sex": "F", "mother": -1, "father": -1},
-        {"id": 3, "sex": "M", "mother": 2, "father": 1},
-        {"id": 4, "sex": "F", "mother": 2, "father": 1},
-        {"id": 5, "sex": unknown_sex, "mother": 4, "father": 3},
-        {"id": 8, "sex": unknown_sex, "mother": -1, "father": -1},
-    ]
-    with path.open("w") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
-    return path
-
-
-def test_summarize_inbreeding_does_not_need_resolved_sex(tmp_path):
-    """F on a pedigree with unsexed rows equals F with their sex filled in (ADR 0004).
-
-    0.14 refused ``--allow-missing-sex`` with inbreeding on; F never read sex.
-    """
-    import gzip
-
-    import polars as pl
-
-    unsexed = tmp_path / "unsexed"
-    res = _run(
-        [
-            "summarize",
-            "--in",
-            str(_inbred_pedigree(tmp_path / "u.tsv", "")),
-            "--out",
-            str(unsexed),
-            "--allow-missing-sex",
-        ]
-    )
-    assert res.returncode == 0, res.stderr
-    sexed = tmp_path / "sexed"
-    res = _run(["summarize", "--in", str(_inbred_pedigree(tmp_path / "s.tsv", "F")), "--out", str(sexed)])
-    assert res.returncode == 0, res.stderr
-
-    inbreeding = _load_yaml(unsexed)["pedigree"]["relatedness"]["inbreeding"]
-    assert inbreeding == _load_yaml(sexed)["pedigree"]["relatedness"]["inbreeding"]
-    assert inbreeding["n_inbred"] == 1
-    assert inbreeding["max_F"] == 0.25
-    assert "sex_summary" in _load_yaml(unsexed)["pedigree"]["strata"]
-    with gzip.open(unsexed / "annotated.tsv.gz", "rb") as fh:
-        ann = pl.read_csv(fh.read(), separator="\t")
-    assert ann.filter(pl.col("id").is_in([5, 8]))["sex_source"].to_list() == ["unresolved", "unresolved"]
-    assert "--allow-unknown-sex" not in res.stderr

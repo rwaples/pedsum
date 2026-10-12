@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
-
 import polars as pl
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
@@ -32,8 +30,7 @@ def test_validate_reorders_unordered_tsv(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
     assert r.returncode == 0, r.stderr
     assert "reordering" in r.stderr.lower()
-    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rt") as fh:
-        fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
+    fixed = load_validate_tsv_gz(tmp_path / "out")
     # The two founders must appear before the child in row order.
     ids_in_order = fixed["id"].cast(pl.Int64).to_list()
     assert ids_in_order.index(1) < ids_in_order.index(3)

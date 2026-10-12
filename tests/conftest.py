@@ -64,6 +64,20 @@ def write_ped(path, rows):
     return path
 
 
+def ambig_pedigree(path):
+    """Pedigree where id=7 is unsexed and used as both mother and father."""
+    return write_ped(
+        path,
+        [
+            {"id": 7, "sex": "", "mother": -1, "father": -1},
+            {"id": 8, "sex": "M", "mother": -1, "father": -1},
+            {"id": 9, "sex": "F", "mother": -1, "father": -1},
+            {"id": 10, "sex": "F", "mother": 7, "father": 8},  # uses 7 as mother
+            {"id": 11, "sex": "M", "mother": 9, "father": 7},  # uses 7 as father
+        ],
+    )
+
+
 def write_stripped_pedigree(dest: Path) -> Path:
     """Write ``example_pedigree.tsv`` to ``dest`` with ``birth_year`` dropped."""
     with EXAMPLE.open() as fh:
