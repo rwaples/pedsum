@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Union
 
@@ -18,8 +19,9 @@ import yaml
 from pedsum.base import VERSION, PedigreeError, logger
 from pedsum.checks import CHECK_GROUPS, CHECK_LABELS
 from pedsum.parse import plink_sex, read_aligned_columns
-from pedsum.schema import categorise_pedigree, split_individual_distributions, split_summary
-from pedsum.sections import INBREEDING_COLUMNS, numeric_distribution
+from pedsum.redaction import SAFE_MIN_CELL
+from pedsum.schema import SECTION_SPECS, categorise_pedigree, split_individual_distributions, split_summary
+from pedsum.sections import INBREEDING_COLUMNS, Distribution, numeric_distribution
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -219,236 +221,49 @@ def build_individual_data(
 
 _SUMMARY_META_KEYS = ("input", "command", "version", "generated_at", "n_total")
 
-SAFE_MIN_CELL = 5
-
-
-def _drop_distribution_extrema(obj: object) -> None:
-    """Remove min/max from nested distribution dicts for safe-attempt output."""
-    if isinstance(obj, dict):
-        if {"mean", "q1", "median", "q3", "min", "max"}.issubset(obj.keys()):
-            obj.pop("min", None)
-            obj.pop("max", None)
-        for v in obj.values():
-            _drop_distribution_extrema(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            _drop_distribution_extrema(v)
-
-
-def _null_below(d: dict, keys, min_cell: int) -> None:
-    """Null each of ``keys`` in ``d`` whose int value is in ``(0, min_cell)``.
-
-    Missing / ``None`` values collapse to 0 via ``or 0`` and are left
-    untouched (the ``0 <`` guard fails), matching the original per-site
-    small-cell tests.
-    """
-    for k in keys:
-        if 0 < int(d.get(k, 0) or 0) < min_cell:
-            d[k] = None
-
-
-def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_keys) -> None:
-    """Small-cell redaction for a grouped row keyed by ``n``.
-
-    If the group's ``n`` is below ``min_cell``, null every key except those
-    in ``keep``. Otherwise null only the ``small_keys`` whose own value is
-    below ``min_cell`` (via :func:`_null_below`).
-    """
-    if int(row.get("n", 0)) < min_cell:
-        for k in list(row):
-            if k not in keep:
-                row[k] = None
-    else:
-        _null_below(row, small_keys, min_cell)
-
-
-# Offspring Sex Concordance: every key that carries inference or a derived rate
-# over the eligible set. Suppressed wholesale when the grouping rests on fewer
-# than ``min_cell`` eligible groups; eligibility metadata is retained (and
-# small-cell-nulled) so the reader still sees why nothing was reported.
-_CONCORDANCE_INFERENCE_KEYS: tuple[str, ...] = (
-    "conditioning_male_fraction",
-    "n_within_group_pairs",
-    "max_group_pair_share",
-    "observed_pair_concordance",
-    "expected_pair_concordance",
-    "excess_concordance",
-    "direction",
-    "z",
-    "p_analytical",
-    "p_analytical_holm",
-    "p_holm",
-    "p_source",
-    "all_resolved_excess_concordance",
-)
-
-_CONCORDANCE_COUNT_KEYS: tuple[str, ...] = (
-    "n_groups_total",
-    "n_groups_eligible",
-    "n_groups_incomplete",
-    "n_groups_too_small",
-    "n_offspring_total",
-    "n_offspring_eligible",
-    "n_offspring_sex_excluded",
-    "n_offspring_in_small_groups",
-)
-
-
-def _redact_concordance_block(block: dict, min_cell: int) -> None:
-    """Small-cell redaction for one Offspring Sex Concordance grouping.
-
-    Recurses once into the ``all_resolved`` sensitivity block, which carries
-    the same eligibility/statistic keys and none of the outer wrappers.
-    Permutation count and seed survive — they describe the procedure,
-    not the pedigree.
-    """
-    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
-        for key in _CONCORDANCE_INFERENCE_KEYS:
-            if key in block:
-                block[key] = None
-        if "male_proportion_distribution" in block:
-            block["male_proportion_distribution"] = None
-        if "by_group_size" in block:
-            block["by_group_size"] = []
-        perms = block.get("permutations")
-        if isinstance(perms, dict):
-            perms["p_raw"] = None
-            perms["p_holm"] = None
-
-    for row in block.get("by_group_size") or []:
-        if int(row.get("n_groups", 0)) < min_cell:
-            for key in list(row):
-                if key not in ("group_size", "n_groups"):
-                    row[key] = None
-        else:
-            _null_below(row, ("n_offspring",), min_cell)
-
-    _null_below(block, _CONCORDANCE_COUNT_KEYS, min_cell)
-    by_source = block.get("eligible_by_sex_source")
-    if isinstance(by_source, dict):
-        _null_below(by_source, list(by_source), min_cell)
-
-    nested = block.get("all_resolved")
-    if isinstance(nested, dict):
-        _redact_concordance_block(nested, min_cell)
-
 
 def apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
-    - Pedigree-level: nulls ``relationship_pairs`` codes and ``inbreeding``
-      fields below ``min_cell``; suppresses ``hist`` buckets whose implied
-      count (``frac × n_total``) is below the threshold; drops
-      ``next_components`` entries below it; nulls positional ``depth_counts``
-      entries below it.
-    - Individual-level: drops ``min``/``max`` from every distribution, nulls
-      ``nz`` below threshold.
+    Runs each summary section's ``SectionSpec.redact`` rule, removes the
+    extrema of every ``Distribution`` in the pedigree payload, and in each
+    per-individual distribution also nulls a small nonzero count.
     """
-    n_total = int(ped_data.get("n_total", 0))
+    n_total = int(ped_data["n_total"])
+    for spec in SECTION_SPECS:
+        value = ped_data.get(spec.name)
+        if spec.redact is not None and value is not None:
+            spec.redact(value, min_cell, n_total)
+    _strip_extrema(ped_data)
+    distributions = ind_data["distributions"]
+    for col, dist in distributions.items():
+        small_nz = 0 < (dist.nz or 0) < min_cell
+        distributions[col] = replace(dist.without_extrema(), nz=None if small_nz else dist.nz)
 
-    sizes = ped_data.get("size_structure", {})
-    sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
-    sizes["depth_counts"] = [(g if g >= min_cell else None) for g in sizes.get("depth_counts", [])]
-    _null_below(sizes, ("largest_component",), min_cell)
 
-    _drop_distribution_extrema(ped_data)
+def _strip_extrema(obj: dict | list) -> None:
+    """Replace every ``Distribution`` nested in ``obj`` by its copy without extrema."""
+    items = obj.items() if isinstance(obj, dict) else enumerate(obj)
+    for key, value in list(items):
+        if isinstance(value, Distribution):
+            obj[key] = value.without_extrema()
+        elif isinstance(value, (dict, list)):
+            _strip_extrema(value)
 
-    sibship = ped_data.get("sibship_size")
-    mating = ped_data.get("mating_pairs")
-    n_pairs = int(mating.get("n_pairs", 0)) if mating is not None else 0
-    if sibship is not None and 0 < n_pairs < min_cell:
-        size_dist = sibship.get("size_dist")
-        if isinstance(size_dist, dict):
-            sibship["size_dist"] = dict.fromkeys(size_dist)
 
-    if mating is not None:
-        if 0 < int(mating.get("n_pairs", 0)) < min_cell:
-            for k in list(mating):
-                if k != "n_pairs":
-                    mating[k] = None
-        _null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
+def as_plain(payload: dict) -> dict:
+    """``payload`` with each ``Distribution`` rendered as its mapping, for the writers that walk dicts and lists."""
+    return {k: _plain(v) for k, v in payload.items()}
 
-    concordance = ped_data.get("offspring_sex_concordance")
-    if isinstance(concordance, dict):
-        for name, block in concordance.items():
-            if name != "null_model" and isinstance(block, dict):
-                _redact_concordance_block(block, min_cell)
 
-    rel_summary = ped_data.get("relationship_summary") or {}
-    _null_below(rel_summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
-    for section in ("related_pairs_by_closest_degree", "closest_relationship_per_individual"):
-        vals = rel_summary.get(section)
-        if isinstance(vals, dict):
-            _null_below(vals, list(vals), min_cell)
-    for row in rel_summary.get("related_pair_density_by_depth", []):
-        _redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
-        )
-
-    reproduction = ped_data.get("reproduction", {})
-    _null_below(reproduction, ("n_reproductive", "n_terminal"), min_cell)
-
-    founder = ped_data.get("founder_contribution", {})
-    _null_below(
-        founder,
-        ("n_founders_with_descendants", "n_founders_without_descendants"),
-        min_cell,
-    )
-
-    founder_summary = ped_data.get("founder_summary", {})
-    for row in founder_summary.get("by_depth", []):
-        _redact_small_group(row, ("depth", "n"), min_cell, ("active_founders",))
-    bottleneck = founder_summary.get("bottleneck")
-    if isinstance(bottleneck, dict):
-        _null_below(bottleneck, ("min_active_founders",), min_cell)
-
-    comps_full = ped_data.get("components", {})
-    _null_below(comps_full, ("singletons",), min_cell)
-
-    sex_summary = ped_data.get("sex_summary", {})
-    for stats in sex_summary.values():
-        _redact_small_group(
-            stats,
-            ("n",),
-            min_cell,
-            ("n_founders", "n_reproductive", "n_terminal", "n_inbred"),
-        )
-
-    for row in ped_data.get("depth_summary", []):
-        _redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
-        )
-
-    pairs = ped_data.get("relationship_pairs", {})
-    for code in list(pairs):
-        if code == "by_degree":
-            _null_below(pairs["by_degree"], list(pairs["by_degree"]), min_cell)
-        elif isinstance(pairs[code], int):
-            _null_below(pairs, (code,), min_cell)
-
-    inb = ped_data.get("inbreeding")
-    if inb is not None:
-        if 0 < int(inb.get("n_inbred", 0)) < min_cell:
-            inb["n_inbred"] = None
-            inb["frac_inbred"] = None
-            inb["mean_F"] = None
-            inb["max_F"] = None
-        for bucket, frac in list(inb.get("hist", {}).items()):
-            if frac is None:
-                continue
-            if 0 < frac * n_total < min_cell:
-                inb["hist"][bucket] = None
-
-    for dist in ind_data.get("distributions", {}).values():
-        dist.pop("min", None)
-        dist.pop("max", None)
-        _null_below(dist, ("nz",), min_cell)
+def _plain(obj: object) -> object:
+    if isinstance(obj, Distribution):
+        return obj.as_dict()
+    if isinstance(obj, dict):
+        return {k: _plain(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_plain(v) for v in obj]
+    return obj
 
 
 def build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:

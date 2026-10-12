@@ -3,15 +3,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from pedsum.pairs import redact_relationship_pairs
+from pedsum.sections import (
+    redact_components,
+    redact_depth_summary,
+    redact_founder_contribution,
+    redact_founder_summary,
+    redact_inbreeding,
+    redact_mating_pairs,
+    redact_relationship_summary,
+    redact_reproduction,
+    redact_sex_summary,
+    redact_sibship_size,
+    redact_size_structure,
+)
+from pedsum.sex_concordance import redact_offspring_sex_concordance
+
+if TYPE_CHECKING:
+    from pedsum.redaction import Redact
 
 
 @dataclass(frozen=True)
 class SectionSpec:
-    """One leaf section under a category."""
+    """One leaf section under a category, with its slim keys and its ``--safe-attempt`` rule."""
 
     name: str
     slim_keys: tuple[str, ...] | None = None
     list_of_dict_slim_keys: tuple[str, ...] | None = None
+    # None: the section has nothing to redact beyond distribution extrema.
+    redact: Redact | None = None
 
 
 @dataclass(frozen=True)
@@ -55,49 +77,52 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
     CategorySpec(
         "structure",
         (
-            SectionSpec("size_structure"),
-            SectionSpec("components"),
+            SectionSpec("size_structure", redact=redact_size_structure),
+            SectionSpec("components", redact=redact_components),
             SectionSpec("max_degree_enumerated"),
         ),
     ),
     CategorySpec(
         "demography",
         (
-            SectionSpec("sibship_size"),
-            SectionSpec("mating_pairs"),
-            SectionSpec("offspring_sex_concordance"),  # per-grouping special handling
+            SectionSpec("sibship_size", redact=redact_sibship_size),
+            SectionSpec("mating_pairs", redact=redact_mating_pairs),
+            SectionSpec("offspring_sex_concordance", redact=redact_offspring_sex_concordance),  # per-grouping split
         ),
     ),
     CategorySpec(
         "individuals",
         (
-            SectionSpec("reproduction"),
+            SectionSpec("reproduction", redact=redact_reproduction),
             SectionSpec("genealogy"),
         ),
     ),
     CategorySpec(
         "founders",
         (
-            SectionSpec("founder_contribution"),
-            SectionSpec("founder_summary"),
+            SectionSpec("founder_contribution", redact=redact_founder_contribution),
+            SectionSpec("founder_summary", redact=redact_founder_summary),
         ),
     ),
     CategorySpec(
         "relatedness",
         (
-            SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS),
-            SectionSpec("relationship_summary"),
-            SectionSpec("inbreeding"),
+            SectionSpec("relationship_pairs", slim_keys=_PAIRS_SLIM_KEYS, redact=redact_relationship_pairs),
+            SectionSpec("relationship_summary", redact=redact_relationship_summary),
+            SectionSpec("inbreeding", redact=redact_inbreeding),
         ),
     ),
     CategorySpec(
         "strata",
         (
-            SectionSpec("sex_summary"),  # per-stratum special handling
-            SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n")),
+            SectionSpec("sex_summary", redact=redact_sex_summary),  # per-stratum split
+            SectionSpec("depth_summary", list_of_dict_slim_keys=("depth", "n"), redact=redact_depth_summary),
         ),
     ),
 )
+
+#: Every section, in schema order.
+SECTION_SPECS: tuple[SectionSpec, ...] = tuple(sec for cat in SUMMARY_SCHEMA for sec in cat.sections)
 
 # Per-grouping slim keys for offspring_sex_concordance: the headline verdict
 # plus the two numbers that qualify it (how much data, how dominated), plus one
@@ -273,7 +298,7 @@ def split_summary(nested_ped: dict) -> tuple[dict, dict]:
     appears in exactly one of (slim, extra, ``KNOWN_YAML_DROPS``). Empty
     categories are omitted from both files.
     """
-    spec_by_name = {sec.name: sec for cat in SUMMARY_SCHEMA for sec in cat.sections}
+    spec_by_name = {sec.name: sec for sec in SECTION_SPECS}
     slim: dict = {}
     extra: dict = {}
     for cat_name, cat_dict in nested_ped.items():

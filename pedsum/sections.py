@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields, replace
 from itertools import pairwise
 from typing import TYPE_CHECKING, TypedDict
 
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import build_children_csr, unique_ints
+from pedsum.redaction import null_below, redact_small_group
 
 #: The individual-table columns only the inbreeding computation fills; ``--no-inbreeding`` omits them.
 INBREEDING_COLUMNS: tuple[str, ...] = ("F", "n_distinct_ancestors")
@@ -92,22 +94,54 @@ def compute_size_structure(
     return summary, comp_labels
 
 
-def numeric_distribution(values: pl.Series | np.ndarray) -> dict:
-    """Compact distribution summary for pedigree-level aggregate sections."""
+@dataclass(frozen=True)
+class Distribution:
+    """One numeric column summarised: mean, std, quartiles, extrema and the count of nonzero values.
+
+    Summary sections carry these through ``--safe-attempt``, which removes
+    the extrema; ``as_dict`` then renders the mapping the outputs write, in
+    field order, without a removed extremum. Quartiles and extrema are ints
+    for an integer column.
+    """
+
+    mean: float
+    std: float
+    min: float | None
+    q1: float
+    median: float
+    q3: float
+    max: float | None
+    nz: int | None
+
+    def without_extrema(self) -> Distribution:
+        """This distribution with ``min`` and ``max`` removed."""
+        return replace(self, min=None, max=None)
+
+    def as_dict(self) -> dict[str, float | None]:
+        """The output mapping; a removed extremum is absent rather than null."""
+        out = {f.name: getattr(self, f.name) for f in fields(self)}
+        for extremum in ("min", "max"):
+            if out[extremum] is None:
+                del out[extremum]
+        return out
+
+
+def numeric_distribution(values: pl.Series | np.ndarray) -> Distribution:
+    """Compact distribution summary for pedigree-level aggregate sections and per-individual columns."""
     arr = values.to_numpy() if isinstance(values, pl.Series) else np.asarray(values)
     n = len(arr)
     is_float = np.issubdtype(arr.dtype, np.floating)
     cast = float if is_float else int
-    return {
-        "mean": float(arr.mean()) if n else 0.0,
-        "std": float(arr.std(ddof=1)) if n > 1 else 0.0,
-        "min": cast(arr.min()) if n else 0,
-        "q1": cast(np.quantile(arr, 0.25)) if n else 0,
-        "median": cast(np.median(arr)) if n else 0,
-        "q3": cast(np.quantile(arr, 0.75)) if n else 0,
-        "max": cast(arr.max()) if n else 0,
-        "nz": int((arr != 0).sum()) if n else 0,
-    }
+    return Distribution(
+        mean=float(arr.mean()) if n else 0.0,
+        std=float(arr.std(ddof=1)) if n > 1 else 0.0,
+        min=cast(arr.min()) if n else 0,
+        q1=cast(np.quantile(arr, 0.25)) if n else 0,
+        median=cast(np.median(arr)) if n else 0,
+        q3=cast(np.quantile(arr, 0.75)) if n else 0,
+        max=cast(arr.max()) if n else 0,
+        nz=int((arr != 0).sum()) if n else 0,
+    )
 
 
 def _effective_count_from_weights(weights: np.ndarray) -> float:
@@ -165,7 +199,7 @@ class _DepthRow(TypedDict):
     active_founders: int
     active_founder_frac: float
     effective_founders_by_descendants: float
-    founder_ancestors: dict
+    founder_ancestors: Distribution
 
 
 def compute_founder_summary(
@@ -792,3 +826,101 @@ def build_individual_df(
         "n_descendant_paths": n_descendant_paths.astype(np.int64),
     }
     return pl.DataFrame({name: values for name, values in columns.items() if values is not None})
+
+
+# ---------------------------------------------------------------------------
+# --safe-attempt rules, one per section (``SectionSpec.redact``)
+# ---------------------------------------------------------------------------
+
+
+def redact_size_structure(sizes: dict, min_cell: int, n_total: int) -> None:
+    """Drop small components from ``next_components``; null small depth counts and a small largest component."""
+    sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
+    sizes["depth_counts"] = [(g if g >= min_cell else None) for g in sizes.get("depth_counts", [])]
+    null_below(sizes, ("largest_component",), min_cell)
+
+
+def redact_sibship_size(sibships: dict, min_cell: int, n_total: int) -> None:
+    """Null the size histogram when few Sibships (one per Mating Pair) back it."""
+    if 0 < sibships["n_sibships"] < min_cell:
+        sibships["size_dist"] = dict.fromkeys(sibships["size_dist"])
+
+
+def redact_mating_pairs(mating: dict, min_cell: int, n_total: int) -> None:
+    """Null everything but ``n_pairs`` when there are few Mating Pairs, else a small multi-child count."""
+    if 0 < int(mating.get("n_pairs", 0)) < min_cell:
+        for k in list(mating):
+            if k != "n_pairs":
+                mating[k] = None
+    null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
+
+
+def redact_relationship_summary(summary: dict, min_cell: int, n_total: int) -> None:
+    """Null small pair counts and small per-degree tallies; redact small depth rows."""
+    null_below(summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
+    for section in ("related_pairs_by_closest_degree", "closest_relationship_per_individual"):
+        vals = summary.get(section)
+        if isinstance(vals, dict):
+            null_below(vals, list(vals), min_cell)
+    for row in summary.get("related_pair_density_by_depth", []):
+        redact_small_group(
+            row,
+            ("depth", "n"),
+            min_cell,
+            ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
+        )
+
+
+def redact_reproduction(reproduction: dict, min_cell: int, n_total: int) -> None:
+    """Null small reproductive and terminal counts."""
+    null_below(reproduction, ("n_reproductive", "n_terminal"), min_cell)
+
+
+def redact_founder_contribution(founder: dict, min_cell: int, n_total: int) -> None:
+    """Null small counts of founders with and without descendants."""
+    null_below(founder, ("n_founders_with_descendants", "n_founders_without_descendants"), min_cell)
+
+
+def redact_founder_summary(founder_summary: dict, min_cell: int, n_total: int) -> None:
+    """Redact small depth rows and a small bottleneck."""
+    for row in founder_summary.get("by_depth", []):
+        redact_small_group(row, ("depth", "n"), min_cell, ("active_founders",))
+    bottleneck = founder_summary.get("bottleneck")
+    if isinstance(bottleneck, dict):
+        null_below(bottleneck, ("min_active_founders",), min_cell)
+
+
+def redact_components(components: dict, min_cell: int, n_total: int) -> None:
+    """Null a small singleton count."""
+    null_below(components, ("singletons",), min_cell)
+
+
+def redact_sex_summary(sex_summary: dict, min_cell: int, n_total: int) -> None:
+    """Redact each sex as a group of ``n``."""
+    for stats in sex_summary.values():
+        redact_small_group(stats, ("n",), min_cell, ("n_founders", "n_reproductive", "n_terminal", "n_inbred"))
+
+
+def redact_depth_summary(depth_summary: list, min_cell: int, n_total: int) -> None:
+    """Redact each depth row as a group of ``n``."""
+    for row in depth_summary:
+        redact_small_group(
+            row,
+            ("depth", "n"),
+            min_cell,
+            ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
+        )
+
+
+def redact_inbreeding(inb: dict, min_cell: int, n_total: int) -> None:
+    """Null the F statistics when few individuals are inbred, and histogram buckets of few individuals."""
+    if 0 < int(inb.get("n_inbred", 0)) < min_cell:
+        inb["n_inbred"] = None
+        inb["frac_inbred"] = None
+        inb["mean_F"] = None
+        inb["max_F"] = None
+    for bucket, frac in list(inb.get("hist", {}).items()):
+        if frac is None:
+            continue
+        if 0 < frac * n_total < min_cell:
+            inb["hist"][bucket] = None

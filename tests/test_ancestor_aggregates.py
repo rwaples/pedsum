@@ -88,7 +88,7 @@ def test_inbreeding_mode_reports_ancestor_stats() -> None:
         "pedigree_summary.py summarize --in ped.tsv --out out --inbreeding",
     )
 
-    assert aggregates["genealogy"]["distinct_ancestors"]["max"] == 2
+    assert aggregates["genealogy"]["distinct_ancestors"].max == 2
     depth1 = next(row for row in aggregates["depth_summary"] if row["depth"] == 1)
     assert depth1["mean_distinct_ancestors"] == 2.0
-    assert out["distributions"]["n_distinct_ancestors"]["max"] == 2
+    assert out["distributions"]["n_distinct_ancestors"].max == 2

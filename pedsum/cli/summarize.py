@@ -15,9 +15,10 @@ from pedsum.cli.common import commit_thread_budget, load_or_fail
 from pedsum.pairs import augment_pair_counts, build_pedigree_graph
 from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
+from pedsum.redaction import SAFE_MIN_CELL
 from pedsum.report import (
-    SAFE_MIN_CELL,
     apply_safe_attempt,
+    as_plain,
     build_individual_data,
     build_pedigree_data,
     build_summary_data,
@@ -190,6 +191,9 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if args.safe_attempt:
         apply_safe_attempt(tsv_payload, ind_data)
         logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
+    # The writers below walk plain dicts and lists.
+    tsv_payload = as_plain(tsv_payload)
+    ind_data = as_plain(ind_data)
 
     slim_yaml, extra_yaml = build_summary_data(tsv_payload, ind_data)
     write_yaml(slim_yaml, out_dir / "summary.yaml")

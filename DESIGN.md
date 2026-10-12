@@ -22,13 +22,14 @@ from those above it):
 | `pedsum/validate.py` | `ValidationConfig`, `ValidationContext`, sex imputation, the runner, `load_and_validate` (fail-fast) / `validate_pedigree` (accumulating) |
 | `pedsum/fixed_pedigree.py` | the Fixed Pedigree: founder synthesis, phantom parents, resolved sex, topological order (`fix_pedigree`), and the string frame `validate` writes (`render_fixed_pedigree`) |
 | `pedsum/reduce.py` | `fix_validated` (what `validate` writes: BLOCKED, or the Fixed Pedigree, after the `--drop-offending` reduction and its self-verify) and `reduce_pedigree` |
+| `pedsum/redaction.py` | `--safe-attempt` primitives (`SAFE_MIN_CELL`, `null_below`, `redact_small_group`); each section's rule sits beside its producer and is registered as `SectionSpec.redact` |
 | `pedsum/pairs.py` | relationship-pair enumeration + `PedigreeGraph` construction |
 | `pedsum/sections.py` | per-section summary computations |
 | `pedsum/sex_concordance.py` | Offspring Sex Concordance: group projection, exact conditional moments, Holm, permutation samplers |
 | `pedsum/assortative_mating.py` | Mate Correlation: trait typing, row strata, the call to pg-phenotype's `mate_correlation` and the YAML payload built from its result |
 | `pedsum/schema.py` | categorised YAML schema + slim/extra split machinery |
 | `pedsum/memory.py` | the best-effort memory limit: `MemoryWatchdog`, default-limit discovery, `--max-memory` parsing |
-| `pedsum/report.py` | report payload builders, safe-attempt redaction, output writers, `atomic_output` |
+| `pedsum/report.py` | report payload builders, the `--safe-attempt` driver, output writers, `atomic_output` |
 | `pedsum/cli/` | `parser.py` (argparse), `common.py` (logging, thread budget, `load_or_fail`), one runner module per subcommand, and `main` in `__init__.py` |
 
 ## CLI design rationale

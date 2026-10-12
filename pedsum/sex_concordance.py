@@ -52,6 +52,8 @@ import numpy as np
 
 from pedsum.base import SEX_MALE, SexSource, logger
 from pedsum.progress import timed
+from pedsum.redaction import null_below
+from pedsum.sections import numeric_distribution
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -471,27 +473,6 @@ def _project(index: _GroupIndex, admitted: np.ndarray) -> _Projection:
 # ---------------------------------------------------------------------------
 
 
-def _proportion_distribution(values: np.ndarray) -> dict:
-    """Unweighted distribution of per-group male proportions.
-
-    Same key set as ``sections.numeric_distribution`` so the safe-attempt
-    extrema drop recognises it. ``nz`` counts groups holding at least one male.
-    """
-    n = values.size
-    if n == 0:
-        return dict.fromkeys(("mean", "std", "min", "q1", "median", "q3", "max"), 0.0) | {"nz": 0}
-    return {
-        "mean": float(values.mean()),
-        "std": float(values.std(ddof=1)) if n > 1 else 0.0,
-        "min": float(values.min()),
-        "q1": float(np.quantile(values, 0.25)),
-        "median": float(np.median(values)),
-        "q3": float(np.quantile(values, 0.75)),
-        "max": float(values.max()),
-        "nz": int((values != 0).sum()),
-    }
-
-
 def _by_group_size(sizes: np.ndarray, male_counts: np.ndarray, q2: float) -> list[dict]:
     """Non-inferential per-group-size rows covering every observed size.
 
@@ -770,7 +751,7 @@ def compute_offspring_sex_concordance(
         block["all_resolved"] = sensitivity[name]
 
         if block["computed"]:
-            block["male_proportion_distribution"] = _proportion_distribution(analysis.male_counts / analysis.sizes)
+            block["male_proportion_distribution"] = numeric_distribution(analysis.male_counts / analysis.sizes)
             block["by_group_size"] = _by_group_size(
                 analysis.sizes,
                 analysis.male_counts,
@@ -801,3 +782,74 @@ def _warn_if_unpermuted_tail(name: str, block: dict) -> None:
         ANALYTICAL_P_WARN,
         block.get("max_group_pair_share") or 0.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# --safe-attempt rule (``SectionSpec.redact``)
+# ---------------------------------------------------------------------------
+
+# Every key that carries inference or a derived rate over the eligible set.
+# Suppressed wholesale when the grouping rests on fewer than ``min_cell``
+# eligible groups; eligibility metadata (_COUNT_KEYS) is retained, and
+# small-cell-nulled, so the reader still sees why nothing was reported.
+_INFERENCE_KEYS: tuple[str, ...] = (
+    "conditioning_male_fraction",
+    "n_within_group_pairs",
+    "max_group_pair_share",
+    "observed_pair_concordance",
+    "expected_pair_concordance",
+    "excess_concordance",
+    "direction",
+    "z",
+    "p_analytical",
+    "p_analytical_holm",
+    "p_holm",
+    "p_source",
+    "all_resolved_excess_concordance",
+)
+
+
+def _redact_grouping(block: dict, min_cell: int) -> None:
+    """Small-cell redaction for one grouping's block.
+
+    Recurses once into the ``all_resolved`` sensitivity block, which carries
+    the same eligibility/statistic keys and none of the outer wrappers.
+    Permutation count and seed survive — they describe the procedure, not
+    the pedigree.
+    """
+    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
+        for key in _INFERENCE_KEYS:
+            if key in block:
+                block[key] = None
+        if "male_proportion_distribution" in block:
+            block["male_proportion_distribution"] = None
+        if "by_group_size" in block:
+            block["by_group_size"] = []
+        perms = block.get("permutations")
+        if isinstance(perms, dict):
+            perms["p_raw"] = None
+            perms["p_holm"] = None
+
+    for row in block.get("by_group_size") or []:
+        if int(row.get("n_groups", 0)) < min_cell:
+            for key in list(row):
+                if key not in ("group_size", "n_groups"):
+                    row[key] = None
+        else:
+            null_below(row, ("n_offspring",), min_cell)
+
+    null_below(block, _COUNT_KEYS, min_cell)
+    by_source = block.get("eligible_by_sex_source")
+    if isinstance(by_source, dict):
+        null_below(by_source, list(by_source), min_cell)
+
+    nested = block.get("all_resolved")
+    if isinstance(nested, dict):
+        _redact_grouping(nested, min_cell)
+
+
+def redact_offspring_sex_concordance(section: dict, min_cell: int, n_total: int) -> None:
+    """Redact each grouping's block; the ``null_model`` description is not data."""
+    for name, block in section.items():
+        if name != "null_model" and isinstance(block, dict):
+            _redact_grouping(block, min_cell)

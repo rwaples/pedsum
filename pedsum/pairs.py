@@ -8,6 +8,7 @@ import numpy as np
 from pedigree_graph import RELATIONSHIPS, PedigreeGraph
 
 from pedsum.pedigree_ops import IdIndex
+from pedsum.redaction import null_below
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -86,3 +87,12 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
         sex=df["sex"].to_numpy().astype(np.int8),
         birth_year=birth_year,
     )
+
+
+def redact_relationship_pairs(pairs: dict, min_cell: int, n_total: int) -> None:
+    """``--safe-attempt``: null each small count, and each small ``by_degree`` count."""
+    for code in list(pairs):
+        if code == "by_degree":
+            null_below(pairs["by_degree"], list(pairs["by_degree"]), min_cell)
+        elif isinstance(pairs[code], int):
+            null_below(pairs, (code,), min_cell)

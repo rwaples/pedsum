@@ -8,6 +8,8 @@ are bounded, finite numeric arrays so NumPy reductions cannot overflow.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 from hypothesis import given, settings
@@ -15,21 +17,27 @@ from hypothesis import strategies as st
 
 from pedsum.sections import _effective_count_from_weights, numeric_distribution
 
+if TYPE_CHECKING:
+    from pedsum.sections import Distribution
+
 _FINITE_FLOATS = st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False)
 _NONNEG_FLOATS = st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False)
 
 
-def _assert_distribution_invariants(d: dict, n: int) -> None:
-    """Assert the ordering, support, and count invariants of a distribution dict."""
+def _assert_distribution_invariants(d: Distribution, n: int) -> None:
+    """Assert the ordering, support, and count invariants of a distribution."""
     if n == 0:
-        assert d["mean"] == 0.0
-        assert d["std"] == 0.0
-        assert d["nz"] == 0
+        assert d.mean == 0.0
+        assert d.std == 0.0
+        assert d.nz == 0
         return
-    assert d["min"] <= d["q1"] <= d["median"] <= d["q3"] <= d["max"]
-    assert d["min"] - 1e-6 <= d["mean"] <= d["max"] + 1e-6
-    assert d["std"] >= 0.0
-    assert 0 <= d["nz"] <= n
+    assert d.min is not None
+    assert d.max is not None
+    assert d.nz is not None
+    assert d.min <= d.q1 <= d.median <= d.q3 <= d.max
+    assert d.min - 1e-6 <= d.mean <= d.max + 1e-6
+    assert d.std >= 0.0
+    assert 0 <= d.nz <= n
 
 
 @settings(deadline=None)
@@ -41,8 +49,8 @@ def test_numeric_distribution_float(vals: list[float]) -> None:
     _assert_distribution_invariants(d, len(vals))
 
     reversed_d = numeric_distribution(arr[::-1])
-    for key, value in d.items():
-        assert reversed_d[key] == pytest.approx(value)
+    for key, value in d.as_dict().items():
+        assert reversed_d.as_dict()[key] == pytest.approx(value)
 
 
 @settings(deadline=None)

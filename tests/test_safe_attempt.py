@@ -10,10 +10,12 @@ founder_contribution, founder_summary, components, depth_summary.
 
 from __future__ import annotations
 
+import numpy as np
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.report import apply_safe_attempt
+from pedsum.sections import numeric_distribution
 
 
 def test_safe_attempt_summarize_outputs(tmp_path):
@@ -73,8 +75,8 @@ def test_apply_safe_attempt_headline_branches():
     }
     ind_data = {
         "distributions": {
-            "n_children": {"min": 0, "max": 5, "nz": 2},
-            "kinship": {"min": 0.0, "max": 0.5, "nz": 7},
+            "n_children": numeric_distribution(np.array([0, 0, 0, 1, 5])),
+            "kinship": numeric_distribution(np.array([0.0, *[0.5] * 7])),
         },
     }
 
@@ -110,8 +112,8 @@ def test_apply_safe_attempt_headline_branches():
 
     # ind_data.distributions: min/max dropped unconditionally; nz nulled
     # only when below min_cell.
-    n_children = ind_data["distributions"]["n_children"]
-    kinship = ind_data["distributions"]["kinship"]
+    n_children = ind_data["distributions"]["n_children"].as_dict()
+    kinship = ind_data["distributions"]["kinship"].as_dict()
     assert "min" not in n_children
     assert "max" not in n_children
     assert "min" not in kinship
