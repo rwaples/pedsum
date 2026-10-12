@@ -8,7 +8,7 @@ import polars as pl
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
-from pedsum.validate import _CHECK_ORDER
+from pedsum.checks import _CHECK_ORDER
 
 
 def test_topological_row_order_check_removed():

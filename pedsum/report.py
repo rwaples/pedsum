@@ -17,11 +17,11 @@ import polars as pl
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
+from pedsum.checks import _CHECK_GROUPS, _CHECK_LABELS
 from pedsum.parse import _read_pedigree_table, plink_sex
 from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
 from pedsum.sections import _numeric_distribution
-from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
 
 if TYPE_CHECKING:
     import argparse
@@ -748,8 +748,8 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
             if r.status == "FAIL":
                 line += f" ({r.count})"
                 total_findings += r.count
-            elif r.skip_reason and r.status in ("SKIP", "PASS"):
-                line += f" ({r.skip_reason})"
+            elif r.note:
+                line += f" ({r.note})"
             lines.append(line)
     lines.append("")
     lines.append(f"result: {total_findings} finding(s)")

@@ -16,12 +16,15 @@ import polars as pl
 
 from pedsum.cli import main
 from pedsum.pedigree_ops import IdIndex, _parent_rows
+from pedsum.validate import ValidationConfig, ValidationContext, _run_checks
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
 
 if TYPE_CHECKING:
     import numpy as np
+
+    from pedsum.checks import CheckResult
 
 
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -46,6 +49,13 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
         os.chdir(prev_cwd)
         logging.getLogger().handlers.clear()
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+
+
+def run_check(name: str, rows: list[dict], config: ValidationConfig | None = None) -> CheckResult:
+    """Check ``name``'s result when the whole registry runs over ``rows`` in validate's accumulating mode."""
+    df = pl.DataFrame(rows, schema=dict.fromkeys(rows[0], pl.String))
+    results, _ = _run_checks(ValidationContext(df, config or ValidationConfig()))
+    return results[name]
 
 
 def write_ped(path, rows):

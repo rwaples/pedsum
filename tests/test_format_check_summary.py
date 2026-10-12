@@ -1,7 +1,7 @@
 """Direct unit tests for the validate stderr summary formatter.
 
 Covers the four rendering branches of ``_format_check_summary`` (PASS /
-PASS-with-skip_reason / FAIL / SKIP-with-skip_reason), the finding-total
+PASS-with-note / FAIL / SKIP-with-note), the finding-total
 accounting (only FAIL contributes), and the ``_summarize_findings``
 >5-finding truncation.
 """
@@ -10,54 +10,52 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pedsum.checks import CheckResult, Finding, _summarize_findings
+from pedsum.checks import CheckResult, CheckStatus, Finding, _summarize_findings
 from pedsum.report import _format_check_summary
 
 
 def test_format_check_summary_renders_all_status_combinations():
-    """Each status / skip_reason combination renders its own line shape."""
+    """Each status / note combination renders its own line shape."""
     results = [
-        CheckResult(name="required_columns", status="PASS"),
+        CheckResult(name="required_columns", status=CheckStatus.PASS),
         CheckResult(
             name="sex_role_consistency",
-            status="PASS",
-            count=1,
-            skip_reason="1 overridden from role",
+            status=CheckStatus.PASS,
+            note="1 overridden from role",
         ),
-        CheckResult(name="duplicate_ids", status="FAIL", count=3),
+        CheckResult(name="duplicate_ids", status=CheckStatus.FAIL, findings=[Finding()] * 3),
         CheckResult(
             name="negative_ids",
-            status="SKIP",
-            skip_reason="id_dtype failed",
+            status=CheckStatus.SKIP,
+            note="id_dtype failed",
         ),
     ]
     out = _format_check_summary(Path("p.tsv"), n_total=5, results=results)
     # PASS line carries no parenthetical.
     assert "required columns present" in out
     assert " PASS\n" in out  # plain PASS row exists somewhere
-    # PASS-with-count (0.9 sex_role_consistency override): trailing reason.
+    # Annotated PASS (0.9 sex_role_consistency override): trailing note.
     assert "PASS (1 overridden from role)" in out
     # FAIL line carries the count.
     assert "no duplicate IDs " in out
     assert "FAIL (3)" in out
-    # SKIP line carries the skip_reason.
+    # SKIP line carries the note.
     assert "SKIP (id_dtype failed)" in out
 
 
 def test_format_check_summary_total_findings_only_counts_fail():
-    """``result: N finding(s)`` only counts FAIL rows, not PASS-with-count."""
+    """``result: N finding(s)`` only counts FAIL rows, not an annotated PASS."""
     results = [
-        CheckResult(name="duplicate_ids", status="FAIL", count=2),
+        CheckResult(name="duplicate_ids", status=CheckStatus.FAIL, findings=[Finding()] * 2),
         CheckResult(
             name="sex_role_consistency",
-            status="PASS",
-            count=1,
-            skip_reason="1 overridden from role",
+            status=CheckStatus.PASS,
+            note="1 overridden from role",
         ),
         CheckResult(
             name="acyclic",
-            status="SKIP",
-            skip_reason="parent dtype failed",
+            status=CheckStatus.SKIP,
+            note="parent dtype failed",
         ),
     ]
     out = _format_check_summary(Path("p.tsv"), n_total=5, results=results)

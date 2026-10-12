@@ -8,19 +8,11 @@ from types import SimpleNamespace
 import numpy as np
 import polars as pl
 import pytest
-from conftest import parent_rows
+from conftest import EXAMPLE, parent_rows, run_check
 from relationship_summary_oracle import compute_relationship_summary
 
 from pedsum.base import PedigreeError
-from pedsum.checks import (
-    Finding,
-    _check_birth_year_topology,
-    _check_duplicate_ids,
-    _check_empty_pedigree,
-    _check_parent_refs_present,
-    _check_sex_role_consistency,
-    _summarize_findings,
-)
+from pedsum.checks import _CHECK_ORDER, CheckStatus, Finding, _summarize_findings
 from pedsum.ids import IdLabels
 from pedsum.parse import (
     _decode_sex,
@@ -29,7 +21,7 @@ from pedsum.parse import (
     _read_pedigree_table,
     _sniff_delimiter,
 )
-from pedsum.pedigree_ops import IdIndex, ParentRefs, _group_mating_pairs, _structural_depth
+from pedsum.pedigree_ops import _group_mating_pairs, _structural_depth
 from pedsum.report import (
     _apply_safe_attempt,
     _build_individual_data,
@@ -59,6 +51,7 @@ from pedsum.sections import (
     compute_sibship_sizes,
     compute_size_structure,
 )
+from pedsum.validate import ValidationConfig, ValidationContext, _run_checks, validate_pedigree
 
 
 class TestParseEdgeCases:
@@ -117,46 +110,61 @@ class TestParseEdgeCases:
         assert auto.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
 
+def _founders(ids: list[int]) -> list[dict]:
+    """Founder rows with the given IDs, all female."""
+    return [{"id": str(i), "sex": "F", "mother": "-1", "father": "-1"} for i in ids]
+
+
 class TestCheckEdgeCases:
     """Validation check producers cover clean, offending, and formatting cases."""
 
     def test_duplicate_ids_clean_and_offending(self) -> None:
         """Duplicate-ID checking returns no findings for unique IDs and one per duplicate value."""
-        assert _check_duplicate_ids(np.array([1, 2, 3], dtype=np.int64), label=str) == []
-        findings = _check_duplicate_ids(np.array([2, 1, 2, 3, 1], dtype=np.int64), label=str)
+        assert run_check("duplicate_ids", _founders([1, 2, 3])).findings == []
+        findings = run_check("duplicate_ids", _founders([2, 1, 2, 3, 1])).findings
         assert [f.id for f in findings] == [1, 2]
 
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
         """Missing-parent detection distinguishes no refs, all-present refs, and the zero-token hint."""
-        id_index = IdIndex([1, 2, 3])
 
-        def check(parents: np.ndarray, role: str) -> list[Finding]:
-            return _check_parent_refs_present(parents, role, ParentRefs.of(parents, id_index), label=str)
+        def check(mothers: list[int], fathers: list[int], role: str) -> list[Finding]:
+            rows = [
+                {**row, "mother": str(m), "father": str(f)}
+                for row, m, f in zip(_founders([1, 2, 3]), mothers, fathers, strict=True)
+            ]
+            return run_check(f"parent_refs_present_{role}", rows).findings
 
-        assert check(np.array([-1, -1]), "mother") == []
-        assert check(np.array([1, -1, 2]), "mother") == []
-        findings = check(np.array([0, 99, 99]), "father")
+        assert check([-1, -1, -1], [-1, -1, -1], "mother") == []
+        assert check([1, -1, 2], [-1, -1, -1], "mother") == []
+        findings = check([-1, -1, -1], [0, 99, 99], "father")
         assert [f.id for f in findings] == [0, 99]
         assert "convert to -1" in findings[0].detail
 
     def test_empty_pedigree_check(self) -> None:
         """Empty-pedigree checking fires only for n == 0."""
-        assert _check_empty_pedigree(3) == []
-        assert _check_empty_pedigree(0)[0].check == "empty_pedigree"
+        assert run_check("empty_pedigree", _founders([1, 2, 3])).status == CheckStatus.PASS
+        empty = pl.DataFrame(schema=dict.fromkeys(("id", "sex", "mother", "father"), pl.String))
+        result = _run_checks(ValidationContext(empty, ValidationConfig()))[0]["empty_pedigree"]
+        assert result.findings[0].check == "empty_pedigree"
 
-    def test_sex_role_consistency_without_skip_mask(self) -> None:
-        """Sex-role consistency works when no imputation skip mask is supplied."""
-        ids = np.array([1, 2, 3], dtype=np.int64)
-        mothers = np.array([-1, -1, 2], dtype=np.int64)
-        fathers = np.array([-1, -1, 1], dtype=np.int64)
-        sex = np.array([1, 1, 0], dtype=np.int8)  # id=2 is male but used as mother.
-        id_index = IdIndex(ids)
-        findings = _check_sex_role_consistency(
-            mothers, fathers, sex, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), label=str
-        )
+    def test_sex_role_consistency_without_override(self) -> None:
+        """Without the role override, an asserted male used as a mother fails sex-role consistency."""
+        rows = [
+            {"id": "1", "sex": "M", "mother": "-1", "father": "-1"},
+            {"id": "2", "sex": "M", "mother": "-1", "father": "-1"},  # male, but used as mother
+            {"id": "3", "sex": "F", "mother": "2", "father": "1"},
+        ]
+        findings = run_check("sex_role_consistency", rows, ValidationConfig(override_asserted_sex=False)).findings
         assert len(findings) == 1
         assert findings[0].id == 2
         assert "used as mother" in findings[0].detail
+
+    def test_every_check_returns_a_fresh_result(self) -> None:
+        """No CheckResult is shared between Checks or between runs, since the runner stamps each one."""
+        runs = [validate_pedigree(EXAMPLE, ValidationConfig())[1] for _ in range(2)]
+        ids = [id(r) for results in runs for r in results]
+        assert len(set(ids)) == len(ids)
+        assert all(r.name == name for r, name in zip(runs[0], _CHECK_ORDER, strict=True))
 
     def test_summarize_findings_variants(self) -> None:
         """Finding summaries render empty, id-only, row-only, and overflow samples."""
@@ -168,14 +176,14 @@ class TestCheckEdgeCases:
 
     def test_birth_year_topology_no_edges_and_bad_edge(self) -> None:
         """Birth-year topology skips no-edge pedigrees and flags child-before-parent years."""
-        ids = np.array([1, 2], dtype=np.int64)
-        no_edges = _check_birth_year_topology(
-            ids, np.array([-1, -1]), np.array([-1, -1]), np.array([1980, 2000]), IdIndex(ids), label=str
-        )
-        assert no_edges == []
-        bad = _check_birth_year_topology(
-            ids, np.array([-1, 1]), np.array([-1, -1]), np.array([2000, 1990]), IdIndex(ids), label=str
-        )
+        config = ValidationConfig(birth_year_col="birth_year")
+        rows = [
+            {"id": "1", "sex": "F", "mother": "-1", "father": "-1", "birth_year": "2000"},
+            {"id": "2", "sex": "M", "mother": "-1", "father": "-1", "birth_year": "1990"},
+        ]
+        assert run_check("birth_year_topology", rows, config).findings == []
+        rows[1]["mother"] = "1"
+        bad = run_check("birth_year_topology", rows, config).findings
         assert len(bad) == 1
         assert bad[0].check == "birth_year_topology"
 

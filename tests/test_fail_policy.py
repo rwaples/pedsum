@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pedsum.checks import CheckResult
-from pedsum.validate import CHECKS, DROPPABLE_CHECKS, FailPolicy, blocking_failures
+from pedsum.checks import CHECKS, DROPPABLE_CHECKS, CheckResult, CheckStatus, FailPolicy, blocking_failures
 
 # The user-facing contract: changing a Check's row here changes whether plain
 # validate writes a pedigree and whether --drop-offending can remove the flagged ids.
@@ -34,7 +33,10 @@ EXPECTED = {
 
 
 def _failing(name: str) -> dict[str, CheckResult]:
-    return {c.name: CheckResult(name=c.name, status="FAIL" if c.name == name else "PASS") for c in CHECKS}
+    return {
+        c.name: CheckResult(name=c.name, status=CheckStatus.FAIL if c.name == name else CheckStatus.PASS)
+        for c in CHECKS
+    }
 
 
 def test_every_check_has_its_expected_policy():
@@ -62,7 +64,9 @@ def test_blocking_failures_follows_the_policy(name, drop_offending):
 def test_blocking_failures_uses_the_block_message_and_registry_order():
     """BLOCKED lines carry the block_message, in registry order."""
     results = {
-        c.name: CheckResult(name=c.name, status="FAIL" if c.name in ("acyclic", "duplicate_ids") else "PASS")
+        c.name: CheckResult(
+            name=c.name, status=CheckStatus.FAIL if c.name in ("acyclic", "duplicate_ids") else CheckStatus.PASS
+        )
         for c in CHECKS
     }
     assert blocking_failures(results, drop_offending=False) == [
@@ -73,8 +77,8 @@ def test_blocking_failures_uses_the_block_message_and_registry_order():
 
 def test_skipped_and_absent_checks_never_block():
     """Only a FAIL blocks; a SKIP or a Check missing from results does not."""
-    results = {"required_columns": CheckResult(name="required_columns", status="FAIL")}
-    results["id_dtype"] = CheckResult(name="id_dtype", status="SKIP", skip_reason="required_columns failed")
+    results = {"required_columns": CheckResult(name="required_columns", status=CheckStatus.FAIL)}
+    results["id_dtype"] = CheckResult(name="id_dtype", status=CheckStatus.SKIP, note="required_columns failed")
     assert blocking_failures(results, drop_offending=False) == [("required_columns", "required_columns")]
 
 

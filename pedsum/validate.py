@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -20,33 +19,11 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
-from pedsum.checks import (
-    CheckResult,
-    Finding,
-    _check_acyclic,
-    _check_birth_year_range,
-    _check_birth_year_topology,
-    _check_duplicate_ids,
-    _check_empty_pedigree,
-    _check_negative_ids,
-    _check_parent_refs_present,
-    _check_parent_refs_sex_conflict,
-    _check_parent_token_range,
-    _check_parents_distinct,
-    _check_self_loops,
-    _check_sex_role_ambiguity,
-    _check_sex_role_consistency,
-    _check_unknown_sex,
-    _summarize_findings,
-)
+from pedsum.checks import CHECKS, DROPPABLE_CHECKS, CheckResult, CheckStatus, _summarize_findings, blocking_failures
 from pedsum.fixed_pedigree import _next_free_id, fix_pedigree, render_fixed_pedigree
-from pedsum.ids import parse_ids
 from pedsum.parse import (
     _BIRTH_YEAR_DEFAULT_MIN,
-    _as_birth_year_col,
     _birth_year_default_max,
-    _decode_sex,
-    _format_id_sample,
     _maybe_warn_csv,
     _read_pedigree_table,
 )
@@ -54,9 +31,10 @@ from pedsum.pedigree_ops import IdIndex, ParentRefs, _parent_rows, _structural_d
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from pathlib import Path
 
+    from pedsum.checks import Finding
     from pedsum.fixed_pedigree import FixedPedigree
     from pedsum.ids import IdLabels
 
@@ -159,43 +137,8 @@ def _impute_sex_from_roles(
 
 
 # ---------------------------------------------------------------------------
-# Check, CheckOutcome, ValidationContext
+# ValidationConfig, ValidationContext
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class CheckOutcome:
-    """A single Check's verdict: status, any findings, and an optional annotation."""
-
-    status: str  # "PASS" | "FAIL" | "SKIP"
-    findings: list[Finding] = field(default_factory=list)
-    count: int = 0
-    skip_reason: str | None = None
-
-
-_PASS = CheckOutcome("PASS")
-
-
-def _from_findings(findings: list[Finding]) -> CheckOutcome:
-    """PASS when no findings, else FAIL carrying them (count = len)."""
-    if findings:
-        return CheckOutcome("FAIL", findings, len(findings))
-    return _PASS
-
-
-def _try_parse(
-    check_name: str,
-    parse: Callable[[], np.ndarray],
-) -> tuple[np.ndarray | None, CheckOutcome | None]:
-    """Run a column parser, mapping a PedigreeError to a single-finding FAIL.
-
-    Returns ``(value, None)`` on success or ``(None, outcome)`` on failure, so a
-    parse Check reads ``value, fail = _try_parse(...); if fail: return fail``.
-    """
-    try:
-        return parse(), None
-    except PedigreeError as e:
-        return None, CheckOutcome("FAIL", [Finding(check=check_name, detail=str(e))], 1)
 
 
 @dataclass(frozen=True)
@@ -240,7 +183,7 @@ class ValidationConfig:
 
 @dataclass
 class ValidationContext:
-    """Mutable state threaded through every Check's ``run(ctx)``.
+    """Mutable state threaded through every Check (``pedsum.checks``).
 
     Parse Checks populate the array fields (parsing *is* the Check); all other
     Checks read them. ``id_index`` and ``imputation`` are derived once on first
@@ -326,490 +269,8 @@ class ValidationContext:
         return self.ids, self.mothers, self.fathers
 
 
-class FailPolicy(Enum):
-    """What a Check's ``FAIL`` does to the pedigree ``validate`` writes (ADR 0005).
-
-    The policy decides both modes: whether plain ``validate`` BLOCKs or writes
-    the pedigree as-is, and whether ``--drop-offending`` can resolve the FAIL
-    by removing the flagged individual(s).
-    """
-
-    # No row removal fixes it (missing column, parse failure, negative id):
-    # BLOCKs in both modes.
-    BLOCK = "block"
-    # BLOCKs plain validate; --drop-offending removes the flagged ids.
-    BLOCK_OR_DROP = "block_or_drop"
-    # Plain validate writes the pedigree with the contradiction kept;
-    # --drop-offending removes the flagged ids.
-    KEEP_OR_DROP = "keep_or_drop"
-    # Repaired by founder synthesis; never BLOCKs and is never dropped.
-    AUTOFIX = "autofix"
-
-
-@dataclass(frozen=True)
-class Check:
-    """One registry entry: a named integrity test with its prerequisites + display metadata."""
-
-    name: str
-    requires: tuple[str, ...]
-    run: Callable[[ValidationContext], CheckOutcome]
-    label: str
-    fail_policy: FailPolicy
-    # The BLOCKED line plain validate prints for this Check, with any flag that
-    # tolerates it. Defaults to the Check name.
-    block_message: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Per-check run functions (ctx -> CheckOutcome). The _check_* helpers stay pure.
-# ---------------------------------------------------------------------------
-
-
-def _ck_required_columns(ctx: ValidationContext) -> CheckOutcome:
-    # summarize (fail_fast) treats a named --birth-year-col as required;
-    # validate omits it and lets birth_year_dtype SKIP instead.
-    config = ctx.config
-    needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
-    if ctx.fail_fast and config.birth_year_col is not None:
-        needed.add(config.birth_year_col)
-    miss = needed - set(ctx.df_raw.columns)
-    if miss:
-        msg = f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}"
-        return CheckOutcome("FAIL", [Finding(check="required_columns", detail=msg)], 1)
-    return _PASS
-
-
-def _ck_empty_pedigree(ctx: ValidationContext) -> CheckOutcome:
-    return _from_findings(_check_empty_pedigree(len(ctx.df_raw)))
-
-
-def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
-    df = ctx.df_raw
-    try:
-        ctx.ids, ctx.mothers, ctx.fathers, ctx.id_labels = parse_ids(
-            df[ctx.config.id_col],
-            df[ctx.config.mother_col],
-            df[ctx.config.father_col],
-            labels=ctx.fixed_labels,
-        )
-    except PedigreeError as e:
-        return CheckOutcome("FAIL", [Finding(check="id_dtype", detail=str(e))], 1)
-    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), _format_id_sample(ctx.ids, ctx.label))
-    return _PASS
-
-
-def _warn_zero_female_coding(ctx: ValidationContext) -> None:
-    """Warn when mothers are coded 0 and no row is 2: likely 0=female, the coding pedsum wrote before 0.15.0.
-
-    pedsum's own output never writes a mother as 0 (she is imputed female),
-    so its unknown-sex rows do not trigger this.
-    """
-    if ctx.ids is None or ctx.mothers is None:
-        return
-    tokens = ctx.df_raw[ctx.config.sex_col].cast(pl.String).str.strip_chars()
-    zero = (tokens == "0").fill_null(False).to_numpy()
-    if not zero.any() or (tokens == "2").any():
-        return
-    n = int((zero & np.isin(ctx.ids, ctx.mothers[ctx.mothers != -1])).sum())
-    if n:
-        logger.warning(
-            "sex column codes %d mother(s) as 0 and has no 2: pedsum reads 0 as unknown "
-            "(PLINK: 1=male, 2=female, 0=unknown). Recode a file that uses 0=female, 1=male, "
-            "including validate and summarize output from pedsum before 0.15.0.",
-            n,
-        )
-
-
-def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
-    ctx.sex, fail = _try_parse(
-        "sex_tokens",
-        lambda: _decode_sex(ctx.df_raw[ctx.config.sex_col]),
-    )
-    if fail:
-        return fail
-    _warn_zero_female_coding(ctx)
-    return _PASS
-
-
-def _ck_negative_ids(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.ids is not None
-    assert ctx.id_labels is not None
-    return _from_findings(_check_negative_ids(ctx.ids, ctx.id_labels.int_values(ctx.ids), label=ctx.label))
-
-
-def _ck_duplicate_ids(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.ids is not None
-    return _from_findings(_check_duplicate_ids(ctx.ids, label=ctx.label))
-
-
-def _ck_parent_token_range_mother(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.mothers is not None
-    assert ctx.id_labels is not None
-    return _from_findings(_check_parent_token_range(ctx.id_labels.int_values(ctx.mothers), "mother"))
-
-
-def _ck_parent_token_range_father(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.fathers is not None
-    assert ctx.id_labels is not None
-    return _from_findings(_check_parent_token_range(ctx.id_labels.int_values(ctx.fathers), "father"))
-
-
-def _ck_parent_refs_present_mother(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.mothers is not None
-    return _from_findings(_check_parent_refs_present(ctx.mothers, "mother", ctx.mother_refs, label=ctx.label))
-
-
-def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.fathers is not None
-    return _from_findings(_check_parent_refs_present(ctx.fathers, "father", ctx.father_refs, label=ctx.label))
-
-
-def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
-    if ctx.config.no_sex_check:
-        return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
-    assert ctx.mothers is not None
-    assert ctx.fathers is not None
-    return _from_findings(
-        _check_parent_refs_sex_conflict(ctx.mothers, ctx.fathers, ctx.mother_refs, ctx.father_refs, label=ctx.label)
-    )
-
-
-def _ck_self_loops(ctx: ValidationContext) -> CheckOutcome:
-    ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(_check_self_loops(ids, mothers, fathers, label=ctx.label))
-
-
-def _ck_parents_distinct(ctx: ValidationContext) -> CheckOutcome:
-    ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(_check_parents_distinct(ids, mothers, fathers, label=ctx.label))
-
-
-def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
-    imp = ctx.imputation
-    if ctx.config.allow_missing_sex:
-        n = int(imp.ambiguous_mask.sum())
-        return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
-    ids, mothers, fathers = ctx.require_id_parents()
-    return _from_findings(
-        _check_sex_role_ambiguity(
-            ids,
-            imp.ambiguous_mask,
-            mothers,
-            fathers,
-            label=ctx.label,
-        )
-    )
-
-
-def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
-    imp = ctx.imputation
-    # Always run the real check: the override clears asserted-vs-role
-    # contradictions only for rows used in a SINGLE role; a row asserted M and
-    # used as BOTH mother and father stays unoverridable and must still FAIL.
-    assert ctx.mothers is not None
-    assert ctx.fathers is not None
-    findings = _check_sex_role_consistency(
-        ctx.mothers,
-        ctx.fathers,
-        imp.imputed_sex,
-        ctx.mother_refs,
-        ctx.father_refs,
-        skip_mask=imp.original_unknown_mask,
-        label=ctx.label,
-    )
-    if findings:
-        return CheckOutcome("FAIL", findings, len(findings))
-    # Clean: surface the override count as a PASS annotation
-    # ("PASS (N overridden from role)") when the override fired.
-    n = int(imp.overridden_mask.sum()) if ctx.config.override_asserted_sex else 0
-    return CheckOutcome("PASS", count=n, skip_reason=(f"{n} overridden from role" if n > 0 else None))
-
-
-def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
-    imp = ctx.imputation
-    if ctx.config.allow_missing_sex:
-        n = int(((imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-        return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
-    assert ctx.ids is not None
-    return _from_findings(_check_unknown_sex(ctx.ids, imp.imputed_sex, imp.ambiguous_mask, label=ctx.label))
-
-
-def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
-    ids, _, _ = ctx.require_id_parents()
-    return _from_findings(_check_acyclic(ids, ctx.depth, label=ctx.label))
-
-
-def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
-    column = ctx.config.birth_year_col
-    if column is None:
-        return CheckOutcome("SKIP", skip_reason="no --birth-year-col specified")
-    if column not in ctx.df_raw.columns:
-        return CheckOutcome("SKIP", skip_reason=f"column {column!r} not present in file")
-    ctx.birth_year, fail = _try_parse(
-        "birth_year_dtype",
-        lambda: _as_birth_year_col(ctx.df_raw[column], column),
-    )
-    return fail or _PASS
-
-
-def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
-    assert ctx.ids is not None
-    assert ctx.birth_year is not None
-    return _from_findings(
-        _check_birth_year_range(ctx.ids, ctx.birth_year, ctx.config.birth_year_min, ctx.config.by_max, label=ctx.label)
-    )
-
-
-def _ck_birth_year_topology(ctx: ValidationContext) -> CheckOutcome:
-    ids, mothers, fathers = ctx.require_id_parents()
-    assert ctx.birth_year is not None
-    return _from_findings(
-        _check_birth_year_topology(
-            ids,
-            mothers,
-            fathers,
-            ctx.birth_year,
-            ctx.id_index,
-            label=ctx.label,
-        )
-    )
-
-
-# Prerequisite shorthand: id_dtype parses the id and both parent columns.
-_IDS = ("id_dtype", "negative_ids", "duplicate_ids")
-
-CHECKS: tuple[Check, ...] = (
-    Check(
-        "required_columns",
-        (),
-        _ck_required_columns,
-        "required columns present",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "empty_pedigree",
-        ("required_columns",),
-        _ck_empty_pedigree,
-        "pedigree is non-empty",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "id_dtype",
-        ("required_columns",),
-        _ck_id_dtype,
-        "every row has an id",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "sex_tokens",
-        ("required_columns",),
-        _ck_sex_tokens,
-        "sex column tokens recognized",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "negative_ids",
-        ("id_dtype",),
-        _ck_negative_ids,
-        "no negative IDs",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "duplicate_ids",
-        ("id_dtype",),
-        _ck_duplicate_ids,
-        "no duplicate IDs",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="duplicate IDs detected",
-    ),
-    Check(
-        "parent_token_range_mother",
-        ("id_dtype",),
-        _ck_parent_token_range_mother,
-        "mother IDs in valid range",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "parent_token_range_father",
-        ("id_dtype",),
-        _ck_parent_token_range_father,
-        "father IDs in valid range",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "parent_refs_present_mother",
-        _IDS,
-        _ck_parent_refs_present_mother,
-        "mother IDs present in pedigree",
-        FailPolicy.AUTOFIX,
-    ),
-    Check(
-        "parent_refs_present_father",
-        _IDS,
-        _ck_parent_refs_present_father,
-        "father IDs present in pedigree",
-        FailPolicy.AUTOFIX,
-    ),
-    Check(
-        "parent_refs_sex_conflict",
-        _IDS,
-        _ck_parent_refs_sex_conflict,
-        "no missing-parent sex conflicts",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="sex conflict on missing parent(s); pass --no-sex-check to default to sex=F",
-    ),
-    Check(
-        "sex_role_ambiguity",
-        (*_IDS, "sex_tokens"),
-        _ck_sex_role_ambiguity,
-        "no role-ambiguous unsexed individuals",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message=(
-            "present individual(s) with unknown sex used as BOTH mother and father "
-            "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
-        ),
-    ),
-    Check(
-        "self_loops",
-        _IDS,
-        _ck_self_loops,
-        "no self-loops",
-        FailPolicy.KEEP_OR_DROP,
-    ),
-    Check(
-        "parents_distinct",
-        _IDS,
-        _ck_parents_distinct,
-        "mother and father distinct",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="rows with mother == father (cannot disambiguate)",
-    ),
-    Check(
-        "sex_role_consistency",
-        (*_IDS, "sex_tokens"),
-        _ck_sex_role_consistency,
-        "sex consistent with parent role",
-        FailPolicy.KEEP_OR_DROP,
-    ),
-    Check(
-        "unknown_sex",
-        (*_IDS, "sex_tokens"),
-        _ck_unknown_sex,
-        "all individuals have resolved sex",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
-    ),
-    Check(
-        "acyclic",
-        # Not parent_refs_present_*: a parent with no row counts as a founder
-        # for depth, so a cycle is found (and BLOCKs) even when a parent is
-        # missing (pedsum#22).
-        (*_IDS, "parents_distinct"),
-        _ck_acyclic,
-        "acyclic (no descent cycles)",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="cycle detected",
-    ),
-    Check(
-        "birth_year_dtype",
-        ("required_columns",),
-        _ck_birth_year_dtype,
-        "birth_year column parses as numeric",
-        FailPolicy.BLOCK,
-    ),
-    Check(
-        "birth_year_range",
-        ("id_dtype", "birth_year_dtype"),
-        _ck_birth_year_range,
-        "birth years within sanity range",
-        FailPolicy.KEEP_OR_DROP,
-    ),
-    Check(
-        "birth_year_topology",
-        (*_IDS, "birth_year_dtype"),
-        _ck_birth_year_topology,
-        "child birth_year >= parent birth_year",
-        FailPolicy.KEEP_OR_DROP,
-    ),
-)
-
-_CHECKS_BY_NAME: dict[str, Check] = {c.name: c for c in CHECKS}
-
-# Derived from the registry (single source of truth).
-_CHECK_ORDER: tuple[str, ...] = tuple(c.name for c in CHECKS)
-_CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
-
-# Checks `validate --drop-offending` can resolve by removing the flagged
-# individual(s). Derived from the registry so the set never drifts.
-DROPPABLE_CHECKS: frozenset[str] = frozenset(
-    c.name for c in CHECKS if c.fail_policy in (FailPolicy.BLOCK_OR_DROP, FailPolicy.KEEP_OR_DROP)
-)
-
-
-def blocking_failures(results: Mapping[str, CheckResult], *, drop_offending: bool) -> list[tuple[str, str]]:
-    """The FAILed Checks that stop ``validate`` writing a pedigree, as ``(name, message)``.
-
-    In registry order. Under ``--drop-offending`` only ``FailPolicy.BLOCK``
-    Checks block (the rest are removed); in plain ``validate``
-    ``BLOCK_OR_DROP`` Checks block too. The message is the Check's
-    ``block_message``, else its name.
-    """
-    blocking = {FailPolicy.BLOCK} if drop_offending else {FailPolicy.BLOCK, FailPolicy.BLOCK_OR_DROP}
-    return [
-        (c.name, c.block_message or c.name)
-        for c in CHECKS
-        if c.fail_policy in blocking and c.name in results and results[c.name].status == "FAIL"
-    ]
-
-
 # Drop fraction (rows removed / input rows) above which --drop-offending warns.
 DROP_FRACTION_WARN: float = 0.10
-
-# Curated *display* grouping for the stderr summary. Order within a group
-# intentionally differs from execution order (e.g. parents_distinct), so this
-# stays an explicit constant rather than a derivation of _CHECK_ORDER.
-_CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "Columns & parsing",
-        (
-            "required_columns",
-            "empty_pedigree",
-            "id_dtype",
-            "sex_tokens",
-        ),
-    ),
-    ("IDs", ("negative_ids", "duplicate_ids")),
-    (
-        "Parent references",
-        (
-            "parent_token_range_mother",
-            "parent_token_range_father",
-            "parent_refs_present_mother",
-            "parent_refs_present_father",
-            "parents_distinct",
-            "parent_refs_sex_conflict",
-            "sex_role_ambiguity",
-        ),
-    ),
-    (
-        "Graph structure",
-        (
-            "self_loops",
-            "sex_role_consistency",
-            "unknown_sex",
-            "acyclic",
-        ),
-    ),
-    (
-        "Birth years (optional)",
-        (
-            "birth_year_dtype",
-            "birth_year_range",
-            "birth_year_topology",
-        ),
-    ),
-)
-
 
 # ---------------------------------------------------------------------------
 # Runner
@@ -828,30 +289,23 @@ def _run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Fi
     results: dict[str, CheckResult] = {}
     findings: list[Finding] = []
     for check in CHECKS:
-        skip_reason = None
+        skip_note = None
         for prereq in check.requires:
             r = results[prereq]
-            if r.status != "PASS":
-                skip_reason = r.skip_reason if r.status == "SKIP" else f"{prereq} failed"
+            if r.status != CheckStatus.PASS:
+                skip_note = r.note if r.status == CheckStatus.SKIP else f"{prereq} failed"
                 break
-        if skip_reason is not None:
-            results[check.name] = CheckResult(name=check.name, status="SKIP", skip_reason=skip_reason)
-            continue
-        outcome = check.run(ctx)
-        if outcome.status == "FAIL":
+        result = check.run(ctx) if skip_note is None else CheckResult(CheckStatus.SKIP, note=skip_note)
+        result.name = check.name
+        for f in result.findings:
+            f.check = check.name
+        if result.status == CheckStatus.FAIL:
             if ctx.fail_fast:
                 # The id parse Check runs before any Check that names an id.
                 label = ctx.label if ctx.id_labels is not None else str
-                raise PedigreeError(_summarize_findings(outcome.findings, label))
-            findings.extend(outcome.findings)
-            results[check.name] = CheckResult(name=check.name, status="FAIL", count=outcome.count)
-        else:
-            results[check.name] = CheckResult(
-                name=check.name,
-                status=outcome.status,
-                count=outcome.count,
-                skip_reason=outcome.skip_reason,
-            )
+                raise PedigreeError(_summarize_findings(result.findings, label))
+            findings.extend(result.findings)
+        results[check.name] = result
     return results, findings
 
 
@@ -1003,7 +457,7 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
         # Deduped (id, check) reasons for this round — one finding may flag an
         # id twice (e.g. a self-loop via both parent columns). Sorted, because
         # str hashing varies per process and the manifest keeps this order.
-        round_pairs = sorted({(int(f.id), f.check) for f in droppable if int(f.id) in drop_ids})  # ty: ignore[invalid-argument-type]
+        round_pairs = sorted({(f.id, f.check) for f in droppable if f.id is not None and f.id in drop_ids})
         # The manifest writes IDs as the input wrote them.
         dropped.extend((ctx.label(fid), check, rnd) for fid, check in round_pairs)
 
@@ -1104,10 +558,10 @@ def fix_validated(
 
     if not drop_offending:
         fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write_pedigree)
-        failed = any(r.status == "FAIL" for r in results)
+        failed = any(r.status == CheckStatus.FAIL for r in results)
         return ValidateOutcome(exit_code=1 if failed else 0, fixed=fp)
 
-    if not any(by_check[n].status == "FAIL" for n in DROPPABLE_CHECKS if n in by_check):
+    if not any(by_check[n].status == CheckStatus.FAIL for n in DROPPABLE_CHECKS if n in by_check):
         write_manifest([])
         fp, _path = _write_fixed(ctx, fill_half_founders=fill_half_founders, next_id=None, write=write_pedigree)
         return ValidateOutcome(exit_code=0, fixed=fp, nothing_to_drop=True)
@@ -1125,7 +579,7 @@ def fix_validated(
     # Self-verify the written file under the invoked flags. It is always
     # tab-separated whatever the input's separator, so sniff it.
     _n, vresults, _vf, _vctx = validate_pedigree(path, ctx.config, sep="auto")
-    still_failing = sorted(r.name for r in vresults if r.status == "FAIL")
+    still_failing = sorted(r.name for r in vresults if r.status == CheckStatus.FAIL)
     if still_failing:
         raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {still_failing}")
     return ValidateOutcome(exit_code=1, fixed=fp, reduction=reduction)

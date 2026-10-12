@@ -25,6 +25,7 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, logger
+from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
 from pedsum.pedigree_ops import unique_ints
 
@@ -224,18 +225,13 @@ def _build_added_founders(
     moms_only = moms_missing - conflicts
     dads_only = dads_missing - conflicts
 
-    def _rows_listing(rows: np.ndarray) -> str:
-        if len(rows) <= 5:
-            return f"row(s) {rows.tolist()}"
-        return f"row(s) {rows[:5].tolist()} (and {len(rows) - 5} more)"
-
     out: list[dict] = []
     for mid in sorted(moms_only):
         rows = np.where(mothers == mid)[0]
-        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {_rows_listing(rows)}"})
+        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {rows_phrase(rows)}"})
     for did in sorted(dads_only):
         rows = np.where(fathers == did)[0]
-        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {_rows_listing(rows)}"})
+        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {rows_phrase(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
             rows_m = np.where(mothers == cid)[0]
@@ -246,7 +242,7 @@ def _build_added_founders(
                     "sex": SEX_FEMALE,
                     "reason": (
                         f"--no-sex-check; conflicting roles "
-                        f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
+                        f"(mother {rows_phrase(rows_m)}, father {rows_phrase(rows_f)})"
                     ),
                 }
             )
