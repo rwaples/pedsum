@@ -136,7 +136,8 @@ data first. Two kinds of failure hard-block:
 - column- and parse-level failures: a missing required column, a row
   without an id, an unrecognized sex token, a negative id, an
   out-of-range parent token, an unparsable birth year, an empty
-  pedigree;
+  pedigree, and a parent written `0` that has no row (see
+  `--missing-parent-token` under "Input format");
 - cycles (including a self-loop, an individual listed as its own
   parent, which is a one-person cycle), duplicate IDs, a mother equal to
   the father, sex conflicts on missing parents, unresolved sex without
@@ -184,7 +185,7 @@ records changes planned for several rows
 | Problem | pedsum | The R cleaners |
 |---|---|---|
 | Parent ID with no row | Adds a founder row (exit 1). | Same, except purgeR (sets the parent to unknown, which changes founder, half-founder and sibship counts) and kinship2 `pedigree()` / pedtools `ped()` (refuse). |
-| Parent written `0` | Read as an ID: blocks when `0` is both mother and father, otherwise adds a founder named `0`. Recode `0` to `NA`. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
+| Parent written `0` | Read as an ID. A `0` with no row blocks, naming `--missing-parent-token 0`, which reads it as missing. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
 | The same row twice | Blocks. | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
 | Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
@@ -1012,12 +1013,24 @@ id	sex	mother	father
 |---|---|---|
 | `id` | unique, non-missing | Integers or strings (`P001`, `FAM01-003`); see "String IDs" below. |
 | `sex` | `M`/`F`/`Male`/`Female` (any case) or PLINK's `1`/`2`/`0` | `1 = male, 2 = female, 0 = unknown` (see "Sex coding" below). Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
-| `mother` | parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
+| `mother` | parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. `0` is an ID: if your file writes a missing parent as `0` (PLINK `.fam`, most R packages), pass `--missing-parent-token 0`. |
 | `father` | parent ID or missing | Same conventions as `mother`. |
 
 Required column names are overridable via `--id-col` / `--sex-col` /
 `--mother-col` / `--father-col`. Half-founders (one parent missing,
 the other a valid ID) are accepted.
+
+**`--missing-parent-token TOKEN`** (repeatable, every command) adds a
+token that means a missing parent in the mother and father columns,
+matched exactly after stripping whitespace. pedsum reads `0` as an ID,
+because in some pedigrees (simACE's among them) ID 0 is an individual,
+and reading it as missing would turn its offspring from half-sibs into
+unrelated half-founders. A parent written `0` that has no row blocks
+`validate`, `--drop-offending` included, and fails the other commands,
+with a message naming `--missing-parent-token 0`. A token that is also
+the ID of a row is an error. `validate` writes a parent read as missing
+through a token as blank, so `summarize` and `effective-size` read
+`validate.tsv.gz` without the flag.
 
 ### Optional columns
 
@@ -1065,16 +1078,15 @@ delimiter routing automatically.
 ### PLINK `.fam` files
 
 No header, `0` for missing parents, sex `1=male, 2=female`. Add a
-header and remap `0 → -1`:
+header and pass `--missing-parent-token 0`:
 
 ```bash
-{ printf 'FID IID PAT MAT SEX PHENO\n'; \
-  awk 'BEGIN{OFS=" "} {if($3==0)$3=-1; if($4==0)$4=-1; print}' cohort.fam; } \
-    > cohort.fam.headed
+{ printf 'FID IID PAT MAT SEX PHENO\n'; cat cohort.fam; } > cohort.fam.headed
 
 pedsum summarize \
     --in cohort.fam.headed --out cohort/ \
-    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX
+    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX \
+    --missing-parent-token 0
 ```
 
 ### Non-TSV inputs (CSV, Excel)
@@ -1198,7 +1210,7 @@ Exit codes:
 | `column 'id' has N missing value(s)` | a row with a blank or `NA` id | give every row an id |
 | `sex column has N invalid value(s)` | a numeric coding other than PLINK's 1=male, 2=female, 0=unknown | recode the sex column to PLINK or `M`/`F` |
 | WARNING `sex column has '0' tokens and no '2'` | a `0` = female, `1` = male column, such as pedsum output before 0.15.0 | recode `0` → `2` |
-| `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
+| `parent ID 0 has no row` | file writes a missing parent as `0` | pass `--missing-parent-token 0` |
 | WARNING `IDs read as strings` | an ID token that is not a plain integer, e.g. `001`, `1.0`, or a non-standard missing token | expected for string IDs; otherwise fix the token, or replace a missing token with `-1`, `NA`, blank, or `.` |
 | `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |
 

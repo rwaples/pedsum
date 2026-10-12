@@ -204,6 +204,17 @@ def _add_input_args(
         metavar="NAME",
         help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
+    p.add_argument(
+        "--missing-parent-token",
+        action="append",
+        default=[],
+        metavar="TOKEN",
+        help="a token that means a missing parent in the mother and father columns, besides -1, "
+        "blank, NA, '.', '?' and the like; repeatable. Matched exactly after stripping whitespace. "
+        "pedsum reads 0 as an ID, so a file that writes a missing parent as 0 (PLINK .fam, most R "
+        "packages) needs --missing-parent-token 0. A token that is also the ID of a row is an "
+        "error. validate writes such parents blank, so its output needs no flag.",
+    )
     p.add_argument("--birth-year-col", default=None, metavar="NAME", help=birth_year_help)
     p.add_argument(
         "--birth-year-min",

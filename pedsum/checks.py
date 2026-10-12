@@ -139,6 +139,7 @@ def _id_dtype(ctx: ValidationContext) -> CheckResult:
             df[config.mother_col],
             df[config.father_col],
             labels=ctx.fixed_labels,
+            missing_parent_tokens=config.missing_parent_tokens,
         )
     except PedigreeError as e:
         return _failed(str(e))
@@ -221,7 +222,13 @@ def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
     values = ctx.id_labels.int_values(parents)
     return _verdict(
         [
-            Finding(row=int(i), detail=f"row {int(i)}: {role} value {int(values[i])} < -1; missing parent must be -1")
+            Finding(
+                row=int(i),
+                detail=(
+                    f"row {int(i)}: {role} value {int(values[i])} < -1; a missing parent is -1, blank or NA "
+                    f"(or pass --missing-parent-token {int(values[i])})"
+                ),
+            )
             for i in np.where(values < -1)[0]
         ]
     )
@@ -243,9 +250,40 @@ def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
         name = ctx.label(mid)
         detail = f"id={name} referenced as {role} {n_refs} time(s) but no row has this id"
         if name == "0":
-            detail += " (if file uses 0/NA/blank as missing token, convert to -1)"
+            detail += " (if the file writes a missing parent as 0, pass --missing-parent-token 0)"
         findings.append(Finding(id=int(mid), detail=detail, n_refs=n_refs))
     return _verdict(findings)
+
+
+def _zero_parent_present(ctx: ValidationContext) -> CheckResult:
+    """One Finding when a parent ID written ``0`` has no row of its own, in either role.
+
+    PLINK and most R cleaners write a missing parent as ``0``; pedsum reads it
+    as an ID unless ``--missing-parent-token 0`` says otherwise (ADR 0006).
+    """
+    _, mothers, fathers = ctx.require_id_parents()
+    assert ctx.id_labels is not None
+    zero = ctx.id_labels.code_of("0")
+    if zero is None or ctx.id_index.get_indexer([zero])[0] != -1:
+        return _verdict([])
+    roles = [
+        f"{role} in {rows_phrase(rows)}"
+        for role, parents in (("mother", mothers), ("father", fathers))
+        if len(rows := np.flatnonzero(parents == zero))
+    ]
+    if not roles:
+        return _verdict([])
+    return _verdict(
+        [
+            Finding(
+                id=zero,
+                detail=(
+                    f"id=0 referenced as {' and as '.join(roles)} but no row has this id; "
+                    "if the file writes a missing parent as 0, pass --missing-parent-token 0"
+                ),
+            )
+        ]
+    )
 
 
 def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
@@ -607,6 +645,16 @@ CHECKS: tuple[Check, ...] = (
         FailPolicy.BLOCK,
     ),
     Check(
+        "zero_parent_present",
+        _IDS,
+        _zero_parent_present,
+        "parent ID 0 has a row",
+        FailPolicy.BLOCK,
+        block_message=(
+            "parent ID 0 has no row; if the file writes a missing parent as 0, pass --missing-parent-token 0"
+        ),
+    ),
+    Check(
         "parent_refs_present_mother",
         _IDS,
         partial(_parent_refs_present, role="mother"),
@@ -749,6 +797,7 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "parent_token_range_mother",
             "parent_token_range_father",
+            "zero_parent_present",
             "parent_refs_present_mother",
             "parent_refs_present_father",
             "parents_distinct",

@@ -151,6 +151,9 @@ class ValidationConfig:
     birth_year_col: str | None = None
     birth_year_min: int = BIRTH_YEAR_DEFAULT_MIN
     birth_year_max: int | None = None
+    # --missing-parent-token: more tokens that mean a missing parent in the
+    # mother and father columns (ADR 0006).
+    missing_parent_tokens: tuple[str, ...] = ()
     allow_missing_sex: bool = False
     override_asserted_sex: bool = True
     # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
@@ -169,6 +172,7 @@ class ValidationConfig:
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
+            missing_parent_tokens=tuple(args.missing_parent_token),
             allow_missing_sex=args.allow_missing_sex,
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),

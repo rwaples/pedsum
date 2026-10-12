@@ -149,21 +149,30 @@ def render_fixed_pedigree(
     sex_col: str,
     mother_col: str,
     father_col: str,
+    missing_parent_tokens: tuple[str, ...] = (),
 ) -> pl.DataFrame:
     """The string frame ``validate`` writes: the input's columns and tokens, with the fixes.
 
     ``raw`` is the input as read (all String columns). Each input row keeps
     its own tokens except the sex column, written in PLINK's coding
-    (1=male, 2=female, 0=unknown) whatever tokens the input used, and a
-    parent slot that now holds a phantom. A ``sex_source`` column records
-    which rows pedsum changed. Founder rows come first, with empty cells
-    outside the ID, sex and parent columns.
+    (1=male, 2=female, 0=unknown) whatever tokens the input used, a parent
+    written as one of ``missing_parent_tokens``, written blank so the file
+    reads the same without ``--missing-parent-token``, and a parent slot that
+    now holds a phantom. A ``sex_source`` column records which rows pedsum
+    changed. Founder rows come first, with empty cells outside the ID, sex
+    and parent columns.
     """
     out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
         pl.Series(sex_col, plink_sex(fp.sex)).cast(pl.String),
         # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
         pl.Series("sex_source", fp.sex_source, dtype=pl.String),
     )
+    if missing_parent_tokens:
+        tokens = list(missing_parent_tokens)
+        out = out.with_columns(
+            pl.when(pl.col(c).str.strip_chars().is_in(tokens)).then(None).otherwise(pl.col(c)).alias(c)
+            for c in (mother_col, father_col)
+        )
     if fp.filled_mother.any() or fp.filled_father.any():
         out = out.with_columns(
             pl.when(pl.Series(fp.filled_mother))

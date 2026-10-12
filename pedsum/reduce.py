@@ -263,5 +263,6 @@ def _write_fixed(
         sex_col=ctx.config.sex_col,
         mother_col=ctx.config.mother_col,
         father_col=ctx.config.father_col,
+        missing_parent_tokens=ctx.config.missing_parent_tokens,
     )
     return fp, write(frame, fp)

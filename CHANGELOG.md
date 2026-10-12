@@ -152,8 +152,28 @@ whole command.
   parent column, not one scan per missing id: on 1M rows with 100k
   missing fathers, the check took 0.15 s instead of 75 s.
 
+- **`--missing-parent-token TOKEN` on every command**
+  ([#25](https://github.com/rwaples/pedsum/issues/25),
+  [ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)):
+  more tokens that mean a missing parent in the mother and father
+  columns, matched exactly after stripping whitespace and repeatable.
+  `--missing-parent-token 0` reads a PLINK `.fam` or an R package's
+  pedigree without recoding. A token that is also the ID of a row is an
+  error. `validate` writes the parents it read as missing through a
+  token as blank, so `validate.tsv.gz` needs no flag downstream.
+
 ### Changed
 
+- **A parent written `0` that has no row BLOCKs**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). A new Check,
+  `zero_parent_present` (Fail Policy `block`), names
+  `--missing-parent-token 0`. `0` stays an ID, since in some pedigrees
+  ID 0 is an individual. Before, founders written `0 0` blocked with
+  "sex conflict on missing parent(s)" and "rows with mother == father",
+  `--drop-offending` then removed every one of them, and a `0` in one
+  role became an added founder named `0`. The `parent_refs_present_*`
+  hint for ID 0 and the `parent_token_range_*` detail name the flag
+  instead of "convert to -1".
 - **`validate` BLOCKs on every column- or parse-level failure**
   ([#21](https://github.com/rwaples/pedsum/issues/21)): a missing
   required column, a row without an id, an unrecognized sex token, a
