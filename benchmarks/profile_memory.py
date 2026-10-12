@@ -12,9 +12,10 @@ taken, via ``pedsum.progress.current_profile_phase()``; those per-phase peaks ar
 approximate and diagnostic only.
 
 The report gives the median and range of ``cmd_s``, ``wall_s`` and peak RSS
-over the measured repeats. ``--compare BASELINE.json`` exits 1 when the median
-``cmd_s`` or the median peak RSS exceeds 1.05x the baseline's; startup is a
-fixed cost that would dilute a slowdown in the command itself. Compare medians of at
+over the measured repeats. ``--compare BASELINE.json`` exits 1 when the exit codes
+differ from the baseline's, or when the median ``cmd_s`` or the median peak
+RSS exceeds 1.05x the baseline's; startup is a fixed cost that would dilute a
+slowdown in the command itself. Compare medians of at
 least 5 repeats; a single run is not evidence.
 
 Usage::
@@ -208,8 +209,16 @@ def _aggregate(runs: list[dict]) -> dict:
 
 
 def compare(agg: dict, baseline: dict) -> list[str]:
-    """Regressions of ``agg`` against ``baseline``: a median above ``GATE_RATIO`` x the baseline's."""
+    """Regressions of ``agg`` against ``baseline``: other exit codes, or a median above ``GATE_RATIO`` x the baseline's.
+
+    A run that exits differently did different work, so its times say nothing
+    about the change.
+    """
     failures = []
+    if agg["exit_codes"] != baseline["exit_codes"]:
+        line = f"exit_codes: {agg['exit_codes']} vs baseline {baseline['exit_codes']}"
+        print(line)
+        failures.append(line)
     for key, unit in (("cmd_s_median", "s"), ("maxrss_mib_median", " MiB")):
         ratio = agg[key] / baseline[key]
         line = f"{key}: {agg[key]:.2f}{unit} vs baseline {baseline[key]:.2f}{unit} ({ratio:.3f}x)"
