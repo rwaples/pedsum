@@ -203,14 +203,13 @@ because the two programs cleaned the pedigree differently, not because the
 statistic differs. The table compares `pedsum validate` with the cleaners of
 eight R packages: optiSel `prePed`, visPedigree `tidyped`, nadiv `prepPed`,
 kinship2 `pedigree`/`fixParents`, purgeR `ped_rename`/`ped_sort`, pedtools
-`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. The R
-cells come from running the programs on the same fixtures; the fixtures,
+`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. Every
+cell comes from running the programs on the same fixtures; the fixtures,
 outputs and versions are in
 [pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners),
-which ran pedsum 542ef12. The pedsum cells describe this version, which
-changed several rows after that run
-([ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md),
-[#25](https://github.com/rwaples/pedsum/issues/25)).
+run against pedsum ebcf00c. A first run against 542ef12 led to the changes in
+[ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)
+([#25](https://github.com/rwaples/pedsum/issues/25)).
 
 | Problem | pedsum | The R cleaners |
 |---|---|---|
