@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
 from pedsum.pedigree_ops import cycle_components, rows_of_parents
@@ -59,8 +59,8 @@ class CheckStatus(StrEnum):
 class CheckResult:
     """One Check's verdict and its Findings; a FAIL has at least one.
 
-    ``note`` says why a Check was SKIPped, or annotates a PASS
-    (``3 overridden from role``). ``name`` is stamped by the runner.
+    ``note`` says why a Check was SKIPped, or annotates a PASS. ``name`` is
+    stamped by the runner.
     """
 
     status: CheckStatus
@@ -501,13 +501,44 @@ def _sex_role_findings(
     ]
 
 
+def _sex_role_override(ctx: ValidationContext) -> CheckResult:
+    """One Finding per recorded sex overridden from the only parent role the individual has.
+
+    The override is a repair (ADR 0001 0.9, ADR 0006): an asserted M used only
+    as a mother becomes F, an asserted F used only as a father becomes M.
+    ``--no-override-asserted-sex`` turns it off, and ``sex_role_consistency``
+    then flags the contradiction instead.
+    """
+    if not ctx.config.override_asserted_sex:
+        return CheckResult(CheckStatus.SKIP, note="off (--no-override-asserted-sex)")
+    imp = ctx.imputation
+    ids, mothers, fathers = ctx.require_id_parents()
+    assert ctx.sex is not None
+    findings = []
+    for i in np.flatnonzero(imp.overridden_mask):
+        was_male = ctx.sex[i] == SEX_MALE
+        role, parents = ("mother", mothers) if was_male else ("father", fathers)
+        findings.append(
+            Finding(
+                id=int(ids[i]),
+                row=ctx.row(i),
+                detail=(
+                    f"id={ctx.label(ids[i])} recorded {'M' if was_male else 'F'} but used only as {role} in "
+                    f"{rows_phrase(ctx.rows(np.flatnonzero(parents == ids[i])))}; "
+                    f"sex set to {'F' if was_male else 'M'}"
+                ),
+            )
+        )
+    return _verdict(findings)
+
+
 def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
     """IDs used as mother with resolved sex != female, or as father with sex != male.
 
     Always runs: the override clears asserted-vs-role contradictions only for
     rows used in a SINGLE role; a row asserted M and used as BOTH mother and
     father stays unoverridable and must still FAIL. Rows whose sex started
-    unknown are left to ``sex_role_ambiguity`` and ``unknown_sex``.
+    unknown are left to ``sex_role_ambiguity``.
     """
     imp = ctx.imputation
     _, mothers, fathers = ctx.require_id_parents()
@@ -522,33 +553,7 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
         findings += _sex_role_findings(
             role, parents, refs.ids[keep], refs.rows[keep], imp.imputed_sex, expected_sex, ctx.label, ctx.rows
         )
-    if findings:
-        return _verdict(findings)
-    # Clean: annotate the PASS ("PASS (N overridden from role)") when the override fired.
-    n = int(imp.overridden_mask.sum()) if ctx.config.override_asserted_sex else 0
-    return CheckResult(CheckStatus.PASS, note=f"{n} overridden from role" if n > 0 else None)
-
-
-def _unknown_sex(ctx: ValidationContext) -> CheckResult:
-    """One Finding per row still unsexed after imputation, except those ``sex_role_ambiguity`` reports."""
-    imp = ctx.imputation
-    orphan_mask = (imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask
-    if ctx.config.allow_missing_sex:
-        return CheckResult(
-            CheckStatus.SKIP, note=f"bypassed via --allow-missing-sex ({int(orphan_mask.sum())} tolerated)"
-        )
-    ids = ctx.ids
-    assert ids is not None
-    return _verdict(
-        [
-            Finding(
-                id=int(ids[i]),
-                row=ctx.row(i),
-                detail=f"id={ctx.label(ids[i])} has unknown sex and is not referenced as a parent; cannot be imputed",
-            )
-            for i in np.where(orphan_mask)[0]
-        ]
-    )
+    return _verdict(findings)
 
 
 def _acyclic(ctx: ValidationContext) -> CheckResult:
@@ -662,7 +667,8 @@ class FailPolicy(Enum):
     # --drop-offending removes the flagged ids.
     KEEP_OR_DROP = "keep_or_drop"
     # Repaired in the Fixed Pedigree (a founder synthesized, a duplicate row
-    # collapsed, a cycle link cleared); never BLOCKs and is never dropped.
+    # collapsed, a cycle link cleared, a sex overridden from role); never
+    # BLOCKs and is never dropped.
     AUTOFIX = "autofix"
 
 
@@ -824,19 +830,18 @@ CHECKS: tuple[Check, ...] = (
         block_message="rows with mother == father (cannot disambiguate)",
     ),
     Check(
+        "sex_role_override",
+        (*_IDS, "sex_tokens"),
+        _sex_role_override,
+        "no recorded sex overridden by role",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
         "sex_role_consistency",
         (*_IDS, "sex_tokens"),
         _sex_role_consistency,
         "sex consistent with parent role",
         FailPolicy.KEEP_OR_DROP,
-    ),
-    Check(
-        "unknown_sex",
-        (*_IDS, "sex_tokens"),
-        _unknown_sex,
-        "all individuals have resolved sex",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
     ),
     Check(
         "acyclic",
@@ -924,8 +929,8 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "cycle_breaks",
             "self_loops",
+            "sex_role_override",
             "sex_role_consistency",
-            "unknown_sex",
             "acyclic",
         ),
     ),

@@ -9,10 +9,12 @@ from pedigree_graph import ResourceError
 
 from pedsum.base import (
     F_WALK_WARN_VISITS,
+    SexSource,
     logger,
 )
 from pedsum.cli.common import commit_thread_budget, load_or_fail
 from pedsum.pairs import augment_pair_counts, build_pedigree_graph
+from pedsum.parse import read_aligned_columns
 from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
 from pedsum.redaction import SAFE_MIN_CELL
@@ -44,6 +46,38 @@ from pedsum.validate import ValidationConfig
 if TYPE_CHECKING:
     import argparse
 
+    from pedsum.ids import IdLabels
+
+
+def _with_input_sex_source(
+    df: pl.DataFrame, args: argparse.Namespace, labels: IdLabels
+) -> tuple[pl.DataFrame, dict[str, int] | None]:
+    """``df`` with the input's own ``sex_source`` column, and its counts; ``(df, None)`` without one.
+
+    A Fixed Pedigree (``validate.tsv.gz``) records where each sex came from;
+    loading it again finds every sex already resolved, so the provenance comes
+    from the column (ADR 0006). A row the column leaves blank (a founder
+    ``validate`` added) keeps the value loading derived. A column with values
+    pedsum does not write is ignored with a WARNING.
+    """
+    try:
+        raw = read_aligned_columns(
+            args.in_path, args.sep, args.id_col, df["id"].to_numpy(), labels, columns=["sex_source"]
+        )
+    except pl.exceptions.ColumnNotFoundError:
+        return df, None
+    known = [s.value for s in SexSource]
+    tokens = raw["sex_source"].str.strip_chars()
+    unknown = tokens.filter(tokens.is_not_null() & ~tokens.is_in(known)).unique().sort()
+    if len(unknown):
+        logger.warning(
+            "input column sex_source has values pedsum does not write (%s); ignored", unknown.head(3).to_list()
+        )
+        return df, None
+    sex_source = pl.select(pl.coalesce(tokens, df["sex_source"])).to_series()
+    logger.info("sex_source: read from the input's sex_source column")
+    return df.with_columns(sex_source.alias("sex_source")), {v: int((sex_source == v).sum()) for v in known}
+
 
 def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs."""
@@ -54,6 +88,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if isinstance(loaded, int):
         return loaded
     df, labels = loaded
+    df, sex_source_counts = _with_input_sex_source(df, args, labels)
 
     if args.sex_concordance_seed is not None and args.sex_concordance_permutations == 0:
         logger.warning(
@@ -87,6 +122,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     with timed("size+structure"):
         size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
+    size["sex_source"] = sex_source_counts
 
     with timed("mating pairs grouped"):
         mating = group_mating_pairs(df, mother_rows, father_rows)

@@ -78,7 +78,8 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     rows and sets references to them to -1), and rebuilds the context from the
     reduced frame. The full `df_current` is carried so extra columns survive and
     the *original* declared sex tokens persist — a parent that loses its only
-    role correctly becomes `unknown_sex` the next round. See docs/adr/0003.
+    role and had no recorded sex is unsexed the next round, and is kept
+    (ADR 0006). See docs/adr/0003.
     """
     mother_col = ctx0.config.mother_col
     father_col = ctx0.config.father_col

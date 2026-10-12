@@ -174,7 +174,7 @@ def build_pedigree_data(
     return {
         **_meta(path, cmd, size["n_total"]),
         "max_degree_enumerated": max_degree,
-        "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
+        "size_structure": _size_structure(size),
         "sibship_size": sibships,
         "mating_pairs": mating_pairs,
         # Opt-in (`--sex-concordance`); None keeps the section out of every
@@ -192,6 +192,16 @@ def build_pedigree_data(
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
         "inbreeding": inbreeding,
     }
+
+
+def _size_structure(size: dict) -> dict:
+    """The ``size_structure`` section; ``sex_source`` follows ``n_female`` when the input carried the column."""
+    out = {}
+    for k in _SIZE_STRUCTURE_KEYS:
+        out[k] = size[k]
+        if k == "n_female" and size.get("sex_source") is not None:
+            out["sex_source"] = size["sex_source"]
+    return out
 
 
 def _serialise_pair_entry(value: PairEntry) -> object:

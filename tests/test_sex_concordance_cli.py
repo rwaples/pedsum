@@ -252,7 +252,7 @@ def test_safe_attempt_drops_male_proportion_extrema(tmp_path):
 
 
 def test_real_imputation_feeds_the_provenance_tally(tmp_path):
-    """The three ``sex_source`` values ``validate`` emits land in the right slots.
+    """The three ``sex_source`` values ``validate`` writes land in the right slots after a round trip.
 
     Guards a cross-module coupling the fabricated-frame tests cannot: they
     supply ``sex_source`` themselves, so they would still pass if ``validate``
@@ -284,13 +284,17 @@ def test_real_imputation_feeds_the_provenance_tally(tmp_path):
             rows.append({"id": next_id, "sex": sex, "mother": mother, "father": father})
             next_id += 1
     ped = write_ped(tmp_path / "mixed_provenance.tsv", rows)
+    # Two overrides are repairs, so summarize reads validate's Fixed Pedigree,
+    # whose sex_source column carries the provenance (ADR 0006).
+    res = _run(["validate", "--in", str(ped), "--out", str(tmp_path / "v")])
+    assert res.returncode == 1, res.stderr
 
     out_dir = tmp_path / "out"
     res = _run(
         [
             "summarize",
             "--in",
-            str(ped),
+            str(tmp_path / "v" / "validate.tsv.gz"),
             "--out",
             str(out_dir),
             "--sex-concordance",

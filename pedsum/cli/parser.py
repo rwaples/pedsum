@@ -140,22 +140,21 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--allow-missing-sex",
         action="store_true",
-        help="tolerate rows whose sex is missing after imputation — either "
-        "because the row is unsexed and not used as a parent (orphan), OR "
-        "because it is used as BOTH mother and father with unknown sex "
-        "(role-ambiguous). Such rows are auto-fixed to sex=-1 in the "
-        "validate-fixed output. Without this flag, either case hard-blocks. "
-        "effective-size refuses such rows (its sex-stratified estimators "
-        "need resolved sex).",
+        help="tolerate an individual with unknown sex used as BOTH mother and father "
+        "(sex_role_ambiguity), which otherwise blocks; validate writes its sex as 0. "
+        "An unsexed individual who is never a parent needs no flag: it is kept with "
+        "sex 0 and a WARNING. effective-size refuses its sex-dependent estimators "
+        "while any row is unsexed.",
     )
     p.add_argument(
         "--no-override-asserted-sex",
         action="store_true",
-        help="disable the 0.9 default of overriding asserted sex when topology "
-        "unambiguously implies the opposite (asserted M used only as mother "
-        "-> F; asserted F used only as father -> M). The existing "
-        "missing->F/M imputation is unaffected. Restores 0.8's hard-block on "
-        "sex/role contradictions via the sex_role_consistency check.",
+        help="keep a recorded sex that contradicts the only parent role an individual has, "
+        "instead of overriding it (asserted M used only as mother -> F; asserted F used only "
+        "as father -> M; each override is a sex_role_override finding). The contradiction is "
+        "then a sex_role_consistency finding: validate writes the pedigree with it and exits 1, "
+        "and --drop-offending removes the individual. Filling a missing sex from role is "
+        "unaffected.",
     )
 
 

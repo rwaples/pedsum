@@ -62,8 +62,11 @@ def test_drop_preserves_extra_columns_and_clears_refs(tmp_path):
     assert df.filter(pl.col("id") == "5")["father"][0] == "-1"
 
 
-def test_drop_spawned_offender_reaches_fixpoint(tmp_path):
-    """Dropping a child orphans its unsexed parent → new unknown_sex in round 2."""
+def test_drop_keeps_a_parent_left_unsexed(tmp_path):
+    """Dropping a child leaves its unsexed parent with no role; the parent stays, with sex 0 (ADR 0006).
+
+    Under ADR 0003 it became an unknown_sex offender and was dropped in round 2.
+    """
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -78,16 +81,14 @@ def test_drop_spawned_offender_reaches_fixpoint(tmp_path):
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 1, r.stderr
     manifest = _read_manifest(out)
-    rounds = dict(zip(manifest["id"], manifest["round"], strict=False))
-    assert rounds[9] == 2  # 9 only droppable once its child 10 is removed
-    assert max(manifest["round"]) == 2
-    assert "2 round(s)" in r.stderr
-    # An INFO line announces the loop start before the per-round detail.
+    assert manifest["id"].to_list() == [8, 10]  # recorded sex, used as both mother and father
+    assert manifest["round"].to_list() == [1, 1]
+    assert "1 round(s)" in r.stderr
     assert "starting reduction loop" in r.stderr
-    # Per-round INFO lines list the changes made each iteration.
     assert "drop-offending round 1:" in r.stderr
-    assert "drop-offending round 2:" in r.stderr
-    assert "unknown_sex" in r.stderr
+    fixed = load_validate_tsv_gz(out)
+    assert fixed.filter(pl.col("id") == "9")["sex"].item() == "0"
+    assert "kept 1 individual(s) with unknown sex who are never parents" in r.stderr
 
 
 def test_drop_acyclic_drops_cycle_members_only(tmp_path):

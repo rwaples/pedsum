@@ -214,13 +214,17 @@ def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
             n_overridden,
             n_unresolved,
         )
-    if allow_missing_sex:
-        n_ambiguous = int(imp.ambiguous_mask.sum())
-        if n_ambiguous > 0:
-            logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
-        n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-        if n_orphan > 0:
-            logger.info("kept %d row(s) with sex=%d (--allow-missing-sex)", n_orphan, SEX_UNKNOWN)
+    n_ambiguous = int(imp.ambiguous_mask.sum())
+    if allow_missing_sex and n_ambiguous > 0:
+        logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
+    # Never a parent, so no role to sex them from (ADR 0006): kept with sex 0.
+    n_unsexed = n_unresolved - n_ambiguous
+    if n_unsexed > 0:
+        logger.warning(
+            "kept %d individual(s) with unknown sex who are never parents (sex 0); "
+            "effective-size refuses its sex-dependent estimators while any row is unsexed",
+            n_unsexed,
+        )
 
 
 def _build_added_founders(

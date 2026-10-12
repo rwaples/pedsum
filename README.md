@@ -118,6 +118,11 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
   `1980.0` the same year; every other column is compared as text.
 - Sex imputed from parent role (F if used as a mother, M if used as
   a father) for any row whose original sex was missing.
+- A recorded sex that contradicts the only parent role an individual has
+  overridden from that role (`sex_role_override`; turn it off with
+  `--no-override-asserted-sex`).
+- An unsexed individual who is never a parent kept with sex `0`, with a
+  WARNING giving the count.
 - The sex column written in PLINK's coding, `1` = male, `2` = female,
   `0` = unknown, whatever tokens the input used. `sex_source` says
   where each row's sex came from: `input`, `imputed_from_missing`,
@@ -146,9 +151,16 @@ data first. Two kinds of failure hard-block:
   `--missing-parent-token` under "Input format");
 - cycles (including a self-loop, an individual listed as its own
   parent, which is a one-person cycle), an ID on rows that differ, a mother equal to
-  the father, sex conflicts on missing parents, unresolved sex without
-  `--allow-missing-sex`, and sex-role ambiguity. A cycle blocks even
-  when some parent IDs are missing from the file.
+  the father, sex conflicts on missing parents, and an unsexed
+  individual used as both mother and father (sex-role ambiguity,
+  tolerated by `--allow-missing-sex`). A cycle blocks even when some
+  parent IDs are missing from the file.
+
+Each auto-fix of a recorded fact (a synthesized founder, a collapsed
+duplicate row, a cleared cycle link, an overridden sex) is a finding in
+`validate.log`, so `validate` exits 1; filling a missing sex from role is
+recorded only in `sex_source`. `summarize` and the other commands stop on
+any finding, so run them on `validate.tsv.gz`, which has none.
 
 Sex-role contradictions and birth years out of range or out of order are
 written to `DIR/validate.tsv.gz` as they are, with exit 1;
@@ -204,9 +216,9 @@ records changes planned for several rows
 | The same row twice | Keeps the first copy (exit 1). | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
 | Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. `--break-cycles` first clears a self-link and, in a cycle, each link to a parent born after the child. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
-| Recorded sex contradicts the only parent role | Overrides it from the role (`sex_source = imputed_from_role`). | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
+| Recorded sex contradicts the only parent role | Overrides it from the role: a `sex_role_override` finding (exit 1) and `sex_source = imputed_from_role`. | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
 | No sex, used as a parent | Filled from the role. | optiSel, visPedigree and kinship2 `fixParents` fill it; kinship2 `pedigree()` refuses; the rest leave it unknown. |
-| No sex, never a parent | Blocks unless `--allow-missing-sex`. | All accept it. |
+| No sex, never a parent | Kept with sex `0` and a WARNING. | All accept it. |
 | One parent known | Kept as a half-founder; `--fill-half-founders` adds a founder in the empty slot. | kinship2 `fixParents` and nprcgenekeepr add a parent by default; kinship2 `pedigree()` and pedtools refuse; the rest keep it. |
 | Mother = father (selfing) | Blocks ([#24](https://github.com/rwaples/pedsum/issues/24)). | nadiv allows it, visPedigree with `selfing = TRUE`, pedtools for sex 0; the rest refuse or do not check. |
 | Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
@@ -283,22 +295,29 @@ Flags:
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
   **Not a safe-harbor guarantee** — review before sharing.
-- `--allow-missing-sex` — tolerate rows whose sex is missing after
-  imputation, either because the row is unsexed and not used as a
-  parent (orphan), or because it is used as BOTH mother and father
-  with unknown sex (role-ambiguous). Such rows are auto-fixed to
-  `sex=0` (unknown) in the validate-fixed output. Without this flag, either
-  case hard-blocks. `summarize` runs normally on such rows, F included.
-  `effective-size` refuses them only when `ne_sex_ratio`,
+- `--allow-missing-sex` — tolerate an individual with unknown sex used
+  as BOTH mother and father (role-ambiguous), which otherwise
+  hard-blocks; it is written with `sex=0` (unknown). An unsexed
+  individual who is never a parent needs no flag: it is kept with
+  `sex=0` and a WARNING. `summarize` runs normally on unsexed rows, F
+  included. `effective-size` refuses them only when `ne_sex_ratio`,
   `ne_variance_family_size` or `ne_hill_overlapping` is selected, since
   those need every sex resolved; the other five estimators run.
 - `--no-override-asserted-sex` — disable the default behavior of
   overriding asserted sex when topology unambiguously implies the
   opposite (asserted M used only as mother → F; asserted F used only
-  as father → M). The missing→F/M imputation is unaffected. A
-  contradiction then fails `sex_role_consistency`: `validate` reports it
-  and writes the asserted sex as it is (exit 1), `--drop-offending`
-  removes the individual, and `summarize` refuses to run.
+  as father → M), each a `sex_role_override` finding. The missing→F/M
+  imputation is unaffected. A contradiction then fails
+  `sex_role_consistency`: `validate` reports it and writes the asserted
+  sex as it is (exit 1), `--drop-offending` removes the individual, and
+  `summarize` refuses to run.
+
+When its input has a `sex_source` column, as `validate.tsv.gz` does,
+`summarize` takes each row's sex provenance from it, for
+`annotated.tsv.gz` and `--sex-concordance`, and counts its values under
+`size_structure.sex_source` in `summary.yaml`. Loading a Fixed Pedigree
+again finds every sex already resolved, so without the column a sex
+`validate` filled or overrode would pass for a recorded one.
 
 ### Offspring Sex Concordance (`--sex-concordance`)
 
@@ -1079,10 +1098,11 @@ in plant and other monoecious pedigrees) is refused
 ([#24](https://github.com/rwaples/pedsum/issues/24)).
 
 Missing-sex tokens, and `0`, decode to unknown. pedsum then imputes
-from parent role: F if used as mother, M if used as father. Two
-cases hard-block unless `--allow-missing-sex` is set — an individual
-used as BOTH mother and father (pedsum cannot pick a side), and an
-unsexed row not used as a parent at all.
+from parent role: F if used as mother, M if used as father. An
+individual used as BOTH mother and father hard-blocks unless
+`--allow-missing-sex` is set (pedsum cannot pick a side). An unsexed
+individual who is never a parent is kept with sex `0`: it changes no
+relationship and no F.
 
 ## Preparing your data
 

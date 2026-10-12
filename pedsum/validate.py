@@ -72,16 +72,14 @@ def _impute_sex_from_roles(
          - id used as both        → leave -1, mark ambiguous (caller decides
                                     whether to raise / tolerate via
                                     ``--allow-missing-sex``)
-         - id used as neither     → leave -1, orphan (caller decides whether
-                                    to raise / tolerate via
-                                    ``--allow-missing-sex``)
+         - id used as neither     → leave -1; kept unsexed (ADR 0006)
 
       2. Asserted → role (0.9 default; opt out via
          ``override_asserted_sex=False``):
          - asserted M used only as mother → override to F
          - asserted F used only as father → override to M
-         - asserted used as both          → leave alone; ``_check_sex_role_
-                                            consistency`` still hard-blocks
+         - asserted used as both          → leave alone; ``sex_role_consistency``
+                                            flags it
          - asserted used as neither       → leave alone
 
     ``mother_ids`` / ``father_ids`` are the distinct ids referenced as mother

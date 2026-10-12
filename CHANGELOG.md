@@ -197,6 +197,36 @@ whole command.
   individual vanished and its offspring lost a parent. `summarize` refuses
   a raw input with a duplicate row, as it does any FAIL; `validate.tsv.gz`
   has none. Findings after a removed copy still name the input's rows.
+- **An overridden sex is a Finding**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). pedsum still
+  overrides a recorded sex that contradicts the only parent role an
+  individual has, but each override is now a Finding of a new `autofix`
+  Check, `sex_role_override`, so it is in `validate.log` and plain
+  `validate` exits 1 (it exited 0, with only `PASS (1 overridden from
+  role)` in the summary). Under `--drop-offending` the individual stays
+  and a run with nothing else to fix exits 0. `summarize` refuses a raw
+  input with an override, as it does any FAIL; run it on
+  `validate.tsv.gz`.
+- **An unsexed individual who is never a parent is kept**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)) with sex `0` and a
+  WARNING giving the count, instead of blocking unless
+  `--allow-missing-sex`. The `unknown_sex` Check is gone; it flagged only
+  such individuals. `--allow-missing-sex` now covers only an unsexed
+  individual used as both mother and father. `--drop-offending` no longer
+  removes a parent left unsexed when its only offspring is dropped.
+  `effective-size` still refuses its sex-dependent estimators while any
+  row is unsexed. 20 of the 21 published pedigrees in pedsum-validate that
+  needed `--allow-missing-sex` needed it only for these individuals.
+- **`summarize` reads `sex_source` from its input** when the column is
+  there, as in `validate.tsv.gz`, and counts it under
+  `size_structure.sex_source` in `summary.yaml`. A Fixed Pedigree's sexes
+  all load as resolved, so before, `annotated.tsv.gz` and the
+  `--sex-concordance` headline took every sex `validate` filled or
+  overrode for a recorded one. Rows the column leaves blank (founders
+  `validate` added) keep the provenance loading derives.
+- **`--allow-missing-sex` and `--no-override-asserted-sex` help.** The
+  latter said it restored a hard-block; `validate` writes the pedigree and
+  exits 1, and `--drop-offending` removes the individual.
 - **`validate` BLOCKs on every column- or parse-level failure**
   ([#21](https://github.com/rwaples/pedsum/issues/21)): a missing
   required column, a row without an id, an unrecognized sex token, a

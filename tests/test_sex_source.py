@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from conftest import load_annotated_tsv_gz, load_validate_tsv_gz, read_tsv_gz, run_pedsum
+from conftest import load_annotated_tsv_gz, load_summary_yaml, load_validate_tsv_gz, read_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -22,7 +22,7 @@ def _all_sex_sources_pedigree(path):
     id=5 unsexed used only as mother of id=3 -> imputed_from_missing (F).
     id=6 asserted M used only as mother of id=7 -> imputed_from_role (F).
     id=7 input F (used as child).
-    id=8 unsexed orphan -> unresolved (requires --allow-missing-sex).
+    id=8 unsexed, never a parent -> unresolved (kept with sex 0).
     """
     return _write_ped(
         path,
@@ -39,21 +39,20 @@ def _all_sex_sources_pedigree(path):
 
 
 def test_annotated_tsv_has_sex_source_column(tmp_path):
-    """Summarize emits a per-row sex_source column in annotated.tsv.gz."""
+    """Summarizing validate.tsv.gz keeps its sex_source in annotated.tsv.gz and counts it in summary.yaml.
+
+    Loading the Fixed Pedigree again finds every sex resolved, so the
+    provenance comes from the input's column (ADR 0006).
+    """
     ped = _all_sex_sources_pedigree(tmp_path / "ped.tsv")
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "v")])
+    assert r.returncode == 1, r.stderr  # the override is a repair
     out_dir = tmp_path / "out"
-    r = run_pedsum(
-        [
-            "summarize",
-            "--in",
-            str(ped),
-            "--out",
-            str(out_dir),
-            "--allow-missing-sex",
-            "--no-inbreeding",
-        ]
-    )
+    fixed = tmp_path / "v" / "validate.tsv.gz"
+    r = run_pedsum(["summarize", "--in", str(fixed), "--out", str(out_dir), "--no-inbreeding"])
     assert r.returncode == 0, r.stderr
+    size = load_summary_yaml(out_dir)["pedigree"]["structure"]["size_structure"]
+    assert size["sex_source"] == {"input": 4, "imputed_from_missing": 1, "imputed_from_role": 1, "unresolved": 1}
     ann = load_annotated_tsv_gz(out_dir)
     assert "sex_source" in ann.columns
     by_id = dict(zip(ann["id"].to_list(), ann["sex_source"].to_list(), strict=True))
@@ -74,10 +73,9 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
             str(ped),
             "--out",
             str(out_dir),
-            "--allow-missing-sex",
         ]
     )
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 1, r.stderr  # the override is a sex_role_override Finding
     fixed = load_validate_tsv_gz(out_dir)
     assert "sex_source" in fixed.columns
     by_id = dict(zip(fixed["id"].cast(pl.Int64).to_list(), fixed["sex_source"].to_list(), strict=True))
@@ -91,7 +89,7 @@ def test_validate_tsv_has_sex_source_column(tmp_path):
 
 
 def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
-    """--no-override-asserted-sex restores 0.8's hard-block on sex/role contradictions."""
+    """Under --no-override-asserted-sex a contradiction is a sex_role_consistency FAIL, so summarize refuses."""
     ped = _write_ped(
         tmp_path / "ped.tsv",
         [
@@ -116,8 +114,8 @@ def test_no_override_asserted_sex_flag_blocks_contradictions_in_cli(tmp_path):
     assert "sex_role_consistency" in r.stderr
 
 
-def test_override_count_in_grouped_summary(tmp_path):
-    """Validate's grouped stderr summary shows PASS (N overridden from role)."""
+def test_override_is_a_finding(tmp_path):
+    """Each override is a sex_role_override Finding: validate.log has it and validate exits 1 (ADR 0006)."""
     ped = _write_ped(
         tmp_path / "ped.tsv",
         [
@@ -128,13 +126,23 @@ def test_override_count_in_grouped_summary(tmp_path):
     )
     out_dir = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir)])
+    assert r.returncode == 1, r.stderr
+    lines = [line for line in r.stderr.splitlines() if "no recorded sex overridden by role" in line]
+    assert lines[0].endswith("FAIL (1)")
+    consistency = [line for line in r.stderr.splitlines() if "sex consistent with parent role" in line]
+    assert consistency[0].endswith("PASS")
+    log = pl.read_csv(out_dir / "validate.log", separator="\t", infer_schema=False)
+    assert log.rows() == [
+        ("sex_role_override", "2", "1", "id=2 recorded M but used only as mother in row(s) [2]; sex set to F", None)
+    ]
+    # --drop-offending keeps the overridden individual: an autofix-only run exits 0.
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "d"), "--drop-offending"])
     assert r.returncode == 0, r.stderr
-    # One row overrides; expect "PASS (1 overridden from role)" on the
-    # sex_role_consistency line in the grouped summary.
-    lines = [line for line in r.stderr.splitlines() if "sex consistent with parent role" in line]
-    assert lines, "expected sex_role_consistency line in grouped summary"
-    assert "PASS" in lines[0]
-    assert "1 overridden from role" in lines[0]
+    assert load_validate_tsv_gz(tmp_path / "d")["id"].to_list() == ["1", "2", "3"]
+    # --no-override-asserted-sex SKIPs the Check.
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "n"), "--no-override-asserted-sex"])
+    line = next(line for line in r.stderr.splitlines() if "no recorded sex overridden by role" in line)
+    assert line.endswith("SKIP (off (--no-override-asserted-sex))")
 
 
 # Sex tokens per input style: (female, male, unknown).
@@ -194,3 +202,17 @@ def test_drop_offending_self_verifies_plink_input(tmp_path):
     assert "self-verify failed" not in r.stderr
     fixed = read_tsv_gz(out_dir / "validate.tsv.gz")
     assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 2, 2: 1, 4: 2, 5: 1}
+
+
+def test_safe_attempt_nulls_small_sex_source_counts():
+    """--safe-attempt nulls a sex_source count below the minimum cell, like the other size counts."""
+    from pedsum.sections import redact_size_structure
+
+    sizes = {
+        "next_components": [],
+        "depth_counts": [],
+        "largest_component": 100,
+        "sex_source": {"input": 90, "imputed_from_missing": 0, "imputed_from_role": 3, "unresolved": 7},
+    }
+    redact_size_structure(sizes, 5, 100)
+    assert sizes["sex_source"] == {"input": 90, "imputed_from_missing": 0, "imputed_from_role": None, "unresolved": 7}
