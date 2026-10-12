@@ -162,6 +162,10 @@ whole command.
   error. `validate` writes the parents it read as missing through a
   token as blank, so `validate.tsv.gz` needs no flag downstream.
 
+- **`--min-parent-age N`** ([#25](https://github.com/rwaples/pedsum/issues/25))
+  on every command: `birth_year_topology` flags a parent fewer than `N`
+  years older than its child (`child.birth_year - parent.birth_year >=
+  N`). The default 0 keeps the old rule, a child born before a parent.
 - **`validate --break-cycles`**
   ([#25](https://github.com/rwaples/pedsum/issues/25)) clears the parent
   links the data show to be wrong instead of blocking on them: every

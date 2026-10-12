@@ -106,9 +106,11 @@ When `--birth-year-col NAME` is passed, validate also runs three
 optional checks: `birth_year_dtype` (numeric parsing),
 `birth_year_range` (each year within `[--birth-year-min,
 --birth-year-max]`; defaults to `[1800, current_year + 1]`), and
-`birth_year_topology` (`child.birth_year >= parent.birth_year` for
-every edge where both endpoints are known). Findings are written to
-`.validate.log` like any other check.
+`birth_year_topology` (`child.birth_year - parent.birth_year >=
+--min-parent-age`, default 0, for every edge where both endpoints are
+known). `--min-parent-age N` flags a parent fewer than `N` years older
+than its child; ages are whole years, since pedsum has birth years, not
+dates. Findings are written to `validate.log` like any other check.
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
@@ -221,7 +223,7 @@ records changes planned for several rows
 | No sex, never a parent | Kept with sex `0` and a WARNING. | All accept it. |
 | One parent known | Kept as a half-founder; `--fill-half-founders` adds a founder in the empty slot. | kinship2 `fixParents` and nprcgenekeepr add a parent by default; kinship2 `pedigree()` and pedtools refuse; the rest keep it. |
 | Mother = father (selfing) | Blocks ([#24](https://github.com/rwaples/pedsum/issues/24)). | nadiv allows it, visPedigree with `selfing = TRUE`, pedtools for sex 0; the rest refuse or do not check. |
-| Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
+| Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). `--min-parent-age N` also flags a parent fewer than `N` years older. | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
 | Row without an ID | Blocks. | visPedigree and nadiv drop the row with a warning; pedtools, pedigreemm and nprcgenekeepr keep an individual named `NA`; the rest refuse. |
 
 On optiSel's `PedigWithErrors` (10,863 rows), `prePed` keeps every row: it
@@ -1070,7 +1072,7 @@ through a token as blank, so `summarize` and `effective-size` read
 
 | Column | Recognised when | Effect |
 |---|---|---|
-| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year >= parent.birth_year` on every known edge). |
+| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year - parent.birth_year >= --min-parent-age`, default 0, on every known edge). |
 | *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
 
 ### Row order

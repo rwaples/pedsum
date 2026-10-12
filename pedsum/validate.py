@@ -148,6 +148,8 @@ class ValidationConfig:
     birth_year_col: str | None = None
     birth_year_min: int = BIRTH_YEAR_DEFAULT_MIN
     birth_year_max: int | None = None
+    # --min-parent-age: birth_year_topology wants child - parent >= this.
+    min_parent_age: int = 0
     # --missing-parent-token: more tokens that mean a missing parent in the
     # mother and father columns (ADR 0006).
     missing_parent_tokens: tuple[str, ...] = ()
@@ -172,6 +174,7 @@ class ValidationConfig:
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
+            min_parent_age=args.min_parent_age,
             missing_parent_tokens=tuple(args.missing_parent_token),
             allow_missing_sex=args.allow_missing_sex,
             override_asserted_sex=not args.no_override_asserted_sex,

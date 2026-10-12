@@ -612,10 +612,12 @@ def _birth_year_range(ctx: ValidationContext) -> CheckResult:
 
 
 def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
-    """One Finding per parent-child edge with ``child.birth_year < parent.birth_year``.
+    """One Finding per parent-child edge with ``child.birth_year - parent.birth_year < --min-parent-age``.
 
-    Edges where either endpoint's birth year is unknown (``-1``) are skipped.
+    The default age 0 flags a child born before a parent. Edges where either
+    endpoint's birth year is unknown (``-1``) are skipped.
     """
+    min_age = ctx.config.min_parent_age
     ids, mothers, fathers = ctx.require_id_parents()
     birth_year = ctx.birth_year
     assert birth_year is not None
@@ -628,21 +630,24 @@ def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
         child_rows = np.where(edges)[0]
         child_by = birth_year[child_rows]
         parent_by = birth_year[parent_rows[child_rows]]
-        bad = (child_by != -1) & (parent_by != -1) & (child_by < parent_by)
+        bad = (child_by != -1) & (parent_by != -1) & (child_by - parent_by < min_age)
         for i in np.where(bad)[0]:
             row_idx = int(child_rows[i])
-            findings.append(
-                Finding(
-                    id=int(ids[row_idx]),
-                    row=ctx.row(row_idx),
-                    detail=(
-                        f"id={ctx.label(ids[row_idx])} birth_year={int(child_by[i])} < "
-                        f"{role} (id={ctx.label(parents[row_idx])}) "
-                        f"birth_year={int(parent_by[i])}"
-                    ),
-                )
+            child, parent = int(child_by[i]), int(parent_by[i])
+            detail = (
+                f"id={ctx.label(ids[row_idx])} birth_year={child} < "
+                f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}"
             )
-    return _verdict(findings)
+            if child >= parent:
+                detail = (
+                    f"id={ctx.label(ids[row_idx])} birth_year={child} is {child - parent} year(s) after "
+                    f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}; "
+                    f"--min-parent-age is {min_age}"
+                )
+            findings.append(Finding(id=int(ids[row_idx]), row=ctx.row(row_idx), detail=detail))
+    if findings or not min_age:
+        return _verdict(findings)
+    return CheckResult(CheckStatus.PASS, note=f"--min-parent-age {min_age}")
 
 
 # ---------------------------------------------------------------------------

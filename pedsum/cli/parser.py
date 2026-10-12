@@ -231,6 +231,15 @@ def _add_input_args(
         help="inclusive upper bound for birth_year sanity check "
         "(default: current calendar year + 1). No-op without --birth-year-col.",
     )
+    p.add_argument(
+        "--min-parent-age",
+        type=_nonnegative_int,
+        default=0,
+        metavar="YEARS",
+        help="flag a parent fewer than YEARS years older than its child, comparing birth years "
+        "(birth_year_topology: child.birth_year - parent.birth_year >= YEARS). The default 0 "
+        "flags only a child born before a parent. No-op without --birth-year-col.",
+    )
 
 
 def _estimator_list(v: str) -> list[str]:
@@ -417,7 +426,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
         "[--birth-year-min, --birth-year-max]), and birth_year_topology "
-        "(child birth_year >= parent birth_year).",
+        "(child birth_year - parent birth_year >= --min-parent-age, default 0).",
     )
     p_val.add_argument(
         "--no-sex-check",
