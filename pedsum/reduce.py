@@ -45,7 +45,7 @@ class ReductionResult:
 def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
     """IDs in a true descent cycle (strongly-connected component, size >= 2).
 
-    `_check_acyclic` flags every node it cannot topologically order — cycle
+    `checks._acyclic` flags every node it cannot topologically order — cycle
     members *and* their descendants. For reduction we drop only true cycle
     members, so descendants survive (as half-founders once the cycle edge is
     cleared) and re-validate the next round. Self-loops are size-1 SCCs here and

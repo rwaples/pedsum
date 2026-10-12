@@ -14,7 +14,8 @@ refactors are gated on before/after medians (`profile_memory.py --compare`);
   Each repeat runs in a child process; peak RSS is `wait4`'s `ru_maxrss`, and
   a sampler in the child attributes approximate per-phase peaks via
   `pedsum.progress.current_profile_phase()`. `--compare BASELINE.json` exits 1
-  when the median wall time or median peak RSS exceeds 1.05x the baseline's.
+  when the median command time (the child's `main()`, without interpreter
+  startup and imports) or the median peak RSS exceeds 1.05x the baseline's.
 - `bench_pytest_workers.sh` — repeatable pytest-xdist worker/thread sweep. It
   compares the serial suite with pinned and unpinned parallel cells and samples
   aggregate RSS across the whole pytest process tree.
@@ -92,9 +93,8 @@ Everything after `--` is a pedsum argv, so any subcommand works.
 `summarize` at `--max-degree 5` takes tens of minutes on 1M rows; gate
 it at `--max-degree 2` unless the change touches pair counting.
 
-Since 0.15.0 `summarize` computes no Ne, so results recorded before then (the
-`effective_size` key in `benchmarks/results/*.json`) are not comparable on
-total peak or runtime.
+Since 0.15.0 `summarize` computes no Ne, so the peaks and runtimes in
+`memory_results.md`, recorded before then, are not comparable to a current run.
 
 ## Repeats / interpretation
 

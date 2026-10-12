@@ -252,10 +252,6 @@ class ValidationContext:
             override_asserted_sex=self.config.override_asserted_sex,
         )
 
-    def get_imputation(self) -> _SexImputation | None:
-        """Return the imputation only if already computed (never triggers it)."""
-        return self.__dict__.get("imputation")
-
     def require_id_parents(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the parsed ``(ids, mothers, fathers)``.
 

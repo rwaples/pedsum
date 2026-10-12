@@ -185,9 +185,8 @@ def write_pedsum_tsv(parquet: Path, out: Path, traits: dict[str, pl.Expr]) -> No
     simACE codes sex 0=female, 1=male (``simace/core/relationships.py:41``);
     pedsum reads M/F, so the export writes those letters (its numeric coding
     is PLINK's, where 0 is unknown). Both use ``-1`` for an unknown parent
-    (pedsum keeps id ``0`` as a real parent because the command never sets
-    ``zero_as_missing``), so the parent columns pass through as they are; the
-    guards below make that a checked fact.
+    (pedsum reads id ``0`` as a real parent), so the parent columns pass
+    through as they are; the guards below make that a checked fact.
     Floats are written at shortest round-trip precision and read back to prove
     pedsum sees the parquet's exact values.
     """

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Wall-time and peak-RSS profiler for any ``pedsum`` subcommand, with a regression gate.
 
-Each repeat runs the command in its own child process. The parent times the
-child and reads its peak RSS from ``wait4``'s ``ru_maxrss``, the exact meter
-(in-process ``ru_maxrss`` only grows, so one process cannot measure several
-runs). Inside the child a background thread samples ``/proc/self/statm`` every
+Each repeat runs the command in its own child process. The child times its
+``main()`` call (``cmd_s``), which leaves out interpreter startup and the import
+of ``pedsum.cli``; the parent times the whole child (``wall_s``) and reads its
+peak RSS from ``wait4``'s ``ru_maxrss``, the exact meter (in-process
+``ru_maxrss`` only grows, so one process cannot measure several runs). Inside
+the child a background thread samples ``/proc/self/statm`` every
 ~20 ms and attributes each sample to the ``timed`` block active when it was
 taken, via ``pedsum.progress.current_profile_phase()``; those per-phase peaks are
 approximate and diagnostic only.
 
-The report gives the median and range of wall time and peak RSS over the
-measured repeats. ``--compare BASELINE.json`` exits 1 when the median wall time
-or the median peak RSS exceeds 1.05x the baseline's. Compare medians of at
+The report gives the median and range of ``cmd_s``, ``wall_s`` and peak RSS
+over the measured repeats. ``--compare BASELINE.json`` exits 1 when the median
+``cmd_s`` or the median peak RSS exceeds 1.05x the baseline's; startup is a
+fixed cost that would dilute a slowdown in the command itself. Compare medians of at
 least 5 repeats; a single run is not evidence.
 
 Usage::
@@ -100,22 +103,27 @@ class _Sampler:
         self._thread.join()
 
 
-def _child(phases_out: Path, argv: list[str]) -> int:
-    """Run ``pedsum <argv>`` in this process under the phase sampler; write the phases to ``phases_out``."""
+def _child(timing_out: Path, argv: list[str]) -> int:
+    """Run ``pedsum <argv>`` in this process under the phase sampler; write its time and phases to ``timing_out``."""
     from pedsum.cli import main
     from pedsum.progress import current_profile_phase
 
     with _Sampler(current_profile_phase) as sampler:
+        t0 = time.perf_counter()
         rc = main(argv)
-    phases_out.write_text(
+        cmd_s = time.perf_counter() - t0
+    timing_out.write_text(
         json.dumps(
             {
-                name: {
-                    "peak_mib": slot["peak"] / _MiB,
-                    "elapsed_s": slot["last_t"] - slot["first_t"],
-                    "n_samples": int(slot["n"]),
-                }
-                for name, slot in sampler.phases.items()
+                "cmd_s": cmd_s,
+                "per_phase": {
+                    name: {
+                        "peak_mib": slot["peak"] / _MiB,
+                        "elapsed_s": slot["last_t"] - slot["first_t"],
+                        "n_samples": int(slot["n"]),
+                    }
+                    for name, slot in sampler.phases.items()
+                },
             }
         )
     )
@@ -123,7 +131,7 @@ def _child(phases_out: Path, argv: list[str]) -> int:
 
 
 def _run_once(argv: list[str], out_dir: Path) -> dict:
-    """Run one repeat in a child process; return its exit code, wall time, peak RSS and phases."""
+    """Run one repeat in a child process; return its exit code, times, peak RSS and phases."""
     argv = [*argv]
     if "--out" in argv:
         argv[argv.index("--out") + 1] = str(out_dir)
@@ -131,19 +139,23 @@ def _run_once(argv: list[str], out_dir: Path) -> dict:
         argv += ["--out", str(out_dir)]
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    phases_path = out_dir.parent / f".{out_dir.name}.phases.json"
+    timing_path = out_dir.parent / f".{out_dir.name}.timing.json"
+    timing_path.unlink(missing_ok=True)
     t0 = time.perf_counter()
-    proc = subprocess.Popen([sys.executable, __file__, "--child", str(phases_path), "--", *argv])
+    proc = subprocess.Popen([sys.executable, __file__, "--child", str(timing_path), "--", *argv])
     _, status, usage = os.wait4(proc.pid, 0)
     wall = time.perf_counter() - t0
-    proc.returncode = os.waitstatus_to_exitcode(status)
-    phases = json.loads(phases_path.read_text()) if phases_path.exists() else {}
+    exit_code = os.waitstatus_to_exitcode(status)
+    if not timing_path.exists():
+        raise SystemExit(f"pedsum {' '.join(argv)} did not return (exit {exit_code}); nothing to measure")
+    timing = json.loads(timing_path.read_text())
     return {
-        "exit_code": proc.returncode,
+        "exit_code": exit_code,
+        "cmd_s": timing["cmd_s"],
         "wall_s": wall,
         # Linux reports ru_maxrss in KiB.
         "maxrss_mib": usage.ru_maxrss / 1024,
-        "per_phase": phases,
+        "per_phase": timing["per_phase"],
     }
 
 
@@ -166,7 +178,8 @@ def _detect_metadata(argv: list[str]) -> dict:
 
 
 def _aggregate(runs: list[dict]) -> dict:
-    """Median + range of wall time and peak RSS over measured runs; per-phase medians."""
+    """Median + range of command time, wall time and peak RSS over measured runs; per-phase medians."""
+    cmds = [r["cmd_s"] for r in runs]
     walls = [r["wall_s"] for r in runs]
     rss = [r["maxrss_mib"] for r in runs]
     phase_names = {name for r in runs for name in r["per_phase"]}
@@ -181,6 +194,9 @@ def _aggregate(runs: list[dict]) -> dict:
     return {
         "n_runs": len(runs),
         "exit_codes": sorted({r["exit_code"] for r in runs}),
+        "cmd_s_median": statistics.median(cmds),
+        "cmd_s_min": min(cmds),
+        "cmd_s_max": max(cmds),
         "wall_s_median": statistics.median(walls),
         "wall_s_min": min(walls),
         "wall_s_max": max(walls),
@@ -194,7 +210,7 @@ def _aggregate(runs: list[dict]) -> dict:
 def compare(agg: dict, baseline: dict) -> list[str]:
     """Regressions of ``agg`` against ``baseline``: a median above ``GATE_RATIO`` x the baseline's."""
     failures = []
-    for key, unit in (("wall_s_median", "s"), ("maxrss_mib_median", " MiB")):
+    for key, unit in (("cmd_s_median", "s"), ("maxrss_mib_median", " MiB")):
         ratio = agg[key] / baseline[key]
         line = f"{key}: {agg[key]:.2f}{unit} vs baseline {baseline[key]:.2f}{unit} ({ratio:.3f}x)"
         print(line)
@@ -210,7 +226,8 @@ def _print_report(label: str, meta: dict, agg: dict) -> None:
         f"extra_cols={meta['extra_cols']} exit_codes={agg['exit_codes']}"
     )
     print(
-        f"wall: median {agg['wall_s_median']:.2f}s (range {agg['wall_s_min']:.2f}-{agg['wall_s_max']:.2f}); "
+        f"command: median {agg['cmd_s_median']:.2f}s (range {agg['cmd_s_min']:.2f}-{agg['cmd_s_max']:.2f}); "
+        f"process wall: median {agg['wall_s_median']:.2f}s; "
         f"peak RSS (wait4): median {agg['maxrss_mib_median']:.1f} MiB "
         f"(range {agg['maxrss_mib_min']:.1f}-{agg['maxrss_mib_max']:.1f}) over {agg['n_runs']} run(s)"
     )

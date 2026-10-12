@@ -49,7 +49,7 @@ See [CHANGELOG.md](CHANGELOG.md). Notable:
   [docs/adr/0004](docs/adr/0004-effective-size-subcommand-and-memory-limit.md)).
 - `validate --drop-offending` emits a **Reduced Pedigree** (0.11; see
   [docs/adr/0003](docs/adr/0003-drop-offending-reduction.md)). `--no-sex-check`
-  now lives in the registry (`ValidationContext.no_sex_check`) so the tolerance
+  now lives in the registry (`ValidationConfig.no_sex_check`) so the tolerance
   composes inside `run_checks` rather than as a cli post-filter.
 - `--allow-unknown-sex` → `--allow-missing-sex` (0.8)
 - `ped_depth` sourced from `PedigreeGraph.depth` (0.4; the attribute was

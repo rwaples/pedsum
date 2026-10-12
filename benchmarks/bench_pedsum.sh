@@ -10,19 +10,27 @@
 #   cell      label for the run (e.g. default, deg2)
 # Writes benchmarks/results/simace/<scenario>.<cell>.{time,log} and a one-line TSV row
 # to benchmarks/results/simace/results.tsv (scenario, cell, rows, export_s, wall_s, user_s,
-# sys_s, max_rss_mib, args). The TSV is exported once per scenario and reused by later
-# cells; export_s is that one export's time, or NA when the TSV predates its .export_s
-# sidecar. simACE codes sex 0=female, 1=male; the export recodes it to PLINK's 2/1.
+# sys_s, max_rss_mib, args). The TSV is exported once per scenario, and again when the
+# parquet is newer, and reused by later cells; export_s is that one export's time.
+# simACE codes sex 0=female, 1=male; the export recodes it to PLINK's 2/1 and writes
+# pedigree.pedsum.tsv, so the 0/1-coded pedigree.tsv of earlier versions is never read.
+# A results.tsv with another header (earlier versions logged wall as [h:]mm:ss) is
+# refused; move it aside.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)   # the simACE umbrella checkout
 scenario=$1; cell=$2; shift 2
 parquet=$root/results/bench_pedsum/$scenario/rep1/pedigree.parquet
-tsv=$root/results/bench_pedsum/$scenario/rep1/pedigree.tsv
+tsv=$root/results/bench_pedsum/$scenario/rep1/pedigree.pedsum.tsv
 out=$root/results/bench_pedsum/$scenario/pedsum_$cell
 bench=$here/results/simace; mkdir -p "$bench"
+header=$'scenario\tcell\trows\texport_s\twall_s\tuser_s\tsys_s\tmax_rss_mib\targs'
+if [ -f "$bench/results.tsv" ] && [ "$(head -n 1 "$bench/results.tsv")" != "$header" ]; then
+  echo "error: $bench/results.tsv has another header; move it aside" >&2
+  exit 1
+fi
 
-if [ ! -f "$tsv" ]; then
+if [ ! -f "$tsv" ] || [ "$parquet" -nt "$tsv" ]; then
   t0=$(date +%s.%N)
   (cd "$root" && pixi run python -c "
 import polars as pl
@@ -35,7 +43,7 @@ import polars as pl
   echo "$(echo "$(date +%s.%N) - $t0" | bc)" > "$tsv.export_s"
 fi
 rows=$(( $(wc -l < "$tsv") - 1 ))
-export_s=$(cat "$tsv.export_s" 2>/dev/null || echo NA)  # sidecar only exists if we did the export
+export_s=$(cat "$tsv.export_s")
 
 rm -rf "$out"
 /usr/bin/time -v -o "$bench/$scenario.$cell.time" \
@@ -48,5 +56,5 @@ user=$(grep "User time" "$bench/$scenario.$cell.time" | awk '{print $NF}')
 sys=$(grep "System time" "$bench/$scenario.$cell.time" | awk '{print $NF}')
 rss_kb=$(grep "Maximum resident" "$bench/$scenario.$cell.time" | awk '{print $NF}')
 rss_mib=$(echo "scale=1; $rss_kb/1024" | bc)
-[ -f "$bench/results.tsv" ] || printf 'scenario\tcell\trows\texport_s\twall_s\tuser_s\tsys_s\tmax_rss_mib\targs\n' > "$bench/results.tsv"
+[ -f "$bench/results.tsv" ] || printf '%s\n' "$header" > "$bench/results.tsv"
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$scenario" "$cell" "$rows" "$export_s" "$wall_s" "$user" "$sys" "$rss_mib" "$*" | tee -a "$bench/results.tsv"
