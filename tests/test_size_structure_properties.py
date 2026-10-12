@@ -10,7 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
-from pedsum.pedigree_ops import _build_children_csr, _group_mating_pairs
+from pedsum.pedigree_ops import build_children_csr, group_mating_pairs
 from pedsum.sections import _offspring_dist, compute_sibship_sizes, compute_size_structure
 
 
@@ -78,7 +78,7 @@ def test_compute_size_structure_is_row_order_invariant(df: pl.DataFrame, data: s
 @given(acyclic_pedigree_frames())
 def test_build_children_csr_matches_known_parent_links(df: pl.DataFrame) -> None:
     """The parent→child CSR contains exactly the known parent-child links."""
-    csr = _build_children_csr(*parent_rows(df))
+    csr = build_children_csr(*parent_rows(df))
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
     n_edges = int((mothers != -1).sum() + (fathers != -1).sum())
@@ -110,16 +110,16 @@ def test_offspring_distribution_is_a_pmf(counts: list[int]) -> None:
 @given(acyclic_pedigree_frames())
 def test_sibship_size_distribution_is_a_pmf(df: pl.DataFrame) -> None:
     """Non-empty sibship-size histograms conserve probability mass over Mating Pairs."""
-    summary = compute_sibship_sizes(_group_mating_pairs(df, *parent_rows(df)).sizes)
+    summary = compute_sibship_sizes(group_mating_pairs(df, *parent_rows(df)).sizes)
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
     both_present = (mothers != -1) & (fathers != -1)
     if not both_present.any():
-        assert summary == {"empty": True}
+        assert summary is None
         return
 
     pair_keys = np.column_stack([mothers[both_present], fathers[both_present]])
     n_pairs = len(np.unique(pair_keys, axis=0))
-    assert summary["empty"] is False
+    assert summary is not None
     assert summary["n_sibships"] == n_pairs
     assert sum(summary["size_dist"].values()) == pytest.approx(1.0)

@@ -1,0 +1,6 @@
+exit: 2
+artifacts: ['validate.log']
+=== validate.log ===
+check	id	row	detail	n_refs
+id_dtype			column 'id' has 1 missing value(s) (blank, NA, '.', '?', ...); every row needs an id	
+

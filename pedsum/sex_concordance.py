@@ -44,18 +44,19 @@ from __future__ import annotations
 
 import functools
 import math
-from contextlib import nullcontext
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pedsum.base import SEX_MALE, logger
+from pedsum.base import SEX_MALE, SexSource, logger
+from pedsum.progress import timed
+from pedsum.redaction import null_below
+from pedsum.sections import numeric_distribution
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from contextlib import AbstractContextManager
 
     import polars as pl
 
@@ -71,13 +72,13 @@ GROUPINGS: tuple[tuple[str, tuple[str, ...]], ...] = (
 MIN_GROUP_SIZE = 2
 
 #: ``sex_source`` values admitted by the headline analysis.
-HEADLINE_SEX_SOURCES: tuple[str, ...] = ("input",)
+HEADLINE_SEX_SOURCES: tuple[SexSource, ...] = (SexSource.INPUT,)
 
 #: ``sex_source`` values admitted by the all-resolved sensitivity analysis.
-ALL_RESOLVED_SEX_SOURCES: tuple[str, ...] = (
-    "input",
-    "imputed_from_missing",
-    "imputed_from_role",
+ALL_RESOLVED_SEX_SOURCES: tuple[SexSource, ...] = (
+    SexSource.INPUT,
+    SexSource.IMPUTED_FROM_MISSING,
+    SexSource.IMPUTED_FROM_ROLE,
 )
 
 #: Analytical p below this needs permutations before it may be claimed.
@@ -89,13 +90,7 @@ ANALYTICAL_P_WARN = 0.01
 # exact-integer ceiling (measured: fine at 1e15, broken at 1e16).
 _NUMBA_SAMPLER_MAX_N = 2**53
 
-_SEX_SOURCE_ORDER: tuple[str, ...] = (
-    "input",
-    "imputed_from_missing",
-    "imputed_from_role",
-    "unresolved",
-)
-_SEX_SOURCE_CODE = {name: i for i, name in enumerate(_SEX_SOURCE_ORDER)}
+_SEX_SOURCE_CODE = {source: i for i, source in enumerate(SexSource)}
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +369,7 @@ class _GroupIndex:
     """Sorted male indicator (int64 0/1); meaningless where sex is unresolved."""
 
     sex_source_code: np.ndarray
-    """Sorted ``sex_source`` codes, indices into ``_SEX_SOURCE_ORDER``."""
+    """Sorted ``sex_source`` codes, indices into ``SexSource``."""
 
 
 def _build_group_index(keys: tuple[np.ndarray, ...], is_male: np.ndarray, sex_source_code: np.ndarray) -> _GroupIndex:
@@ -478,27 +473,6 @@ def _project(index: _GroupIndex, admitted: np.ndarray) -> _Projection:
 # ---------------------------------------------------------------------------
 
 
-def _proportion_distribution(values: np.ndarray) -> dict:
-    """Unweighted distribution of per-group male proportions.
-
-    Same key set as ``sections._numeric_distribution`` so the safe-attempt
-    extrema drop recognises it. ``nz`` counts groups holding at least one male.
-    """
-    n = values.size
-    if n == 0:
-        return dict.fromkeys(("mean", "std", "min", "q1", "median", "q3", "max"), 0.0) | {"nz": 0}
-    return {
-        "mean": float(values.mean()),
-        "std": float(values.std(ddof=1)) if n > 1 else 0.0,
-        "min": float(values.min()),
-        "q1": float(np.quantile(values, 0.25)),
-        "median": float(np.median(values)),
-        "q3": float(np.quantile(values, 0.75)),
-        "max": float(values.max()),
-        "nz": int((values != 0).sum()),
-    }
-
-
 def _by_group_size(sizes: np.ndarray, male_counts: np.ndarray, q2: float) -> list[dict]:
     """Non-inferential per-group-size rows covering every observed size.
 
@@ -589,8 +563,8 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
     # ``minlength`` is what makes the lookup safe: without it bincount sizes its
     # result to max(code) + 1, so a pedigree of purely input sex would return a
     # length-1 tally and IndexError on the imputed slots.
-    tally = np.bincount(index.sex_source_code[projection.eligible_row], minlength=len(_SEX_SOURCE_ORDER))
-    by_source = {name: int(tally[_SEX_SOURCE_CODE[name]]) for name in ALL_RESOLVED_SEX_SOURCES}
+    tally = np.bincount(index.sex_source_code[projection.eligible_row], minlength=len(SexSource))
+    by_source = {source.value: int(tally[_SEX_SOURCE_CODE[source]]) for source in ALL_RESOLVED_SEX_SOURCES}
 
     n_male = int(male_counts.sum())
     n_total = int(sizes.sum())
@@ -660,18 +634,11 @@ def _analyse(index: _GroupIndex, admitted: np.ndarray, *, require_input_sex: boo
 # ---------------------------------------------------------------------------
 
 
-def _null_timer(label: str) -> AbstractContextManager[None]:
-    """No-op stand-in for the CLI's ``_timed`` phase logger; ``label`` is ignored."""
-    del label
-    return nullcontext()
-
-
 def compute_offspring_sex_concordance(
     df: pl.DataFrame,
     *,
     permutations: int = 0,
     seed: int = 0,
-    timer=None,
 ) -> dict:
     """Offspring Sex Concordance across the three canonical groupings.
 
@@ -685,23 +652,20 @@ def compute_offspring_sex_concordance(
         permutations: ``B``, permutation draws for the headline analysis of
             each grouping. ``0`` runs the analytical test only.
         seed: Permutation seed; meaningful only when ``permutations > 0``.
-        timer: Optional ``label -> context manager`` used to attribute phases
-            (the CLI passes its ``_timed``).
 
     Returns:
         The ``offspring_sex_concordance`` report section: a ``null_model``
         block plus one block per grouping. Aggregate only — no per-parent,
         per-Mating-Pair or per-Sibship record is emitted.
     """
-    timed = timer or _null_timer
     # ``sex_source`` already encodes resolution — validate.py stamps every
     # still-unknown row "unresolved" in its final pass — so admitting by
     # provenance admits only rows whose sex is resolved.
     is_male = (df["sex"].to_numpy() == SEX_MALE).astype(np.int64)
     source_raw = df["sex_source"].to_numpy()
-    sex_source_code = np.full(len(df), _SEX_SOURCE_CODE["unresolved"], dtype=np.int8)
-    for name, code in _SEX_SOURCE_CODE.items():
-        sex_source_code[source_raw == name] = code
+    sex_source_code = np.full(len(df), _SEX_SOURCE_CODE[SexSource.UNRESOLVED], dtype=np.int8)
+    for source, code in _SEX_SOURCE_CODE.items():
+        sex_source_code[source_raw == source.value] = code
 
     headline_codes = np.array(sorted(_SEX_SOURCE_CODE[s] for s in HEADLINE_SEX_SOURCES), dtype=np.int8)
     all_resolved_codes = np.array(sorted(_SEX_SOURCE_CODE[s] for s in ALL_RESOLVED_SEX_SOURCES), dtype=np.int8)
@@ -787,7 +751,7 @@ def compute_offspring_sex_concordance(
         block["all_resolved"] = sensitivity[name]
 
         if block["computed"]:
-            block["male_proportion_distribution"] = _proportion_distribution(analysis.male_counts / analysis.sizes)
+            block["male_proportion_distribution"] = numeric_distribution(analysis.male_counts / analysis.sizes)
             block["by_group_size"] = _by_group_size(
                 analysis.sizes,
                 analysis.male_counts,
@@ -818,3 +782,74 @@ def _warn_if_unpermuted_tail(name: str, block: dict) -> None:
         ANALYTICAL_P_WARN,
         block.get("max_group_pair_share") or 0.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# --safe-attempt rule (``SectionSpec.redact``)
+# ---------------------------------------------------------------------------
+
+# Every key that carries inference or a derived rate over the eligible set.
+# Suppressed wholesale when the grouping rests on fewer than ``min_cell``
+# eligible groups; eligibility metadata (_COUNT_KEYS) is retained, and
+# small-cell-nulled, so the reader still sees why nothing was reported.
+_INFERENCE_KEYS: tuple[str, ...] = (
+    "conditioning_male_fraction",
+    "n_within_group_pairs",
+    "max_group_pair_share",
+    "observed_pair_concordance",
+    "expected_pair_concordance",
+    "excess_concordance",
+    "direction",
+    "z",
+    "p_analytical",
+    "p_analytical_holm",
+    "p_holm",
+    "p_source",
+    "all_resolved_excess_concordance",
+)
+
+
+def _redact_grouping(block: dict, min_cell: int) -> None:
+    """Small-cell redaction for one grouping's block.
+
+    Recurses once into the ``all_resolved`` sensitivity block, which carries
+    the same eligibility/statistic keys and none of the outer wrappers.
+    Permutation count and seed survive — they describe the procedure, not
+    the pedigree.
+    """
+    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
+        for key in _INFERENCE_KEYS:
+            if key in block:
+                block[key] = None
+        if "male_proportion_distribution" in block:
+            block["male_proportion_distribution"] = None
+        if "by_group_size" in block:
+            block["by_group_size"] = []
+        perms = block.get("permutations")
+        if isinstance(perms, dict):
+            perms["p_raw"] = None
+            perms["p_holm"] = None
+
+    for row in block.get("by_group_size") or []:
+        if int(row.get("n_groups", 0)) < min_cell:
+            for key in list(row):
+                if key not in ("group_size", "n_groups"):
+                    row[key] = None
+        else:
+            null_below(row, ("n_offspring",), min_cell)
+
+    null_below(block, _COUNT_KEYS, min_cell)
+    by_source = block.get("eligible_by_sex_source")
+    if isinstance(by_source, dict):
+        null_below(by_source, list(by_source), min_cell)
+
+    nested = block.get("all_resolved")
+    if isinstance(nested, dict):
+        _redact_grouping(nested, min_cell)
+
+
+def redact_offspring_sex_concordance(section: dict, min_cell: int, n_total: int) -> None:
+    """Redact each grouping's block; the ``null_model`` description is not data."""
+    for name, block in section.items():
+        if name != "null_model" and isinstance(block, dict):
+            _redact_grouping(block, min_cell)

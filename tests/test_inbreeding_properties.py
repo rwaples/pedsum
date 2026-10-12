@@ -1,6 +1,6 @@
 """Property-based tests for the inbreeding histogram in ``pedsum.sections``.
 
-``_build_inbreeding_summary`` bins per-individual F into a PMF that must sum to 1.
+``build_inbreeding_summary`` bins per-individual F into a PMF that must sum to 1.
 The ``@example`` near ``INBRED_TOL`` pins the boundary regression: before the
 ``edges`` fix, F in ``(0, 1e-9]`` was counted in both the zero bucket and the
 first range bucket, so the histogram summed above 1.
@@ -14,7 +14,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from pedsum.base import INBRED_TOL
-from pedsum.sections import _build_inbreeding_summary
+from pedsum.sections import build_inbreeding_summary
 
 _F_VALUES = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
 
@@ -26,7 +26,7 @@ _F_VALUES = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infin
 def test_inbreeding_histogram_partitions(values: list[float]) -> None:
     """The histogram sums to 1, frac/n_inbred are consistent, and mean/max match the data."""
     arr = np.array(values, dtype=float)
-    out = _build_inbreeding_summary(arr)
+    out = build_inbreeding_summary(arr)
     n = len(arr)
 
     if n == 0:

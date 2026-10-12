@@ -1,0 +1,100 @@
+exit: 0
+artifacts: ['effective_size.yaml']
+=== effective_size.yaml ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 9
+status: complete
+estimators_requested:
+- ne_coancestry
+- ne_individual_delta_f
+effective_size:
+  ne_inbreeding:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_coancestry:
+    ne: null
+    reason: no_estimate
+    code: no_positive_rate
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    mean_theta_per_gen:
+    - 0.0
+    - 0.25
+    - 0.125
+    - null
+    transition_from:
+    - 0
+    - 1
+    - 2
+    transition_to:
+    - 1
+    - 2
+    - 3
+    ne_per_gen:
+    - 2.0
+    - null
+    - null
+    slope: 0.1542
+    n_depths_used: 2
+    no_estimate_code: no_positive_rate
+  ne_variance_family_size:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_sex_ratio:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_individual_delta_f:
+    ne: 34.7098
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    ne_per_gen:
+    - null
+    - null
+    - null
+    - 8.6775
+    mean_eqg_per_gen:
+    - null
+    - 1.0
+    - 1.3333
+    - 2.25
+    n_used_per_gen:
+    - 0
+    - 2
+    - 3
+    - 1
+    standard_error: 34.7098
+    n_reference: 4
+    reference_generation: null
+    ne_unrelated_founders: 14.805
+    no_estimate_code: null
+    reference_column: ref
+  ne_long_term_contributions:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_hill_overlapping:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_group_coancestry:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+

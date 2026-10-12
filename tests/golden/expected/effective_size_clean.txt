@@ -1,0 +1,314 @@
+exit: 0
+artifacts: ['effective_size.yaml']
+=== effective_size.yaml ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 200
+status: complete
+estimators_requested:
+- ne_inbreeding
+- ne_coancestry
+- ne_variance_family_size
+- ne_sex_ratio
+- ne_individual_delta_f
+- ne_long_term_contributions
+- ne_hill_overlapping
+- ne_group_coancestry
+effective_size:
+  ne_inbreeding:
+    ne: 29.2251
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    mean_f_per_gen:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0163
+    - 0.0503
+    transition_from:
+    - 0
+    - 1
+    - 2
+    - 3
+    transition_to:
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - null
+    - null
+    - 30.7692
+    - 14.4625
+    slope: -0.0171
+    n_depths_used: 4
+    no_estimate_code: null
+  ne_coancestry:
+    ne: 64.3912
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    mean_theta_per_gen:
+    - 0.0
+    - 0.0128
+    - 0.0228
+    - 0.0315
+    - 0.0352
+    transition_from:
+    - 0
+    - 1
+    - 2
+    - 3
+    transition_to:
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - 39.0
+    - 49.684
+    - 55.7613
+    - 133.2565
+    slope: -0.0078
+    n_depths_used: 4
+    no_estimate_code: null
+  ne_variance_family_size:
+    ne: 102.3261
+    parent_depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_transition:
+    - 112.0
+    - 127.1186
+    - 76.306
+    - 108.8099
+    - null
+    v_mm:
+    - 0.6857
+    - 1.4619
+    - 0.7742
+    - 0.4058
+    - null
+    v_mf:
+    - 1.6381
+    - 0.5286
+    - 0.9315
+    - 0.3406
+    - null
+    v_fm:
+    - 0.8286
+    - 1.6725
+    - 0.8235
+    - 0.4062
+    - null
+    v_ff:
+    - 1.4952
+    - 0.6082
+    - 1.2026
+    - 0.4185
+    - null
+    cov_m:
+    - -0.6857
+    - -0.4714
+    - -0.1452
+    - -0.2319
+    - null
+    cov_f:
+    - -0.6857
+    - -0.6842
+    - -0.451
+    - -0.2246
+    - null
+    no_estimate_code: null
+  ne_sex_ratio:
+    ne: 37.4219
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - 30.0
+    - 39.9
+    - 46.08
+    - 49.92
+    - 29.8667
+    n_male_per_gen:
+    - 15
+    - 21
+    - 32
+    - 24
+    - 16
+    n_female_per_gen:
+    - 15
+    - 19
+    - 18
+    - 26
+    - 14
+    no_estimate_code: null
+  ne_individual_delta_f:
+    ne: 37.3982
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - null
+    - null
+    - null
+    - 90.657
+    - 37.3982
+    mean_eqg_per_gen:
+    - null
+    - 1.0
+    - 2.0
+    - 3.0
+    - 4.0
+    n_used_per_gen:
+    - 0
+    - 40
+    - 50
+    - 50
+    - 30
+    standard_error: 10.1289
+    n_reference: 30
+    reference_generation: 4
+    ne_unrelated_founders: 28.2483
+    no_estimate_code: null
+  ne_long_term_contributions:
+    ne: 46.9629
+    n_effective_founders: 23.4815
+    sum_c_squared: 0.0426
+    max_delta_final: 0.0096
+    asymptote_reached: false
+    n_cohorts: 5
+    final_depth: 4
+    no_estimate_code: null
+  ne_hill_overlapping:
+    ne: 276.1435
+    generation_interval: 5.0
+    collapses_to_ne_v: false
+    T_m: 5.0
+    T_f: 5.0
+    N1_m: 23.0
+    N1_f: 19.5
+    Vk_m: 0.9245
+    Vk_f: 0.8411
+    kbar_m: 1.965
+    kbar_f: 2.3075
+    Ne_m: 147.1163
+    Ne_f: 130.075
+    vk_scaled: false
+    cohort_window:
+      c_min: 2000
+      c_max: 2015
+      reproductive_age_p95: 5.0
+    n_eligible_cohorts: 4
+    n_excluded_right_censored: 30
+    n_excluded_left_censored: 0
+    n_unknown_birth_year: 0
+    cohort_years:
+    - 2000
+    - 2005
+    - 2010
+    - 2015
+    ne_per_cohort:
+    - 203.2258
+    - 268.0941
+    - 285.414
+    - 429.0243
+    Ne_m_per_cohort:
+    - 101.6129
+    - 137.8125
+    - 187.3908
+    - 210.2857
+    Ne_f_per_cohort:
+    - 101.6129
+    - 130.4819
+    - 115.2301
+    - 218.9119
+    Vk_m_per_cohort:
+    - 0.9524
+    - 1.0476
+    - 1.4153
+    - 0.2826
+    Vk_f_per_cohort:
+    - 0.9524
+    - 0.9123
+    - 1.1242
+    - 0.3754
+    N1_m_per_cohort:
+    - 15
+    - 21
+    - 32
+    - 24
+    N1_f_per_cohort:
+    - 15
+    - 19
+    - 18
+    - 26
+    age_table:
+      ages_m:
+      - 5
+      offspring_count_m:
+      - 170
+      ages_f:
+      - 5
+      offspring_count_f:
+      - 170
+    n_offspring_pairs: 340
+    no_estimate_code: null
+  ne_group_coancestry:
+    ne: 54.5251
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    mean_group_coancestry_per_gen:
+    - 0.0167
+    - 0.025
+    - 0.0323
+    - 0.0411
+    - 0.0515
+    n_genomes_per_gen:
+    - 30
+    - 40
+    - 50
+    - 50
+    - 30
+    transition_from:
+    - 0
+    - 1
+    - 2
+    - 3
+    transition_to:
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - 59.0
+    - 66.7808
+    - 55.2971
+    - 45.9515
+    slope: -0.0092
+    n_depths_used: 4
+    census_ratio: 1.6667
+    no_estimate_code: null
+

@@ -1,0 +1,622 @@
+exit: 0
+artifacts: ['annotated.tsv.gz', 'summary.extra.yaml', 'summary.yaml']
+=== annotated.tsv.gz ===
+id	sex	sex_source	mother	father	ped_depth	is_founder	n_full_sibs	n_mat_half_sibs	n_pat_half_sibs	n_offspring	n_mates	component_id	n_grandparents	n_grandchildren	n_uncles_aunts	n_first_cousins	n_descendant_paths	n_founder_ancestors	ecg	ped_depth_input	is_founder_input	F_input	n_full_sibs_input	n_mat_half_sibs_input	n_pat_half_sibs_input	n_offspring_input	n_mates_input	component_id_input	n_grandparents_input	n_grandchildren_input	n_uncles_aunts_input	n_first_cousins_input	n_distinct_ancestors_input	n_descendant_paths_input	n_founder_ancestors_input	ecg_input	birth_year	liability
+1	1	input	-1	-1	0	True	0	0	0	3	1	0	0	4	0	0	12	1	0.0	0	True	0.0	0	0	0	3	1	0	0	4	0	0	0	12	1	0.0	1950	0.1
+2	2	input	-1	-1	0	True	0	0	0	3	1	0	0	4	0	0	12	1	0.0	0	True	0.0	0	0	0	3	1	0	0	4	0	0	0	12	1	0.0	1950	0.4
+3	1	input	-1	-1	0	True	0	0	0	1	1	0	0	2	0	0	4	1	0.0	0	True	0.0	0	0	0	1	1	0	0	2	0	0	0	4	1	0.0	1951	-0.2
+4	2	input	-1	-1	0	True	0	0	0	1	1	0	0	2	0	0	4	1	0.0	0	True	0.0	0	0	0	1	1	0	0	2	0	0	0	4	1	0.0	1952	0.9
+14	2	input	-1	-1	0	True	0	0	0	0	0	1	0	0	0	0	0	1	0.0	0	True	0.0	0	0	0	0	0	1	0	0	0	0	0	0	1	0.0	1960	-0.9
+15	0	unresolved	-1	-1	0	True	0	0	0	0	0	2	0	0	0	0	0	1	0.0	0	True	0.0	0	0	0	0	0	2	0	0	0	0	0	0	1	0.0	1961	0.6
+5	2	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1	False	0.0	2	0	0	2	1	0	0	1	0	0	2	3	2	1.0	1975	1.1
+6	1	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1	False	0.0	2	0	0	2	1	0	0	1	0	0	2	3	2	1.0	1976	-0.7
+7	1	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1	False	0.0	2	0	0	2	1	0	0	1	0	0	2	3	2	1.0	1977	0.3
+8	2	input	4	3	1	False	0	0	0	2	1	0	0	1	0	0	3	2	1.0	1	False	0.0	0	0	0	2	1	0	0	1	0	0	2	3	2	1.0	1978	-1.2
+9	1	input	5	6	2	False	1	0	0	0	0	0	4	0	4	8	0	2	2.0	2	False	0.25	1	0	0	0	0	0	4	0	4	8	4	0	2	2.0	2000	0.5
+10	2	input	5	6	2	False	1	0	0	1	1	0	4	0	4	8	1	2	2.0	2	False	0.25	1	0	0	1	1	0	4	0	4	8	4	1	2	2.0	2001	0.0
+11	1	input	8	7	2	False	1	0	0	1	1	0	4	0	2	4	1	4	2.0	2	False	0.0	1	0	0	1	1	0	4	0	2	4	6	1	4	2.0	2002	-0.4
+12	2	input	8	7	2	False	1	0	0	0	0	0	4	0	2	4	0	4	2.0	2	False	0.0	1	0	0	0	0	0	4	0	2	4	6	0	4	2.0	2003	0.8
+13	1	input	10	11	3	False	0	0	0	0	0	0	4	0	2	0	0	4	3.0	3	False	0.125	0	0	0	0	0	0	4	0	2	0	10	0	4	3.0	2025	0.2
+
+=== summary.extra.yaml ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 15
+pedigree:
+  relatedness:
+    relationship_pairs: {}
+  strata:
+    sex_summary:
+      female:
+        frac_reproductive: 0.7143
+        n_terminal: 2
+        offspring_count:
+          mean: 1.2857
+          std: 1.1127
+          min: 0
+          q1: 0
+          median: 1
+          q3: 2
+          max: 3
+          nz: 5
+        mate_count:
+          mean: 0.7143
+          std: 0.488
+          min: 0
+          q1: 0
+          median: 1
+          q3: 1
+          max: 1
+          nz: 5
+        depth:
+          mean: 0.8571
+          std: 0.8997
+          min: 0
+          q1: 0
+          median: 1
+          q3: 1
+          max: 2
+          nz: 4
+      male:
+        frac_reproductive: 0.7143
+        n_terminal: 2
+        offspring_count:
+          mean: 1.2857
+          std: 1.1127
+          min: 0
+          q1: 0
+          median: 1
+          q3: 2
+          max: 3
+          nz: 5
+        mate_count:
+          mean: 0.7143
+          std: 0.488
+          min: 0
+          q1: 0
+          median: 1
+          q3: 1
+          max: 1
+          nz: 5
+        depth:
+          mean: 1.2857
+          std: 1.1127
+          min: 0
+          q1: 0
+          median: 1
+          q3: 2
+          max: 3
+          nz: 5
+    depth_summary:
+    - n_male: 2
+      n_female: 3
+      n_founders: 6
+      n_reproductive: 4
+      frac_reproductive: 0.6667
+      n_terminal: 2
+      offspring_count:
+        mean: 1.3333
+        std: 1.3663
+        min: 0
+        q1: 0
+        median: 1
+        q3: 2
+        max: 3
+        nz: 4
+      offspring_count_hist:
+        '0': 0.3333
+        '1': 0.3333
+        '2': 0.0
+        '3': 0.3333
+        4+: 0.0
+      mate_count:
+        mean: 0.6667
+        std: 0.5164
+        min: 0
+        q1: 0
+        median: 1
+        q3: 1
+        max: 1
+        nz: 4
+      mean_distinct_ancestors: null
+      mean_descendant_paths: 5.3333
+    - n_male: 2
+      n_female: 2
+      n_founders: 0
+      n_reproductive: 4
+      frac_reproductive: 1.0
+      n_terminal: 0
+      offspring_count:
+        mean: 2.0
+        std: 0.0
+        min: 2
+        q1: 2
+        median: 2
+        q3: 2
+        max: 2
+        nz: 4
+      offspring_count_hist:
+        '0': 0.0
+        '1': 0.0
+        '2': 1.0
+        '3': 0.0
+        4+: 0.0
+      mate_count:
+        mean: 1.0
+        std: 0.0
+        min: 1
+        q1: 1
+        median: 1
+        q3: 1
+        max: 1
+        nz: 4
+      mean_distinct_ancestors: null
+      mean_descendant_paths: 3.0
+    - n_male: 2
+      n_female: 2
+      n_founders: 0
+      n_reproductive: 2
+      frac_reproductive: 0.5
+      n_terminal: 2
+      offspring_count:
+        mean: 0.5
+        std: 0.5774
+        min: 0
+        q1: 0
+        median: 0
+        q3: 1
+        max: 1
+        nz: 2
+      offspring_count_hist:
+        '0': 0.5
+        '1': 0.5
+        '2': 0.0
+        '3': 0.0
+        4+: 0.0
+      mate_count:
+        mean: 0.5
+        std: 0.5774
+        min: 0
+        q1: 0
+        median: 0
+        q3: 1
+        max: 1
+        nz: 2
+      mean_distinct_ancestors: null
+      mean_descendant_paths: 0.5
+    - n_male: 1
+      n_female: 0
+      n_founders: 0
+      n_reproductive: 0
+      frac_reproductive: 0.0
+      n_terminal: 1
+      offspring_count:
+        mean: 0.0
+        std: 0.0
+        min: 0
+        q1: 0
+        median: 0
+        q3: 0
+        max: 0
+        nz: 0
+      offspring_count_hist:
+        '0': 1.0
+        '1': 0.0
+        '2': 0.0
+        '3': 0.0
+        4+: 0.0
+      mate_count:
+        mean: 0.0
+        std: 0.0
+        min: 0
+        q1: 0
+        median: 0
+        q3: 0
+        max: 0
+        nz: 0
+      mean_distinct_ancestors: null
+      mean_descendant_paths: 0.0
+individual:
+  distributions:
+    n_full_sibs:
+      mean: 0.6667
+      std: 0.8165
+      min: 0
+      q1: 0
+      median: 0
+      q3: 1
+      max: 2
+      nz: 7
+    n_mat_half_sibs:
+      mean: 0.0
+      std: 0.0
+      min: 0
+      q1: 0
+      median: 0
+      q3: 0
+      max: 0
+      nz: 0
+    n_pat_half_sibs:
+      mean: 0.0
+      std: 0.0
+      min: 0
+      q1: 0
+      median: 0
+      q3: 0
+      max: 0
+      nz: 0
+    n_offspring:
+      std: 1.0823
+      min: 0
+      q1: 0
+      q3: 2
+      max: 3
+      nz: 10
+    n_mates:
+      std: 0.488
+      min: 0
+      q1: 0
+      q3: 1
+      max: 1
+      nz: 10
+    n_grandparents:
+      mean: 1.3333
+      std: 1.9518
+      min: 0
+      q1: 0
+      median: 0
+      q3: 4
+      max: 4
+      nz: 5
+    n_grandchildren:
+      mean: 1.0667
+      std: 1.387
+      min: 0
+      q1: 0
+      median: 1
+      q3: 1
+      max: 4
+      nz: 8
+    n_uncles_aunts:
+      mean: 0.9333
+      std: 1.4864
+      min: 0
+      q1: 0
+      median: 0
+      q3: 2
+      max: 4
+      nz: 5
+    n_first_cousins:
+      mean: 1.6
+      std: 2.9472
+      min: 0
+      q1: 0
+      median: 0
+      q3: 2
+      max: 8
+      nz: 4
+    n_founder_ancestors:
+      mean: 2.0
+      std: 1.1339
+      min: 1
+      q1: 1
+      median: 2
+      q3: 2
+      max: 4
+      nz: 15
+    ecg:
+      mean: 1.0
+      std: 1.0
+      min: 0.0
+      q1: 0.0
+      median: 1.0
+      q3: 2.0
+      max: 3.0
+      nz: 9
+    n_descendant_paths:
+      mean: 3.0667
+      std: 3.9364
+      min: 0
+      q1: 0
+      median: 3
+      q3: 3
+      max: 12
+      nz: 10
+
+=== summary.yaml ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 15
+pedigree:
+  structure:
+    size_structure:
+      n_founders: 6
+      founder_frac: 0.4
+      n_nonfounders: 9
+      nonfounder_frac: 0.6
+      n_male: 7
+      n_female: 7
+      n_mother_links: 9
+      n_father_links: 9
+      n_parent_child_edges: 18
+      n_with_both_parents: 9
+      n_with_mother_only: 0
+      n_with_father_only: 0
+      n_half_founders: 0
+      max_depth: 3
+      mean_depth: 1.0
+      median_depth: 1.0
+      depth_counts:
+      - 6
+      - 4
+      - 4
+      - 1
+      n_components: 3
+      largest_component: 13
+      largest_component_frac: 0.8667
+      next_components:
+      - 1
+      - 1
+    components:
+      singletons: 2
+      singletons_frac: 0.6667
+      size_dist:
+        '1': 0.6667
+        '2': 0.0
+        3-9: 0.0
+        10-99: 0.3333
+        100+: 0.0
+      component_size:
+        mean: 5.0
+        std: 6.9282
+        min: 1
+        q1: 1
+        median: 1
+        q3: 7
+        max: 13
+        nz: 3
+    max_degree_enumerated: 5
+  demography:
+    sibship_size:
+      n_sibships: 5
+      mean: 1.8
+      median: 2.0
+      q1: 1.0
+      q3: 2.0
+      size_dist:
+        '1': 0.4
+        '2': 0.4
+        '3': 0.2
+        4+: 0.0
+    mating_pairs:
+      n_pairs: 5
+      n_pairs_with_multiple_children: 3
+      frac_pairs_with_multiple_children: 0.6
+      children_per_pair:
+        mean: 1.8
+        std: 0.8367
+        min: 1
+        q1: 1
+        median: 2
+        q3: 2
+        max: 3
+        nz: 5
+      effective_pairs_by_children: 4.2632
+  individuals:
+    reproduction:
+      n_reproductive: 10
+      frac_reproductive: 0.6667
+      n_terminal: 5
+      frac_terminal: 0.3333
+      frac_with_full_sib: 0.7778
+      offspring_count:
+        mean: 1.2
+        std: 1.0823
+        min: 0
+        q1: 0
+        median: 1
+        q3: 2
+        max: 3
+        nz: 10
+      offspring_count_hist:
+        '0': 0.3333
+        '1': 0.2667
+        '2': 0.2667
+        '3': 0.1333
+        4+: 0.0
+      offspring_count_hist_male:
+        '0': 0.2857
+        '1': 0.2857
+        '2': 0.2857
+        '3': 0.1429
+        4+: 0.0
+      offspring_count_hist_female:
+        '0': 0.2857
+        '1': 0.2857
+        '2': 0.2857
+        '3': 0.1429
+        4+: 0.0
+      mate_count:
+        mean: 0.6667
+        std: 0.488
+        min: 0
+        q1: 0
+        median: 1
+        q3: 1
+        max: 1
+        nz: 10
+      mate_count_male:
+        mean: 0.7143
+        std: 0.488
+        min: 0
+        q1: 0
+        median: 1
+        q3: 1
+        max: 1
+        nz: 5
+      mate_count_female:
+        mean: 0.7143
+        std: 0.488
+        min: 0
+        q1: 0
+        median: 1
+        q3: 1
+        max: 1
+        nz: 5
+    genealogy:
+      descendant_paths:
+        mean: 3.0667
+        std: 3.9364
+        min: 0
+        q1: 0
+        median: 3
+        q3: 3
+        max: 12
+        nz: 10
+      distinct_ancestors: null
+  founders:
+    founder_contribution:
+      n_founders_with_descendants: 4
+      n_founders_without_descendants: 2
+      frac_founders_with_descendants: 0.6667
+      descendant_paths_per_founder:
+        mean: 5.3333
+        std: 5.465
+        min: 0
+        q1: 1
+        median: 4
+        q3: 10
+        max: 12
+        nz: 4
+      effective_founders_by_descendant_paths: 3.2
+    founder_summary:
+      computed: true
+      by_depth:
+      - depth: 0
+        n: 6
+        active_founders: 6
+        active_founder_frac: 1.0
+        effective_founders_by_descendants: 6.0
+        founder_ancestors:
+          mean: 1.0
+          std: 0.0
+          min: 1
+          q1: 1
+          median: 1
+          q3: 1
+          max: 1
+          nz: 6
+      - depth: 1
+        n: 4
+        active_founders: 4
+        active_founder_frac: 0.6667
+        effective_founders_by_descendants: 3.2
+        founder_ancestors:
+          mean: 2.0
+          std: 0.0
+          min: 2
+          q1: 2
+          median: 2
+          q3: 2
+          max: 2
+          nz: 4
+      - depth: 2
+        n: 4
+        active_founders: 4
+        active_founder_frac: 0.6667
+        effective_founders_by_descendants: 3.6
+        founder_ancestors:
+          mean: 3.0
+          std: 1.1547
+          min: 2
+          q1: 2
+          median: 3
+          q3: 4
+          max: 4
+          nz: 4
+      - depth: 3
+        n: 1
+        active_founders: 4
+        active_founder_frac: 0.6667
+        effective_founders_by_descendants: 4.0
+        founder_ancestors:
+          mean: 4.0
+          std: 0.0
+          min: 4
+          q1: 4
+          median: 4
+          q3: 4
+          max: 4
+          nz: 1
+      bottleneck:
+        min_active_founders: 4
+        min_active_founder_frac: 0.6667
+        min_active_depths:
+        - 1
+        - 2
+        - 3
+        min_effective_founders_by_descendants: 3.2
+        min_effective_depths:
+        - 1
+  relatedness:
+    relationship_pairs:
+      MZ: 0
+      MO: 9
+      FO: 9
+      FS: 5
+      MHS: 0
+      PHS: 0
+      GP: 16
+      Av: 8
+      GGP: 4
+      HAv: 0
+      GAv: 0
+      1C: 4
+      GGGP: 0
+      HGAv: 0
+      GGAv: 0
+      H1C: 0
+      1C1R: 0
+      G3GP: 0
+      HGGAv: 0
+      G3Av: 0
+      H1C1R: 0
+      1C2R: 0
+      2C: 0
+      PO: 18
+      engine: rust_streaming
+    relationship_summary:
+      computed: false
+      skip_reason: per-individual relationship burden is opt-in; pass --per-individual-burden
+        to compute it
+      n_individual_pairs: 105
+  strata:
+    sex_summary:
+      female:
+        n: 7
+        n_founders: 3
+        n_reproductive: 5
+      male:
+        n: 7
+        n_founders: 2
+        n_reproductive: 5
+    depth_summary:
+    - depth: 0
+      n: 6
+    - depth: 1
+      n: 4
+    - depth: 2
+      n: 4
+    - depth: 3
+      n: 1
+individual:
+  distributions:
+    n_offspring:
+      mean: 1.2
+      median: 1
+    n_mates:
+      mean: 0.6667
+      median: 1
+

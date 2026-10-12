@@ -2,7 +2,7 @@
 
 The subprocess test pins the CLI contract (no annotated.tsv.gz written,
 INFO lines on stderr). The direct unit test pins the headline branches
-of ``_apply_safe_attempt`` — size_structure / relationship_pairs /
+of ``apply_safe_attempt`` — size_structure / relationship_pairs /
 sex_summary / inbreeding / ind_data.distributions. Sections deliberately
 not covered: sibship_size, mating_pairs, reproduction, genealogy,
 founder_contribution, founder_summary, components, depth_summary.
@@ -10,10 +10,12 @@ founder_contribution, founder_summary, components, depth_summary.
 
 from __future__ import annotations
 
+import numpy as np
 from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
-import pedigree_summary as ps
+from pedsum.report import apply_safe_attempt
+from pedsum.sections import numeric_distribution
 
 
 def test_safe_attempt_summarize_outputs(tmp_path):
@@ -73,12 +75,12 @@ def test_apply_safe_attempt_headline_branches():
     }
     ind_data = {
         "distributions": {
-            "n_children": {"min": 0, "max": 5, "nz": 2},
-            "kinship": {"min": 0.0, "max": 0.5, "nz": 7},
+            "n_children": numeric_distribution(np.array([0, 0, 0, 1, 5])),
+            "kinship": numeric_distribution(np.array([0.0, *[0.5] * 7])),
         },
     }
 
-    ps._apply_safe_attempt(ped_data, ind_data, min_cell=5)
+    apply_safe_attempt(ped_data, ind_data, min_cell=5)
 
     # size_structure: small components dropped; small depth counts nulled;
     # small largest_component nulled.
@@ -110,8 +112,8 @@ def test_apply_safe_attempt_headline_branches():
 
     # ind_data.distributions: min/max dropped unconditionally; nz nulled
     # only when below min_cell.
-    n_children = ind_data["distributions"]["n_children"]
-    kinship = ind_data["distributions"]["kinship"]
+    n_children = ind_data["distributions"]["n_children"].as_dict()
+    kinship = ind_data["distributions"]["kinship"].as_dict()
     assert "min" not in n_children
     assert "max" not in n_children
     assert "min" not in kinship

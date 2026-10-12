@@ -9,28 +9,22 @@ import io
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from pedsum.cli import main
+from pedsum.pedigree_ops import IdIndex, rows_of_parents
+from pedsum.validate import ValidationConfig, ValidationContext, run_checks
+
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
-SCRIPT = REPO / "pedigree_summary.py"
-
-# Make the repo-root ``pedigree_summary`` shim importable for every test,
-# regardless of collection order or how pytest is invoked. conftest.py is
-# imported before any test module, so this replaces the per-file
-# ``sys.path.insert`` hacks the direct-import tests used to carry.
-if str(REPO) not in sys.path:
-    sys.path.insert(0, str(REPO))
-
-from pedsum.cli import main  # noqa: E402
-from pedsum.pedigree_ops import IdIndex, _parent_rows  # noqa: E402
 
 if TYPE_CHECKING:
     import numpy as np
+
+    from pedsum.checks import CheckResult
 
 
 def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -57,10 +51,31 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
 
+def run_check(name: str, rows: list[dict], config: ValidationConfig | None = None) -> CheckResult:
+    """Check ``name``'s result when the whole registry runs over ``rows`` in validate's accumulating mode."""
+    df = pl.DataFrame(rows, schema=dict.fromkeys(rows[0], pl.String))
+    results, _ = run_checks(ValidationContext(df, config or ValidationConfig()))
+    return results[name]
+
+
 def write_ped(path, rows):
     """Write a list of ``{id, sex, mother, father, ...}`` dicts to a TSV."""
     pl.DataFrame(rows).write_csv(path, separator="\t")
     return path
+
+
+def ambig_pedigree(path):
+    """Pedigree where id=7 is unsexed and used as both mother and father."""
+    return write_ped(
+        path,
+        [
+            {"id": 7, "sex": "", "mother": -1, "father": -1},
+            {"id": 8, "sex": "M", "mother": -1, "father": -1},
+            {"id": 9, "sex": "F", "mother": -1, "father": -1},
+            {"id": 10, "sex": "F", "mother": 7, "father": 8},  # uses 7 as mother
+            {"id": 11, "sex": "M", "mother": 9, "father": 7},  # uses 7 as father
+        ],
+    )
 
 
 def write_stripped_pedigree(dest: Path) -> Path:
@@ -98,8 +113,8 @@ def load_summary_tsv(out_dir: Path) -> list[list[str]]:
 def parent_rows(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Each row's (mother row, father row), ``-1`` when unknown, as summarize reads them off the graph."""
     id_index = IdIndex(df["id"].to_numpy())
-    mother_rows, _ = _parent_rows(df["mother"].to_numpy(), id_index)
-    father_rows, _ = _parent_rows(df["father"].to_numpy(), id_index)
+    mother_rows, _ = rows_of_parents(df["mother"].to_numpy(), id_index)
+    father_rows, _ = rows_of_parents(df["father"].to_numpy(), id_index)
     return mother_rows, father_rows
 
 

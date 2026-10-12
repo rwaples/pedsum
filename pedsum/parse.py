@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from pedsum.ids import IdLabels
 
-_PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
+PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
     {
         "",
         "NA",
@@ -33,7 +33,7 @@ _PARENT_MISSING_TOKENS: frozenset[str] = frozenset(
     }
 )
 
-_SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
+_SEX_MISSING_TOKENS: frozenset[str] = PARENT_MISSING_TOKENS | frozenset(
     {
         "-1",
         "U",
@@ -42,7 +42,7 @@ _SEX_MISSING_TOKENS: frozenset[str] = _PARENT_MISSING_TOKENS | frozenset(
 )
 
 
-def _format_id_sample(ids: np.ndarray, label: Callable[[int], str], k: int = 5) -> str:
+def format_id_sample(ids: np.ndarray, label: Callable[[int], str], k: int = 5) -> str:
     """Deterministic random sample of ``k`` IDs as a comma-separated string.
 
     Logged so collaborators can eyeball whether the id column was parsed
@@ -58,7 +58,7 @@ def _format_id_sample(ids: np.ndarray, label: Callable[[int], str], k: int = 5) 
     return ", ".join(label(x) for x in ids[indices])
 
 
-def _decode_sex(series: pl.Series) -> np.ndarray:
+def decode_sex(series: pl.Series) -> np.ndarray:
     """Parse a sex column to int8 with ``SEX_UNKNOWN`` (-1) for missing.
 
     Accepts M/F (any case), Male/Female, and PLINK's numeric coding: ``1`` =
@@ -130,7 +130,7 @@ def _replace_missing_with(
     return pl.select(pl.when(missing_mask).then(pl.lit(sentinel)).otherwise(str_vals).alias(series.name)).to_series()
 
 
-def _maybe_warn_csv(df: pl.DataFrame) -> None:
+def maybe_warn_csv(df: pl.DataFrame) -> None:
     """Raise a clear error when the file looks like CSV but was read as TSV.
 
     Detected by a single column whose name contains commas (TSV reader
@@ -147,7 +147,7 @@ def _maybe_warn_csv(df: pl.DataFrame) -> None:
         )
 
 
-_SEP_CHOICES = ("auto", "tab", "comma", "semicolon", "pipe", "whitespace")
+SEP_CHOICES = ("auto", "tab", "comma", "semicolon", "pipe", "whitespace")
 
 _SEP_MAP = {
     "tab": "\t",
@@ -252,7 +252,7 @@ def _read_whitespace_table(path: Path, *, as_str: bool, columns: list[str] | Non
     return pl.read_csv(buf, separator="\t", null_values=_NULL_TOKENS, infer_schema_length=None, columns=columns)
 
 
-def _read_pedigree_table(
+def read_pedigree_table(
     path: Path,
     sep: str = "auto",
     *,
@@ -261,7 +261,7 @@ def _read_pedigree_table(
 ) -> pl.DataFrame:
     r"""Read a pedigree table, sniffing the delimiter when ``sep == 'auto'``.
 
-    ``sep`` accepts the argparse keywords in ``_SEP_CHOICES`` or a
+    ``sep`` accepts the argparse keywords in ``SEP_CHOICES`` or a
     literal delimiter (``"\t"``, ``","``, ...). When auto-sniff resolves
     to anything other than tab, an INFO log records the chosen
     delimiter so the routing is visible in the run log.
@@ -287,7 +287,7 @@ def _read_pedigree_table(
     return pl.read_csv(path, separator=chosen, null_values=_NULL_TOKENS, infer_schema_length=None, columns=columns)
 
 
-def _as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
+def as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     """Parse a birth-year column to int32 with sentinel -1 for unknown.
 
     Accepts integer- or float-valued tokens (``"1988"``, ``"1988.0"``) and
@@ -296,7 +296,7 @@ def _as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     whole calendar year). Sentinel encoding matches
     ``pedigree_graph.PedigreeGraph.birth_year``.
     """
-    cleaned = _replace_missing_with(series, _PARENT_MISSING_TOKENS, "-1")
+    cleaned = _replace_missing_with(series, PARENT_MISSING_TOKENS, "-1")
     as_float = cleaned.cast(pl.Float64, strict=False)
     bad = as_float.is_null() | as_float.is_nan()
     if bad.any():
@@ -309,10 +309,10 @@ def _as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     return as_float.to_numpy().astype(np.int32)
 
 
-_BIRTH_YEAR_DEFAULT_MIN = 1800
+BIRTH_YEAR_DEFAULT_MIN = 1800
 
 
-def _birth_year_default_max() -> int:
+def birth_year_default_max() -> int:
     """Default upper bound for birth-year sanity (current calendar year + 1)."""
     return datetime.now(tz=UTC).year + 1
 
@@ -321,19 +321,48 @@ _REFERENCE_TRUE = frozenset({"1", "true", "t", "yes", "y"})
 _REFERENCE_FALSE = frozenset({"0", "false", "f", "no", "n"})
 
 
+def read_aligned_columns(
+    path: Path,
+    sep: str,
+    id_col: str,
+    ids: np.ndarray,
+    labels: IdLabels,
+    *,
+    columns: list[str] | None = None,
+    infer_types: bool = False,
+) -> pl.DataFrame:
+    """Columns of the input with one row per ID code in ``ids``, in that order.
+
+    Rows are matched by id, because loading may reorder them. An id the file
+    lacks (a founder ``validate`` added) gets a row of nulls, so each caller
+    picks its own policy for it. ``columns`` reads ``id_col`` and those columns
+    only (an absent one raises polars' ``ColumnNotFoundError``); None reads
+    every column. Columns are text unless ``infer_types``.
+    """
+    projection = None if columns is None else list(dict.fromkeys([id_col, *columns]))
+    raw = read_pedigree_table(path, sep=sep, dtype=None if infer_types else str, columns=projection)
+    raw_ids = labels.codes(raw[id_col])
+    if np.array_equal(raw_ids, ids):
+        return raw
+    # A null gather index (an id absent from the file) yields a null row.
+    rows = pl.Series(IdIndex(raw_ids).get_indexer(ids)).replace(-1, None)
+    return raw.select(pl.all().gather(rows))
+
+
 def read_reference_mask(
     path: Path, sep: str, id_col: str, column: str, ids: np.ndarray, labels: IdLabels
 ) -> np.ndarray:
     """Boolean reference-subpopulation mask from ``column`` of the input, aligned to the ID codes ``ids``.
 
     True tokens are ``1/true/t/yes/y`` and false tokens ``0/false/f/no/n``
-    (any case); missing tokens are false. Rows are matched by id, because
-    loading may reorder them, and ids absent from the file (founders that
-    ``validate`` added) are false.
+    (any case); missing tokens are false, and so are ids absent from the file
+    (founders that ``validate`` added).
     """
-    raw = _read_pedigree_table(path, sep=sep, dtype=str)
-    if column not in raw.columns:
-        raise PedigreeError(f"reference column {column!r} not in input; file has {list(raw.columns)}")
+    try:
+        raw = read_aligned_columns(path, sep, id_col, ids, labels, columns=[column])
+    except pl.exceptions.ColumnNotFoundError:
+        header = read_pedigree_table(path, sep=sep, dtype=str).columns
+        raise PedigreeError(f"reference column {column!r} not in input; file has {header}") from None
     tokens = raw[column].str.strip_chars().str.to_lowercase()
     missing = tokens.is_null() | tokens.is_in([t.lower() for t in _READER_NULL_TOKENS])
     is_true = tokens.is_in(sorted(_REFERENCE_TRUE)) & ~missing
@@ -341,7 +370,7 @@ def read_reference_mask(
     if bad.any():
         samples = raw[column].filter(bad).head(3).to_list()
         raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
-    return np.isin(ids, labels.codes(raw[id_col].filter(is_true)))
+    return is_true.to_numpy()
 
 
 def read_trait_columns(
@@ -356,21 +385,19 @@ def read_trait_columns(
     """Raw trait tokens from ``columns`` of the input, aligned to the ID codes ``ids``, ``None`` where missing.
 
     Missing is a reader null token (exact), a parent missing token after strip
-    in any case, or one of ``missing`` after strip. Rows are matched by id,
-    because loading may reorder them, and ids absent from the file (founders
-    that ``validate`` added) are missing.
+    in any case, or one of ``missing`` after strip. Ids absent from the file
+    (founders that ``validate`` added) are missing.
     """
     try:
-        raw = _read_pedigree_table(path, sep=sep, dtype=str, columns=list(dict.fromkeys([id_col, *columns])))
+        raw = read_aligned_columns(path, sep, id_col, ids, labels, columns=columns)
     except pl.exceptions.ColumnNotFoundError:
-        header = _read_pedigree_table(path, sep=sep, dtype=str).columns
+        header = read_pedigree_table(path, sep=sep, dtype=str).columns
         absent = [column for column in columns if column not in header]
         if not absent:
             raise
         raise PedigreeError(f"trait column(s) {absent} not in input; file has {header}") from None
-    raw_ids = labels.codes(raw[id_col])
     extra = sorted({token.strip() for token in missing})
-    upper_missing = sorted(_PARENT_MISSING_TOKENS)
+    upper_missing = sorted(PARENT_MISSING_TOKENS)
 
     def masked(column: str) -> pl.Expr:
         tokens = pl.col(column).str.strip_chars()
@@ -378,8 +405,4 @@ def read_trait_columns(
         return pl.when(is_missing).then(None).otherwise(tokens).alias(column)
 
     frame = raw.select(masked(column) for column in dict.fromkeys(columns))
-    if not np.array_equal(raw_ids, ids):
-        # A null gather index (an id absent from the file) yields a null token.
-        rows = pl.Series(IdIndex(raw_ids).get_indexer(ids)).replace(-1, None)
-        frame = frame.select(pl.all().gather(rows))
     return {column: frame[column].to_numpy() for column in columns}

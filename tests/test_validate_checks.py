@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import gzip
-
 import polars as pl
 import pytest
-from conftest import run_pedsum
+from conftest import ambig_pedigree, load_validate_tsv_gz, read_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -62,23 +60,9 @@ def test_validate_unknown_sex_skipped_with_flag(tmp_path):
     assert "unknown_sex" not in log
 
 
-def _ambig_pedigree(path):
-    """Pedigree where id=7 is unsexed and used as both mother and father."""
-    return _write_ped(
-        path,
-        [
-            {"id": 7, "sex": "", "mother": -1, "father": -1},
-            {"id": 8, "sex": "M", "mother": -1, "father": -1},
-            {"id": 9, "sex": "F", "mother": -1, "father": -1},
-            {"id": 10, "sex": "F", "mother": 7, "father": 8},
-            {"id": 11, "sex": "M", "mother": 9, "father": 7},
-        ],
-    )
-
-
 def test_validate_sex_role_ambiguity_is_hard_block_without_flag(tmp_path):
     """sex_role_ambiguity hard-blocks validate when --allow-missing-sex is absent."""
-    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    ped = ambig_pedigree(tmp_path / "p.tsv")
     base = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
     assert r.returncode == 2, r.stderr
@@ -88,9 +72,7 @@ def test_validate_sex_role_ambiguity_is_hard_block_without_flag(tmp_path):
 
 def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
     """--allow-missing-sex lets ambiguity through; fixed TSV writes sex=0 (unknown) for the row."""
-    import gzip
-
-    ped = _ambig_pedigree(tmp_path / "p.tsv")
+    ped = ambig_pedigree(tmp_path / "p.tsv")
     base = tmp_path / "out"
     r = run_pedsum(
         [
@@ -108,8 +90,7 @@ def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
     assert "tolerated" in r.stderr
     fixed = tmp_path / "out" / "validate.tsv.gz"
     assert fixed.exists()
-    with gzip.open(fixed, "rb") as fh:
-        df = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
+    df = read_tsv_gz(fixed, as_str=True)
     row = df.filter(pl.col("id").cast(pl.Int64) == 7).row(0, named=True)
     assert row["sex"] == "0"
     # validate.log should NOT contain a row for the tolerated ambiguous id.
@@ -176,8 +157,6 @@ def test_parent_refs_sex_conflict_log_pins_rows(tmp_path):
 
 def test_orphan_unsexed_writes_unknown_in_fixed_tsv(tmp_path):
     """Orphan-only pedigree (n_imputed==0) + --allow-missing-sex: orphan sex normalised to 0 (unknown)."""
-    import gzip
-
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -200,8 +179,7 @@ def test_orphan_unsexed_writes_unknown_in_fixed_tsv(tmp_path):
     assert r.returncode == 0, r.stderr
     fixed = tmp_path / "out" / "validate.tsv.gz"
     assert fixed.exists()
-    with gzip.open(fixed, "rb") as fh:
-        df = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
+    df = read_tsv_gz(fixed, as_str=True)
     row = df.filter(pl.col("id").cast(pl.Int64) == 3).row(0, named=True)
     assert row["sex"] == "0"
 
@@ -247,8 +225,7 @@ def test_validate_writes_imputed_sex_in_fixed_output(tmp_path):
     base = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
     assert r.returncode == 0, r.stderr
-    with gzip.open(tmp_path / "out" / "validate.tsv.gz", "rb") as fh:
-        fixed = pl.read_csv(fh.read(), separator="\t", infer_schema=False)
+    fixed = load_validate_tsv_gz(tmp_path / "out")
     row2 = fixed.filter(pl.col("id").cast(pl.Int64) == 2).row(0, named=True)
     assert row2["sex"] == "2"
 
@@ -332,8 +309,7 @@ def test_drop_offending_drops_a_cycle_with_a_missing_parent(tmp_path):
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 1, r.stderr
-    with gzip.open(out / "validate.tsv.gz", "rt") as fh:
-        fixed = pl.read_csv(fh.read().encode(), separator="\t", infer_schema=False)
+    fixed = load_validate_tsv_gz(out)
     assert sorted(fixed["id"].to_list()) == ["3", "4", "99"]
     dropped = pl.read_csv(out / "validate.dropped.tsv", separator="\t", infer_schema=False)
     assert sorted(set(dropped["id"].to_list())) == ["1", "2"]
@@ -364,3 +340,19 @@ def test_blocked_run_removes_a_previous_runs_outputs(tmp_path):
     assert not (out / "validate.tsv.gz").exists()
     assert not (out / "validate.dropped.tsv").exists()
     assert (out / "validate.log").exists()
+
+
+def test_validating_an_output_in_place_is_refused(tmp_path):
+    """--in OUT/validate.tsv.gz --out OUT exits 2 and leaves the previous run's outputs as they were."""
+    out = tmp_path / "out"
+    raw = tmp_path / "raw.tsv"
+    raw.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t2\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(raw), "--out", str(out), "--drop-offending"])
+    assert r.returncode == 0, r.stderr
+    before = {p.name: p.read_bytes() for p in out.iterdir()}
+    assert set(before) == {"validate.log", "validate.tsv.gz", "validate.dropped.tsv"}
+    for name in before:
+        r = run_pedsum(["validate", "--in", str(out / name), "--out", str(out)])
+        assert r.returncode == 2, r.stderr
+        assert "pass another --out" in r.stderr
+        assert {p.name: p.read_bytes() for p in out.iterdir()} == before

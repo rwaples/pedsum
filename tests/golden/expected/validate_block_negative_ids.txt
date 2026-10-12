@@ -1,0 +1,6 @@
+exit: 2
+artifacts: ['validate.log']
+=== validate.log ===
+check	id	row	detail	n_refs
+negative_ids	-4	3	id=-4 is negative; must be >= 0	
+

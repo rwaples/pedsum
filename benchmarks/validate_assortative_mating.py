@@ -31,8 +31,8 @@ continuous estimates for information only: simACE targets a slot-level Pearson
 weighted by mating count, so neither side is expected to hit them exactly.
 
 pedsum runs in this process through ``pedsum.cli.main``, the console entry
-point, because ``_write_yaml`` rounds every float (to 4 dp, or 4 significant
-digits below 0.1). The payload is captured on its way into ``_write_yaml``, and
+point, because ``write_yaml`` rounds every float (to 4 dp, or 4 significant
+digits below 0.1). The payload is captured on its way into ``write_yaml``, and
 the YAML written to disk must equal it after that rounding, so the
 full-precision values are the ones the CLI reported.
 
@@ -80,6 +80,7 @@ from scipy.stats import multivariate_normal
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pedsum import cli as pedsum_cli
+from pedsum.cli import assortative_mating as pedsum_am
 from pedsum.report import ASSORTATIVE_MATING_FIGURES, _round_floats
 
 if TYPE_CHECKING:
@@ -184,9 +185,8 @@ def write_pedsum_tsv(parquet: Path, out: Path, traits: dict[str, pl.Expr]) -> No
     simACE codes sex 0=female, 1=male (``simace/core/relationships.py:41``);
     pedsum reads M/F, so the export writes those letters (its numeric coding
     is PLINK's, where 0 is unknown). Both use ``-1`` for an unknown parent
-    (pedsum keeps id ``0`` as a real parent because the command never sets
-    ``zero_as_missing``), so the parent columns pass through as they are; the
-    guards below make that a checked fact.
+    (pedsum reads id ``0`` as a real parent), so the parent columns pass
+    through as they are; the guards below make that a checked fact.
     Floats are written at shortest round-trip precision and read back to prove
     pedsum sees the parquet's exact values.
     """
@@ -223,13 +223,13 @@ def run_pedsum(tsv: Path, out_dir: Path, traits: tuple[str, ...], *inference: st
         "-q",
     ]
     written: list[dict] = []
-    write_yaml = pedsum_cli._write_yaml
+    write_yaml = pedsum_am.write_yaml
 
     def capture(data: dict, path: Path, figures: int = 0) -> None:
         written.append(data)
         write_yaml(data, path, figures)
 
-    with mock.patch.object(pedsum_cli, "_write_yaml", capture):
+    with mock.patch.object(pedsum_am, "write_yaml", capture):
         code = pedsum_cli.main(argv)
     if code != 0:
         raise SystemExit(f"pedsum assortative-mating exited {code} on {tsv}")

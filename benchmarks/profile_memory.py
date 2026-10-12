@@ -1,58 +1,61 @@
 #!/usr/bin/env python3
-"""In-process peak-RSS profiler for ``pedsum summarize``.
+"""Wall-time and peak-RSS profiler for any ``pedsum`` subcommand, with a regression gate.
 
-The memory-reduction plan is *measure-first*: no optimization is merged before
-its before/after RSS delta is shown. This profiler is that gate. It runs
-``pedsum.cli._run_summarize`` in this process (reusing ``_parse_args`` so flag
-parsing matches the real CLI) while a background thread samples this process's
-RSS from ``/proc/self/statm`` every ~20 ms, then reports:
+Each repeat runs the command in its own child process. The child times its
+``main()`` call (``cmd_s``), which leaves out interpreter startup and the import
+of ``pedsum.cli``; the parent times the whole child (``wall_s``) and reads its
+peak RSS from ``wait4``'s ``ru_maxrss``, the exact meter (in-process
+``ru_maxrss`` only grows, so one process cannot measure several runs). Inside
+the child a background thread samples ``/proc/self/statm`` every
+~20 ms and attributes each sample to the ``timed`` block active when it was
+taken, via ``pedsum.progress.current_profile_phase()``; those per-phase peaks are
+approximate and diagnostic only.
 
-* overall peak RSS (median across measured repeats, with observed range), and
-* per-phase peak RSS, attributed via ``pedsum.cli._current_profile_phase()`` —
-  the label of the ``_timed`` block active when each sample was taken.
-
-Secondary metadata: total runtime and approximate per-phase elapsed time. A
-runtime regression (total or the targeted phase worsening >20% vs ``--baseline``)
-is *flagged*, not blocked — the operator decides whether the RSS win is worth it.
-
-This intentionally prioritizes phase attribution over full CLI startup/import
-RSS; the interpreter and imports are already resident before sampling starts.
+The report gives the median and range of ``cmd_s``, ``wall_s`` and peak RSS
+over the measured repeats. ``--compare BASELINE.json`` exits 1 when the exit codes
+differ from the baseline's, or when the median ``cmd_s`` or the median peak
+RSS exceeds 1.05x the baseline's; startup is a fixed cost that would dilute a
+slowdown in the command itself. Compare medians of at
+least 5 repeats; a single run is not evidence.
 
 Usage::
 
-    python benchmarks/profile_memory.py --label narrow/streaming --repeats 3 \
-        -- summarize --in /tmp/ped_narrow.tsv --out /tmp/prof_out \
-        --birth-year-col birth_year
+    python benchmarks/profile_memory.py --label validate/1m --repeats 5 \
+        --json-out /tmp/validate_before.json \
+        -- validate --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out
 
-Everything after ``--`` is the verbatim ``summarize`` argv. ``--out`` is
-rewritten to a fresh directory per repeat. A ``<--in>.meta.json`` sidecar (from
+    python benchmarks/profile_memory.py --label validate/1m --repeats 5 \
+        --compare /tmp/validate_before.json \
+        -- validate --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out
+
+Everything after ``--`` is the verbatim pedsum argv. ``--out`` is rewritten to
+a fresh directory per repeat. A ``<--in>.meta.json`` sidecar (from
 ``generate_pedigree.py``) is read when present to record rows / max depth /
-extra-column count.
+extra-column count. Non-zero exit codes are recorded, not fatal, because
+``validate`` exits 1 whenever it reports a finding. A child that ends without
+returning from ``main()`` (the memory watchdog's ``os._exit``, an uncaught
+exception) has no ``cmd_s``; its exit code and peak RSS still count.
 """
 
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import os
+import shutil
 import statistics
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
-# Make ``pedsum`` importable when this script is run as ``python
-# benchmarks/profile_memory.py`` from the repo root (benchmarks/ is sys.path[0],
-# not the repo root). Mirrors the conftest.py bootstrap the tests rely on.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from pedsum.cli import _current_profile_phase, _parse_args, _run_summarize
-
 _PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
 _MiB = 1024 * 1024
 _SAMPLE_INTERVAL_S = 0.02
 _UNPROFILED = "(unprofiled)"
+#: ``--compare`` fails above this ratio of the baseline's median.
+GATE_RATIO = 1.05
 
 
 def _read_rss_bytes() -> int:
@@ -70,17 +73,15 @@ class _Sampler:
     measurement it is taking.
     """
 
-    def __init__(self, interval: float = _SAMPLE_INTERVAL_S) -> None:
+    def __init__(self, phase, interval: float = _SAMPLE_INTERVAL_S) -> None:
+        self._phase = phase
         self._interval = interval
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="rss-sampler", daemon=True)
-        self.global_peak = 0
         # phase label -> {"peak": bytes, "first_t": s, "last_t": s, "n": int}
         self.phases: dict[str, dict[str, float]] = {}
 
     def _record(self, t: float, phase: str | None, rss: int) -> None:
-        if rss > self.global_peak:
-            self.global_peak = rss
         key = phase if phase is not None else _UNPROFILED
         slot = self.phases.get(key)
         if slot is None:
@@ -93,7 +94,7 @@ class _Sampler:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._record(time.perf_counter(), _current_profile_phase(), _read_rss_bytes())
+            self._record(time.perf_counter(), self._phase(), _read_rss_bytes())
             self._stop.wait(self._interval)
 
     def __enter__(self) -> _Sampler:
@@ -105,64 +106,89 @@ class _Sampler:
         self._thread.join()
 
 
-def _run_once(summarize_argv: list[str], out_dir: Path) -> dict:
-    """Profile one ``summarize`` run into ``out_dir``; return its metrics dict."""
-    argv = [*summarize_argv]
-    # Rewrite --out to this run's fresh directory.
+def _child(timing_out: Path, argv: list[str]) -> int:
+    """Run ``pedsum <argv>`` in this process under the phase sampler; write its time and phases to ``timing_out``."""
+    from pedsum.cli import main
+    from pedsum.progress import current_profile_phase
+
+    with _Sampler(current_profile_phase) as sampler:
+        t0 = time.perf_counter()
+        rc = main(argv)
+        cmd_s = time.perf_counter() - t0
+    timing_out.write_text(
+        json.dumps(
+            {
+                "cmd_s": cmd_s,
+                "per_phase": {
+                    name: {
+                        "peak_mib": slot["peak"] / _MiB,
+                        "elapsed_s": slot["last_t"] - slot["first_t"],
+                        "n_samples": int(slot["n"]),
+                    }
+                    for name, slot in sampler.phases.items()
+                },
+            }
+        )
+    )
+    return rc
+
+
+def _run_once(argv: list[str], out_dir: Path) -> dict:
+    """Run one repeat in a child process; return its exit code, times, peak RSS and phases."""
+    argv = [*argv]
     if "--out" in argv:
         argv[argv.index("--out") + 1] = str(out_dir)
     else:
         argv += ["--out", str(out_dir)]
-    args = _parse_args(argv)
-    cmd = "python pedigree_summary.py " + " ".join(argv)
-
-    gc.collect()
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    timing_path = out_dir.parent / f".{out_dir.name}.timing.json"
+    timing_path.unlink(missing_ok=True)
     t0 = time.perf_counter()
-    with _Sampler() as sampler:
-        rc = _run_summarize(args, cmd)
-    total_runtime = time.perf_counter() - t0
-    if rc != 0:
-        raise SystemExit(f"summarize returned non-zero exit code {rc}; argv={argv}")
-
-    per_phase = {
-        name: {
-            "peak_mib": slot["peak"] / _MiB,
-            "elapsed_s": slot["last_t"] - slot["first_t"],
-            "n_samples": int(slot["n"]),
-        }
-        for name, slot in sampler.phases.items()
-    }
+    proc = subprocess.Popen([sys.executable, __file__, "--child", str(timing_path), "--", *argv])
+    _, status, usage = os.wait4(proc.pid, 0)
+    wall = time.perf_counter() - t0
+    timing = json.loads(timing_path.read_text()) if timing_path.exists() else {"cmd_s": None, "per_phase": {}}
     return {
-        "global_peak_mib": sampler.global_peak / _MiB,
-        "total_runtime_s": total_runtime,
-        "per_phase": per_phase,
+        "exit_code": os.waitstatus_to_exitcode(status),
+        "cmd_s": timing["cmd_s"],
+        "wall_s": wall,
+        # Linux reports ru_maxrss in KiB.
+        "maxrss_mib": usage.ru_maxrss / 1024,
+        "per_phase": timing["per_phase"],
     }
 
 
-def _detect_metadata(summarize_argv: list[str]) -> dict:
-    """Pull engine / flag state and the input's .meta.json into one dict."""
-    in_path = None
-    if "--in" in summarize_argv:
-        in_path = Path(summarize_argv[summarize_argv.index("--in") + 1])
+def _detect_metadata(argv: list[str]) -> dict:
+    """The subcommand and the input's ``.meta.json`` in one dict."""
+    in_path = Path(argv[argv.index("--in") + 1]) if "--in" in argv else None
     meta: dict = {}
     if in_path is not None:
         sidecar = in_path.with_suffix(in_path.suffix + ".meta.json")
         if sidecar.exists():
             meta = json.loads(sidecar.read_text())
     return {
+        "subcommand": argv[0],
+        "argv": argv,
         "input": str(in_path) if in_path else None,
         "rows": meta.get("rows"),
         "max_depth": meta.get("max_depth"),
         "extra_cols": meta.get("extra_cols"),
-        "engine": "matrix" if "--per-individual-pairs" in summarize_argv else "streaming",
-        "inbreeding": "--no-inbreeding" not in summarize_argv,
     }
 
 
+def _spread(name: str, values: list[float]) -> dict:
+    """``{name}_median``, ``_min`` and ``_max`` of ``values``, or ``None`` each when there are none."""
+    if not values:
+        return {f"{name}_median": None, f"{name}_min": None, f"{name}_max": None}
+    return {f"{name}_median": statistics.median(values), f"{name}_min": min(values), f"{name}_max": max(values)}
+
+
 def _aggregate(runs: list[dict]) -> dict:
-    """Median + range over measured runs; per-phase peak/elapsed medians."""
-    peaks = [r["global_peak_mib"] for r in runs]
-    runtimes = [r["total_runtime_s"] for r in runs]
+    """Median + range of command time, wall time and peak RSS over measured runs; per-phase medians.
+
+    Command time is over the runs that returned from ``main()``.
+    """
     phase_names = {name for r in runs for name in r["per_phase"]}
     per_phase: dict[str, dict] = {}
     for name in phase_names:
@@ -173,56 +199,71 @@ def _aggregate(runs: list[dict]) -> dict:
             "n_runs": len(present),
         }
     return {
-        "peak_mib_median": statistics.median(peaks),
-        "peak_mib_min": min(peaks),
-        "peak_mib_max": max(peaks),
-        "runtime_s_median": statistics.median(runtimes),
+        "n_runs": len(runs),
+        "exit_codes": sorted({r["exit_code"] for r in runs}),
+        **_spread("cmd_s", [r["cmd_s"] for r in runs if r["cmd_s"] is not None]),
+        **_spread("wall_s", [r["wall_s"] for r in runs]),
+        **_spread("maxrss_mib", [r["maxrss_mib"] for r in runs]),
         "per_phase": per_phase,
     }
 
 
-def _flag_regressions(label: str, agg: dict, baseline: dict | None) -> list[str]:
-    """Return >20% runtime-regression warnings vs a prior baseline (if any)."""
-    if baseline is None:
-        return []
-    flags: list[str] = []
-    base_rt = baseline.get("runtime_s_median")
-    if base_rt and agg["runtime_s_median"] > 1.2 * base_rt:
-        flags.append(f"[{label}] total runtime {agg['runtime_s_median']:.2f}s > 1.2x baseline {base_rt:.2f}s")
-    base_phases = baseline.get("per_phase", {})
-    for name, cur in agg["per_phase"].items():
-        bp = base_phases.get(name)
-        if bp and bp.get("elapsed_s", 0) > 0 and cur["elapsed_s"] > 1.2 * bp["elapsed_s"]:
-            flags.append(f"[{label}] phase {name!r} {cur['elapsed_s']:.2f}s > 1.2x baseline {bp['elapsed_s']:.2f}s")
-    return flags
+def compare(agg: dict, baseline: dict) -> list[str]:
+    """Regressions of ``agg`` against ``baseline``: other exit codes, or a median above ``GATE_RATIO`` x the baseline's.
+
+    A run that exits differently did different work, so its times say nothing
+    about the change. Command time is compared only when both sides have one.
+    """
+    if "cmd_s_median" not in baseline:
+        raise SystemExit("the baseline has no cmd_s_median; re-record it with this version of profile_memory.py")
+    failures = []
+    if agg["exit_codes"] != baseline["exit_codes"]:
+        line = f"exit_codes: {agg['exit_codes']} vs baseline {baseline['exit_codes']}"
+        print(line)
+        failures.append(line)
+    for key, unit in (("cmd_s_median", "s"), ("maxrss_mib_median", " MiB")):
+        if agg[key] is None or baseline[key] is None:
+            print(f"{key}: {agg[key]} vs baseline {baseline[key]} (not compared)")
+            continue
+        ratio = agg[key] / baseline[key]
+        line = f"{key}: {agg[key]:.2f}{unit} vs baseline {baseline[key]:.2f}{unit} ({ratio:.3f}x)"
+        print(line)
+        if ratio > GATE_RATIO:
+            failures.append(line)
+    return failures
 
 
-def _print_report(label: str, meta: dict, agg: dict, flags: list[str]) -> None:
+def _print_report(label: str, meta: dict, agg: dict) -> None:
     print(f"\n=== {label} ===")
     print(
-        f"input={meta['input']} rows={meta['rows']} max_depth={meta['max_depth']} "
-        f"extra_cols={meta['extra_cols']} engine={meta['engine']} "
-        f"inbreeding={meta['inbreeding']}"
+        f"{meta['subcommand']} input={meta['input']} rows={meta['rows']} max_depth={meta['max_depth']} "
+        f"extra_cols={meta['extra_cols']} exit_codes={agg['exit_codes']}"
+    )
+    command = (
+        "no run returned from main()"
+        if agg["cmd_s_median"] is None
+        else f"median {agg['cmd_s_median']:.2f}s (range {agg['cmd_s_min']:.2f}-{agg['cmd_s_max']:.2f})"
     )
     print(
-        f"peak RSS: median {agg['peak_mib_median']:.1f} MiB "
-        f"(range {agg['peak_mib_min']:.1f}-{agg['peak_mib_max']:.1f}); "
-        f"total runtime median {agg['runtime_s_median']:.2f}s"
+        f"command: {command}; "
+        f"process wall: median {agg['wall_s_median']:.2f}s; "
+        f"peak RSS (wait4): median {agg['maxrss_mib_median']:.1f} MiB "
+        f"(range {agg['maxrss_mib_min']:.1f}-{agg['maxrss_mib_max']:.1f}) over {agg['n_runs']} run(s)"
     )
-    print("per-phase peak RSS (sorted):")
+    print("per-phase sampled peak RSS (sorted):")
     for name, p in sorted(agg["per_phase"].items(), key=lambda kv: kv[1]["peak_mib"], reverse=True):
         print(f"  {p['peak_mib']:8.1f} MiB  {p['elapsed_s']:6.2f}s  {name}")
-    for f in flags:
-        print(f"REGRESSION FLAG: {f}")
 
 
 def _parse_self_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
-    """Split this script's own options from the trailing ``summarize`` argv."""
+    """Split this script's own options from the trailing pedsum argv."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--label", required=True, help="cell label, e.g. narrow/streaming")
-    p.add_argument("--repeats", type=int, default=3, help="measured repeats (default: 3)")
+    p.add_argument("--label", help="cell label, e.g. validate/1m")
+    p.add_argument("--repeats", type=int, default=5, help="measured repeats (default: 5)")
     p.add_argument("--warmup", type=int, default=1, help="warm-up runs before measuring (default: 1)")
-    p.add_argument("--baseline", type=Path, default=None, help="JSON from a prior run to flag regressions against")
+    p.add_argument(
+        "--compare", type=Path, default=None, help="JSON from a prior run; exit 1 on a >5%% median regression"
+    )
     p.add_argument("--json-out", type=Path, default=None, help="write the aggregated metrics as JSON here")
     p.add_argument(
         "--work-dir",
@@ -230,46 +271,40 @@ def _parse_self_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[s
         default=Path("/tmp/pedsum_profile"),
         help="base directory for per-repeat output dirs (default: /tmp/pedsum_profile)",
     )
-    self_argv = argv if argv is not None else None
-    return p.parse_known_args(self_argv)
+    p.add_argument("--child", type=Path, default=None, help=argparse.SUPPRESS)
+    args, rest = p.parse_known_args(argv)
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    return args, rest
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Profile a summarize cell over warm-up + measured repeats; print a report."""
+    """Profile a pedsum command over warm-up + measured repeats; print a report and gate on ``--compare``."""
     args, rest = _parse_self_args(argv)
-    # argparse leaves the trailing "summarize ..." (after --) in `rest`.
-    if rest and rest[0] == "--":
-        rest = rest[1:]
-    if not rest or rest[0] != "summarize":
-        raise SystemExit("expected: profile_memory.py [opts] -- summarize --in ... [flags]")
+    if args.child is not None:
+        return _child(args.child, rest)
+    if not rest or args.label is None:
+        raise SystemExit("expected: profile_memory.py --label L [opts] -- <subcommand> --in ... [flags]")
 
     meta = _detect_metadata(rest)
     work = args.work_dir / args.label.replace("/", "_")
-
     for w in range(args.warmup):
         _run_once(rest, work / f"warmup_{w}")
-        gc.collect()
-
-    runs: list[dict] = []
-    for r in range(args.repeats):
-        runs.append(_run_once(rest, work / f"run_{r}"))
-        gc.collect()
+    runs = [_run_once(rest, work / f"run_{r}") for r in range(args.repeats)]
 
     agg = _aggregate(runs)
-    baseline = json.loads(args.baseline.read_text()) if args.baseline else None
-    base_agg = baseline.get("aggregate") if baseline else None
-    flags = _flag_regressions(args.label, agg, base_agg)
-    _print_report(args.label, meta, agg, flags)
-
+    _print_report(args.label, meta, agg)
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(
-            json.dumps(
-                {"label": args.label, "metadata": meta, "aggregate": agg, "runs": runs, "flags": flags},
-                indent=2,
-            )
+            json.dumps({"label": args.label, "metadata": meta, "aggregate": agg, "runs": runs}, indent=2)
         )
         print(f"\nwrote {args.json_out}")
+    if args.compare is not None:
+        failures = compare(agg, json.loads(args.compare.read_text())["aggregate"])
+        for line in failures:
+            print(f"REGRESSION: {line}")
+        return 1 if failures else 0
     return 0
 
 

@@ -8,33 +8,17 @@ These tests pin the split contract: each leaf appears in exactly one of
 slim / extra / intentional-drop; per-generation values that look like
 duplicates of global scalars are preserved in extra; empty categories
 are omitted.
-
-The unit test for ``_split_summary`` imports pedigree_summary as a module
-to exercise the splitter on a fabricated list-of-dict section.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-
 import pytest
-from conftest import EXAMPLE, REPO
+from conftest import EXAMPLE
 from conftest import load_summary_extra_yaml as _load_extra
 from conftest import load_summary_yaml as _load_yaml
 from conftest import run_pedsum as _run
 
-# Load pedigree_summary.py as a module so we can call its split helpers
-# directly. Doing this via importlib avoids requiring an editable install
-# of pedsum as a package (which the rest of the suite does not assume).
-_spec = importlib.util.spec_from_file_location(
-    "pedigree_summary",
-    REPO / "pedigree_summary.py",
-)
-_ps = importlib.util.module_from_spec(_spec)
-sys.modules["pedigree_summary"] = _ps
-_spec.loader.exec_module(_ps)
-
+from pedsum.schema import split_summary
 
 # --------------------------------------------------------------------------
 # File set & line-budget
@@ -105,7 +89,7 @@ def test_empty_categories_omitted(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Direct unit tests on _split_summary
+# Direct unit tests on split_summary
 # --------------------------------------------------------------------------
 
 
@@ -119,7 +103,7 @@ def test_list_of_dict_split_zips_by_index():
             ],
         },
     }
-    slim, extra = _ps._split_summary(nested)
+    slim, extra = split_summary(nested)
     # Slim rows keep only the slim_keys ("depth", "n").
     assert slim["strata"]["depth_summary"] == [
         {"depth": 0, "n": 50},

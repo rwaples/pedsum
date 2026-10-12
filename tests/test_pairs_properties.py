@@ -1,6 +1,6 @@
 """Property-based tests for relationship-pair count aggregation in ``pedsum.pairs``.
 
-``_augment_pair_counts`` derives ``PO`` and a ``by_degree`` rollup from a dict of
+``augment_pair_counts`` derives ``PO`` and a ``by_degree`` rollup from a dict of
 raw relationship-code counts. These tests assert the conservation invariants
 (``PO == MO + FO``; the degree buckets reproduce the input total; a degree with
 no computed code is ``None``) over arbitrary
@@ -13,10 +13,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pedigree_graph import RELATIONSHIPS
 
-from pedsum.pairs import _augment_pair_counts
+from pedsum.pairs import augment_pair_counts
 
 # Raw registry codes only: these include MO/FO but NOT the derived PO/engine,
-# which _augment_pair_counts adds itself (and which are absent from RELATIONSHIPS,
+# which augment_pair_counts adds itself (and which are absent from RELATIONSHIPS,
 # so feeding them in would KeyError on RELATIONSHIPS[code].degree).
 _CODES = sorted(RELATIONSHIPS.keys())
 
@@ -25,7 +25,7 @@ _CODES = sorted(RELATIONSHIPS.keys())
 def test_augment_pair_counts_conserves(named: dict) -> None:
     """PO equals MO+FO; by_degree buckets reproduce the input total; codes are preserved."""
     original = dict(named)
-    out = _augment_pair_counts(named)
+    out = augment_pair_counts(named)
 
     assert out["PO"] == named.get("MO", 0) + named.get("FO", 0)
     for code, count in named.items():
@@ -51,7 +51,7 @@ def test_augment_pair_counts_treats_none_as_not_computed() -> None:
     ``by_degree`` as a zero would restate "not computed" as "none exist", and a
     ``PO`` built from half of ``MO`` / ``FO`` would be a plain wrong number.
     """
-    out = _augment_pair_counts({"MO": 7, "FO": None, "FS": 3, "1C": None})
+    out = augment_pair_counts({"MO": 7, "FO": None, "FS": 3, "1C": None})
 
     assert out["FO"] is None
     assert out["1C"] is None

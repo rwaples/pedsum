@@ -1,6 +1,6 @@
 """Tests for ``annotated.tsv.gz`` topological realignment and column collisions.
 
-Pins two behaviours of ``_write_annotated_tsv``:
+Pins two behaviours of ``write_annotated_tsv``:
 - when the input pedigree is not in topological order, rows are realigned
   to match the topologically-ordered ``idf`` table and arbitrary input
   columns ride along by id;
@@ -10,7 +10,7 @@ Pins two behaviours of ``_write_annotated_tsv``:
 
 from __future__ import annotations
 
-from conftest import load_annotated_tsv_gz, run_pedsum
+from conftest import EXAMPLE, load_annotated_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -154,3 +154,32 @@ def test_annotated_tsv_renames_component_id_collision(tmp_path):
         zip(ann["id"].to_list(), ann["component_id_input"].to_list(), strict=True),
     )
     assert by_id == {1: "x", 2: "y", 3: "z"}
+
+
+def test_no_inbreeding_omits_the_uncomputed_columns(tmp_path):
+    """--no-inbreeding writes no F or n_distinct_ancestors, and keeps the columns it still computes."""
+    out_dir = tmp_path / "out"
+    r = run_pedsum(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--no-inbreeding"])
+    assert r.returncode == 0, r.stderr
+    columns = load_annotated_tsv_gz(out_dir).columns
+    assert "F" not in columns
+    assert "n_distinct_ancestors" not in columns
+    assert {"n_founder_ancestors", "ecg", "n_descendant_paths"} <= set(columns)
+
+
+def test_no_inbreeding_still_suffixes_an_input_f_column(tmp_path):
+    """An input F column becomes F_input under --no-inbreeding, so it cannot pass as computed."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1, "F": 0.5},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1, "F": 0.25},
+            {"id": 3, "sex": "M", "mother": 2, "father": 1, "F": 0.125},
+        ],
+    )
+    out_dir = tmp_path / "out"
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out_dir), "--no-inbreeding"])
+    assert r.returncode == 0, r.stderr
+    annotated = load_annotated_tsv_gz(out_dir)
+    assert "F" not in annotated.columns
+    assert annotated["F_input"].to_list() == [0.5, 0.25, 0.125]

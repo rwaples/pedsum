@@ -25,6 +25,7 @@ import numpy as np
 import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, logger
+from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
 from pedsum.pedigree_ops import unique_ints
 
@@ -92,14 +93,16 @@ def fix_pedigree(
     assert ctx.id_labels is not None
     labels = ctx.id_labels
     imp = ctx.imputation
-    _log_sex_imputation(imp, allow_missing_sex=ctx.allow_missing_sex)
+    _log_sex_imputation(imp, allow_missing_sex=ctx.config.allow_missing_sex)
 
     n = len(ids)
-    founders = _build_added_founders(mothers, fathers, ctx.id_index, ctx.no_sex_check) if synthesize_founders else []
+    founders = (
+        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check) if synthesize_founders else []
+    )
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:
-            next_id = _next_free_id(ids, mothers, fathers)
+            next_id = next_free_id(ids, mothers, fathers)
         labels = labels.with_phantoms(next_id)
         new_mothers, new_fathers, phantoms = _build_phantom_parents(mothers, fathers, next_id)
         filled_mother = new_mothers != mothers
@@ -222,18 +225,13 @@ def _build_added_founders(
     moms_only = moms_missing - conflicts
     dads_only = dads_missing - conflicts
 
-    def _rows_listing(rows: np.ndarray) -> str:
-        if len(rows) <= 5:
-            return f"row(s) {rows.tolist()}"
-        return f"row(s) {rows[:5].tolist()} (and {len(rows) - 5} more)"
-
     out: list[dict] = []
     for mid in sorted(moms_only):
         rows = np.where(mothers == mid)[0]
-        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {_rows_listing(rows)}"})
+        out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {rows_phrase(rows)}"})
     for did in sorted(dads_only):
         rows = np.where(fathers == did)[0]
-        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {_rows_listing(rows)}"})
+        out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {rows_phrase(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
             rows_m = np.where(mothers == cid)[0]
@@ -244,7 +242,7 @@ def _build_added_founders(
                     "sex": SEX_FEMALE,
                     "reason": (
                         f"--no-sex-check; conflicting roles "
-                        f"(mother {_rows_listing(rows_m)}, father {_rows_listing(rows_f)})"
+                        f"(mother {rows_phrase(rows_m)}, father {rows_phrase(rows_f)})"
                     ),
                 }
             )
@@ -252,7 +250,7 @@ def _build_added_founders(
     return out
 
 
-def _next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
+def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
     """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
     return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
 
@@ -267,7 +265,7 @@ def _build_phantom_parents(
     Returns ``(mothers, fathers, phantoms)``: the parent arrays with every
     half-founder's ``-1`` slot pointing at its phantom, and the phantom founder
     rows (female for a missing mother, male for a missing father). Phantoms are
-    numbered from ``first_id`` in row order; pass :func:`_next_free_id` of the
+    numbered from ``first_id`` in row order; pass :func:`next_free_id` of the
     input pedigree so they collide with no ID, including dropped ones, and
     sort after every existing or synthesized founder.
 

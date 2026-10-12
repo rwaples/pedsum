@@ -24,7 +24,6 @@ from pedsum.epimight import (
     PLACEHOLDER_COLUMNS,
     RELATIVE_PAIR_COLUMNS,
     build_epimight_skeleton,
-    build_relative_pairs,
     iter_relative_pairs,
 )
 
@@ -84,12 +83,12 @@ _SKIPPED_GENERATION = [
 
 def _load_graph(rows, tmp_path):
     """Write ``rows`` to a TSV, run pedsum's validator, and build the PedigreeGraph."""
-    from pedsum.pairs import _build_pedigree_graph
-    from pedsum.validate import load_and_validate
+    from pedsum.pairs import build_pedigree_graph
+    from pedsum.validate import ValidationConfig, load_and_validate
 
     ped = write_ped(tmp_path / "ped.tsv", rows)
-    df, _labels = load_and_validate(ped)
-    return df, _build_pedigree_graph(df)
+    df, _labels = load_and_validate(ped, ValidationConfig())
+    return df, build_pedigree_graph(df)
 
 
 def _skeleton_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:
@@ -101,7 +100,7 @@ def _skeleton_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:
 def _pairs_from_rows(rows, tmp_path, **kwargs) -> pl.DataFrame:
     """Build the relative-pairs frame from raw pedigree rows."""
     df, pg = _load_graph(rows, tmp_path)
-    return build_relative_pairs(df, pg, **kwargs)
+    return pl.concat(iter_relative_pairs(df, pg, **kwargs))
 
 
 def _relatives(frame: pl.DataFrame, person_id: str, rel: str) -> int:
@@ -299,7 +298,6 @@ def test_iter_relative_pairs_one_sorted_frame_per_kind(tmp_path):
     assert list(frames[2].columns) == list(RELATIVE_PAIR_COLUMNS)
     for frame in frames:
         assert frame.equals(frame.sort(["id1", "id2"]))
-    assert pl.concat(frames).equals(build_relative_pairs(df, pg, rels=rels))
 
 
 def test_pairs_reconcile_with_skeleton_counts(tmp_path):

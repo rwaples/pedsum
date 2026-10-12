@@ -1,0 +1,79 @@
+exit: 0
+artifacts: ['effective_size.yaml']
+=== effective_size.yaml ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 200
+status: complete
+estimators_requested:
+- ne_individual_delta_f
+effective_size:
+  ne_inbreeding:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_coancestry:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_variance_family_size:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_sex_ratio:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_individual_delta_f:
+    ne: 59.097
+    depths:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    ne_per_gen:
+    - null
+    - null
+    - null
+    - 90.657
+    - 37.3982
+    mean_eqg_per_gen:
+    - null
+    - 1.0
+    - 2.0
+    - 3.0
+    - 4.0
+    n_used_per_gen:
+    - 0
+    - 40
+    - 50
+    - 50
+    - 30
+    standard_error: 11.116
+    n_reference: 80
+    reference_generation: null
+    ne_unrelated_founders: 42.4275
+    no_estimate_code: null
+    reference_column: ref
+  ne_long_term_contributions:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_hill_overlapping:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+  ne_group_coancestry:
+    ne: null
+    reason: not_requested
+    code: null
+    fields: {}
+

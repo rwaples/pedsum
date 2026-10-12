@@ -1,0 +1,6 @@
+exit: 2
+artifacts: ['validate.log']
+=== validate.log ===
+check	id	row	detail	n_refs
+sex_tokens			sex column has 1 invalid value(s); first offending rows [2] -> ['X']. Allowed: M/F (any case), Male/Female, or PLINK 1=male, 2=female, 0=unknown.	
+

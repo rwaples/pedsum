@@ -1,18 +1,30 @@
-"""Per-check validation finding producers and check metadata."""
+"""The Check registry: each integrity Check is one ``(ctx) -> CheckResult`` function.
+
+``pedsum.validate`` runs ``CHECKS`` in order (ADR 0002). A Check reads the
+parsed arrays and the config off the ``ValidationContext``; the parse Checks
+(``id_dtype``, ``sex_tokens``, ``birth_year_dtype``) also populate them. The
+runner stamps each result's ``name`` and each Finding's ``check``, so a Check
+returns a fresh ``CheckResult`` and leaves both unset.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum, StrEnum
+from functools import partial
 from typing import TYPE_CHECKING
 
 import numpy as np
+import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
+from pedsum.ids import parse_ids
+from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
-    from pedsum.pedigree_ops import IdIndex, ParentRefs
+    from pedsum.validate import ValidationContext
 
     #: Prints an id code as the input's ID (``IdLabels.label``).
     Label = Callable[[int], str]
@@ -24,302 +36,61 @@ class Finding:
 
     ``id`` is the int64 ID code; ``detail`` names IDs as the input wrote them.
     ``n_refs`` is set only by ``parent_refs_present_*``: how many rows name the
-    missing id in that parent column.
+    missing id in that parent column. ``check`` is stamped by the runner.
     """
 
-    check: str
+    check: str = ""
     id: int | None = None
     row: int | None = None
     detail: str = ""
     n_refs: int | None = None
 
 
+class CheckStatus(StrEnum):
+    """A Check's verdict."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    SKIP = "SKIP"
+
+
 @dataclass
 class CheckResult:
-    """Per-check status report (PASS / FAIL / SKIP) with finding count."""
+    """One Check's verdict and its Findings; a FAIL has at least one.
 
-    name: str
-    status: str
-    count: int = 0
-    skip_reason: str | None = None
-
-
-# The check registry (names, ordering, labels, grouping) lives in
-# ``pedsum.validate`` alongside the runner. This module is the pure
-# library of finding producers consumed by that registry.
-
-
-def _rows_phrase(rows: np.ndarray, limit: int = 5) -> str:
-    """Render referencing rows for a finding detail, capped at ``limit``.
-
-    Lets ID-level checks (sex_role_consistency, parent_refs_sex_conflict) pin
-    the offending lines in their detail. Wording matches ``_rows_listing`` in
-    ``report.py``.
+    ``note`` says why a Check was SKIPped, or annotates a PASS
+    (``3 overridden from role``). ``name`` is stamped by the runner.
     """
+
+    status: CheckStatus
+    findings: list[Finding] = field(default_factory=list)
+    note: str | None = None
+    name: str = ""
+
+    @property
+    def count(self) -> int:
+        """Number of Findings."""
+        return len(self.findings)
+
+
+def _verdict(findings: list[Finding]) -> CheckResult:
+    """PASS when there are no Findings, else FAIL carrying them."""
+    return CheckResult(CheckStatus.FAIL if findings else CheckStatus.PASS, findings)
+
+
+def _failed(detail: str) -> CheckResult:
+    """A FAIL with one Finding that names no individual."""
+    return CheckResult(CheckStatus.FAIL, [Finding(detail=detail)])
+
+
+def rows_phrase(rows: np.ndarray, limit: int = 5) -> str:
+    """Render referencing rows for a finding detail or a founder reason, capped at ``limit``."""
     listed = rows[:limit].tolist()
     suffix = f" (and {len(rows) - limit} more)" if len(rows) > limit else ""
     return f"row(s) {listed}{suffix}"
 
 
-def _check_negative_ids(ids: np.ndarray, values: np.ndarray, *, label: Label) -> list[Finding]:
-    """Detect IDs written as negative integers (``values`` < 0). Returns one Finding per offending row.
-
-    ``values`` is each ID as an integer (``IdLabels.int_values``); ``ids`` are the codes.
-    """
-    return [
-        Finding(
-            check="negative_ids", id=int(ids[i]), row=int(i), detail=f"id={label(ids[i])} is negative; must be >= 0"
-        )
-        for i in np.where(values < 0)[0]
-    ]
-
-
-def _check_duplicate_ids(ids: np.ndarray, *, label: Label) -> list[Finding]:
-    """Detect duplicate IDs. Returns one Finding per duplicated ID value."""
-    sort_order = np.argsort(ids, kind="stable")
-    sorted_ids = ids[sort_order]
-    dup_mask = sorted_ids[1:] == sorted_ids[:-1]
-    if not dup_mask.any():
-        return []
-    dup_ids = np.unique(sorted_ids[1:][dup_mask])
-    return [Finding(check="duplicate_ids", id=int(d), detail=f"id={label(d)} appears more than once") for d in dup_ids]
-
-
-def _check_parent_token_range(arr: np.ndarray, role: str) -> list[Finding]:
-    """Detect parent column values < -1; one Finding per offending row."""
-    return [
-        Finding(
-            check=f"parent_token_range_{role}",
-            row=int(i),
-            detail=f"row {int(i)}: {role} value {int(arr[i])} < -1; missing parent must be -1",
-        )
-        for i in np.where(arr < -1)[0]
-    ]
-
-
-def _check_parent_refs_present(arr: np.ndarray, role: str, refs: ParentRefs, *, label: Label) -> list[Finding]:
-    """Detect parent IDs that don't have their own row; one Finding per missing ID."""
-    missing = refs.ids[refs.rows == -1]
-    if len(missing) == 0:
-        return []
-    named = np.sort(arr[arr != -1])
-    counts = np.searchsorted(named, missing, side="right") - np.searchsorted(named, missing, side="left")
-    findings = []
-    for mid, n in zip(missing, counts, strict=True):
-        n_refs = int(n)
-        name = label(mid)
-        detail = f"id={name} referenced as {role} {n_refs} time(s) but no row has this id"
-        if name == "0":
-            detail += " (if file uses 0/NA/blank as missing token, convert to -1)"
-        findings.append(Finding(check=f"parent_refs_present_{role}", id=int(mid), detail=detail, n_refs=n_refs))
-    return findings
-
-
-def _check_empty_pedigree(n: int) -> list[Finding]:
-    """Detect empty pedigrees (n == 0). Returns a single Finding when empty."""
-    if n > 0:
-        return []
-    return [Finding(check="empty_pedigree", detail="pedigree has 0 rows")]
-
-
-def _check_parents_distinct(
-    ids: np.ndarray,
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect rows where mother == father (and both != -1); one Finding per row."""
-    bad = (mothers != -1) & (fathers != -1) & (mothers == fathers)
-    return [
-        Finding(
-            check="parents_distinct",
-            id=int(ids[i]),
-            row=int(i),
-            detail=f"row {int(i)}: id={label(ids[i])} has mother == father == {label(mothers[i])}",
-        )
-        for i in np.where(bad)[0]
-    ]
-
-
-def _check_self_loops(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, *, label: Label) -> list[Finding]:
-    """Detect rows where id == mother or id == father; one Finding per offending row."""
-    findings = [
-        Finding(
-            check="self_loops",
-            id=int(ids[i]),
-            row=int(i),
-            detail=f"row {int(i)}: id={label(ids[i])} listed as own mother",
-        )
-        for i in np.where(mothers == ids)[0]
-    ]
-    findings.extend(
-        Finding(
-            check="self_loops",
-            id=int(ids[i]),
-            row=int(i),
-            detail=f"row {int(i)}: id={label(ids[i])} listed as own father",
-        )
-        for i in np.where(fathers == ids)[0]
-    )
-    return findings
-
-
-def _check_parent_refs_sex_conflict(
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    mother_refs: ParentRefs,
-    father_refs: ParentRefs,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect missing parent IDs referenced as both mother AND father; one Finding per ID."""
-    moms_missing = mother_refs.ids[mother_refs.rows == -1]
-    dads_missing = father_refs.ids[father_refs.rows == -1]
-    conflicts = np.intersect1d(moms_missing, dads_missing)
-    return [
-        Finding(
-            check="parent_refs_sex_conflict",
-            id=int(c),
-            detail=(
-                f"id={label(c)} referenced as both mother ({_rows_phrase(np.where(mothers == c)[0])}) "
-                f"and father ({_rows_phrase(np.where(fathers == c)[0])}) (sex ambiguous)"
-            ),
-        )
-        for c in conflicts
-    ]
-
-
-def _sex_role_findings(
-    role: str,
-    parents: np.ndarray,
-    ids: np.ndarray,
-    own_rows: np.ndarray,
-    sex: np.ndarray,
-    expected_sex: int,
-    label: Label,
-) -> list[Finding]:
-    """Build sex_role_consistency Findings for ids used as ``role`` with the wrong sex.
-
-    ``row`` is the individual's own row (where its sex is declared); the detail
-    names the row(s) that reference the id in this role so the log pins the
-    offending lines.
-    """
-    expected = "female" if expected_sex == SEX_FEMALE else "male"
-    bad = sex[own_rows] != expected_sex
-    return [
-        Finding(
-            check="sex_role_consistency",
-            id=int(pid),
-            row=int(own_row),
-            detail=f"id={label(pid)} used as {role} in {_rows_phrase(np.where(parents == pid)[0])} but sex != {expected}",
-        )
-        for pid, own_row in zip(ids[bad], own_rows[bad], strict=True)
-    ]
-
-
-def _check_sex_role_consistency(
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    sex: np.ndarray,
-    mother_refs: ParentRefs,
-    father_refs: ParentRefs,
-    *,
-    skip_mask: np.ndarray | None = None,
-    label: Label,
-) -> list[Finding]:
-    """Detect IDs used as mother but sex != female, or as father but sex != male.
-
-    When ``skip_mask`` is supplied, rows whose mask entry is True are excluded
-    from both role tests. This is used to bypass rows whose sex started as
-    unknown (already covered by ``sex_role_ambiguity`` and ``unknown_sex``).
-    """
-    used_as_mother, rows_um = mother_refs.ids, mother_refs.rows
-    used_as_father, rows_uf = father_refs.ids, father_refs.rows
-
-    keep_m = rows_um != -1
-    keep_f = rows_uf != -1
-    if skip_mask is not None:
-        present_m = keep_m.copy()
-        present_f = keep_f.copy()
-        keep_m[present_m] = ~skip_mask[rows_um[present_m]]
-        keep_f[present_f] = ~skip_mask[rows_uf[present_f]]
-
-    mother_ids = used_as_mother[keep_m]
-    mother_rows = rows_um[keep_m]
-    father_ids = used_as_father[keep_f]
-    father_rows = rows_uf[keep_f]
-
-    findings = _sex_role_findings("mother", mothers, mother_ids, mother_rows, sex, SEX_FEMALE, label)
-    findings.extend(_sex_role_findings("father", fathers, father_ids, father_rows, sex, SEX_MALE, label))
-    return findings
-
-
-def _check_sex_role_ambiguity(
-    ids: np.ndarray,
-    ambiguous_mask: np.ndarray,
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect unsexed rows that are referenced as BOTH mother and father.
-
-    A hard block by default — this is a data contradiction, not just missing
-    information. Pedsum 0.8 added ``--allow-missing-sex`` which downgrades
-    this to a SKIP with a tolerated count; the fixed validate-output writes
-    these rows' sex as ``-1`` so the on-disk pedigree is self-consistent.
-
-    The first row referencing each ambiguous id as mother / father is found on
-    demand here (rather than precomputed) because ``ambiguous_mask`` is empty on
-    every well-formed pedigree — this loop almost never runs.
-    """
-    findings: list[Finding] = []
-    for row_idx in np.where(ambiguous_mask)[0]:
-        rid = int(ids[row_idx])
-        m_rows = np.where(mothers == rid)[0]
-        f_rows = np.where(fathers == rid)[0]
-        mrow = int(m_rows[0]) if m_rows.size else -1
-        frow = int(f_rows[0]) if f_rows.size else -1
-        findings.append(
-            Finding(
-                check="sex_role_ambiguity",
-                id=rid,
-                row=int(row_idx),
-                detail=(
-                    f"id={label(rid)} has unknown sex AND is referenced as both "
-                    f"mother (row {mrow}) and father (row {frow}); "
-                    "sex cannot be imputed"
-                ),
-            )
-        )
-    return findings
-
-
-def _check_unknown_sex(
-    ids: np.ndarray,
-    sex: np.ndarray,
-    ambiguous_mask: np.ndarray,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect rows that still carry SEX_UNKNOWN after imputation.
-
-    Excludes rows already reported by ``sex_role_ambiguity``.
-    """
-    orphan_mask = (sex == SEX_UNKNOWN) & ~ambiguous_mask
-    return [
-        Finding(
-            check="unknown_sex",
-            id=int(ids[i]),
-            row=int(i),
-            detail=(f"id={label(ids[i])} has unknown sex and is not referenced as a parent; cannot be imputed"),
-        )
-        for i in np.where(orphan_mask)[0]
-    ]
-
-
-def _summarize_findings(findings: list[Finding], label: Label) -> str:
+def summarize_findings(findings: list[Finding], label: Label) -> str:
     """Build a human-readable error message from a list of findings."""
     if not findings:
         return ""
@@ -338,84 +109,668 @@ def _summarize_findings(findings: list[Finding], label: Label) -> str:
     return f"{check}: {n} finding(s) — {sample_str}{extra}"
 
 
-def _check_acyclic(ids: np.ndarray, depth: np.ndarray, *, label: Label) -> list[Finding]:
-    """One Finding per row in or below a cycle (``depth == -1``; see ``_structural_depth``)."""
+# ---------------------------------------------------------------------------
+# Columns & parsing
+# ---------------------------------------------------------------------------
+
+
+def _required_columns(ctx: ValidationContext) -> CheckResult:
+    # summarize treats a named --birth-year-col as required; validate omits it
+    # and lets birth_year_dtype SKIP instead.
+    config = ctx.config
+    needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
+    if ctx.require_birth_year_col and config.birth_year_col is not None:
+        needed.add(config.birth_year_col)
+    miss = needed - set(ctx.df_raw.columns)
+    if miss:
+        return _failed(f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}")
+    return _verdict([])
+
+
+def _empty_pedigree(ctx: ValidationContext) -> CheckResult:
+    return _verdict([] if len(ctx.df_raw) else [Finding(detail="pedigree has 0 rows")])
+
+
+def _id_dtype(ctx: ValidationContext) -> CheckResult:
+    df, config = ctx.df_raw, ctx.config
+    try:
+        ctx.ids, ctx.mothers, ctx.fathers, ctx.id_labels = parse_ids(
+            df[config.id_col],
+            df[config.mother_col],
+            df[config.father_col],
+            labels=ctx.fixed_labels,
+        )
+    except PedigreeError as e:
+        return _failed(str(e))
+    logger.info("parsed %d ids; five random ids: %s", len(ctx.ids), format_id_sample(ctx.ids, ctx.label))
+    return _verdict([])
+
+
+def _warn_zero_female_coding(ctx: ValidationContext) -> None:
+    """Warn when mothers are coded 0 and no row is 2: likely 0=female, the coding pedsum wrote before 0.15.0.
+
+    pedsum's own output never writes a mother as 0 (she is imputed female),
+    so its unknown-sex rows do not trigger this.
+    """
+    if ctx.ids is None or ctx.mothers is None:
+        return
+    tokens = ctx.df_raw[ctx.config.sex_col].cast(pl.String).str.strip_chars()
+    zero = (tokens == "0").fill_null(False).to_numpy()
+    if not zero.any() or (tokens == "2").any():
+        return
+    n = int((zero & np.isin(ctx.ids, ctx.mothers[ctx.mothers != -1])).sum())
+    if n:
+        logger.warning(
+            "sex column codes %d mother(s) as 0 and has no 2: pedsum reads 0 as unknown "
+            "(PLINK: 1=male, 2=female, 0=unknown). Recode a file that uses 0=female, 1=male, "
+            "including validate and summarize output from pedsum before 0.15.0.",
+            n,
+        )
+
+
+def _sex_tokens(ctx: ValidationContext) -> CheckResult:
+    try:
+        ctx.sex = decode_sex(ctx.df_raw[ctx.config.sex_col])
+    except PedigreeError as e:
+        return _failed(str(e))
+    _warn_zero_female_coding(ctx)
+    return _verdict([])
+
+
+# ---------------------------------------------------------------------------
+# IDs
+# ---------------------------------------------------------------------------
+
+
+def _negative_ids(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row whose ID is written as a negative integer."""
+    ids = ctx.ids
+    assert ids is not None
+    assert ctx.id_labels is not None
+    values = ctx.id_labels.int_values(ids)
+    return _verdict(
+        [
+            Finding(id=int(ids[i]), row=int(i), detail=f"id={ctx.label(ids[i])} is negative; must be >= 0")
+            for i in np.where(values < 0)[0]
+        ]
+    )
+
+
+def _duplicate_ids(ctx: ValidationContext) -> CheckResult:
+    """One Finding per duplicated ID value."""
+    ids = ctx.ids
+    assert ids is not None
+    sorted_ids = ids[np.argsort(ids, kind="stable")]
+    dup_mask = sorted_ids[1:] == sorted_ids[:-1]
+    if not dup_mask.any():
+        return _verdict([])
+    dup_ids = np.unique(sorted_ids[1:][dup_mask])
+    return _verdict([Finding(id=int(d), detail=f"id={ctx.label(d)} appears more than once") for d in dup_ids])
+
+
+# ---------------------------------------------------------------------------
+# Parent references
+# ---------------------------------------------------------------------------
+
+
+def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
+    """One Finding per row whose ``role`` value is below -1."""
+    parents = ctx.mothers if role == "mother" else ctx.fathers
+    assert parents is not None
+    assert ctx.id_labels is not None
+    values = ctx.id_labels.int_values(parents)
+    return _verdict(
+        [
+            Finding(row=int(i), detail=f"row {int(i)}: {role} value {int(values[i])} < -1; missing parent must be -1")
+            for i in np.where(values < -1)[0]
+        ]
+    )
+
+
+def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
+    """One Finding per ``role`` ID that has no row of its own."""
+    parents = ctx.mothers if role == "mother" else ctx.fathers
+    assert parents is not None
+    refs = ctx.mother_refs if role == "mother" else ctx.father_refs
+    missing = refs.ids[refs.rows == -1]
+    if len(missing) == 0:
+        return _verdict([])
+    named = np.sort(parents[parents != -1])
+    counts = np.searchsorted(named, missing, side="right") - np.searchsorted(named, missing, side="left")
+    findings = []
+    for mid, n in zip(missing, counts, strict=True):
+        n_refs = int(n)
+        name = ctx.label(mid)
+        detail = f"id={name} referenced as {role} {n_refs} time(s) but no row has this id"
+        if name == "0":
+            detail += " (if file uses 0/NA/blank as missing token, convert to -1)"
+        findings.append(Finding(id=int(mid), detail=detail, n_refs=n_refs))
+    return _verdict(findings)
+
+
+def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
+    """One Finding per missing parent ID referenced as both mother and father."""
+    if ctx.config.no_sex_check:
+        return CheckResult(CheckStatus.SKIP, note="bypassed via --no-sex-check")
+    _, mothers, fathers = ctx.require_id_parents()
+    moms_missing = ctx.mother_refs.ids[ctx.mother_refs.rows == -1]
+    dads_missing = ctx.father_refs.ids[ctx.father_refs.rows == -1]
+    return _verdict(
+        [
+            Finding(
+                id=int(c),
+                detail=(
+                    f"id={ctx.label(c)} referenced as both mother ({rows_phrase(np.where(mothers == c)[0])}) "
+                    f"and father ({rows_phrase(np.where(fathers == c)[0])}) (sex ambiguous)"
+                ),
+            )
+            for c in np.intersect1d(moms_missing, dads_missing)
+        ]
+    )
+
+
+def _sex_role_ambiguity(ctx: ValidationContext) -> CheckResult:
+    """One Finding per unsexed row referenced as BOTH mother and father.
+
+    A hard block by default: a data contradiction, not just missing
+    information. ``--allow-missing-sex`` downgrades it to a SKIP with a
+    tolerated count, and the fixed validate output writes these rows' sex as
+    unknown so the on-disk pedigree is self-consistent.
+
+    The first row referencing each ambiguous id as mother / father is found on
+    demand here (rather than precomputed) because ``ambiguous_mask`` is empty on
+    every well-formed pedigree — this loop almost never runs.
+    """
+    imp = ctx.imputation
+    if ctx.config.allow_missing_sex:
+        n = int(imp.ambiguous_mask.sum())
+        return CheckResult(CheckStatus.SKIP, note=f"bypassed via --allow-missing-sex ({n} tolerated)")
+    ids, mothers, fathers = ctx.require_id_parents()
+    findings: list[Finding] = []
+    for row_idx in np.where(imp.ambiguous_mask)[0]:
+        rid = int(ids[row_idx])
+        m_rows = np.where(mothers == rid)[0]
+        f_rows = np.where(fathers == rid)[0]
+        mrow = int(m_rows[0]) if m_rows.size else -1
+        frow = int(f_rows[0]) if f_rows.size else -1
+        findings.append(
+            Finding(
+                id=rid,
+                row=int(row_idx),
+                detail=(
+                    f"id={ctx.label(rid)} has unknown sex AND is referenced as both "
+                    f"mother (row {mrow}) and father (row {frow}); "
+                    "sex cannot be imputed"
+                ),
+            )
+        )
+    return _verdict(findings)
+
+
+def _parents_distinct(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row whose mother and father are the same known ID."""
+    ids, mothers, fathers = ctx.require_id_parents()
+    bad = (mothers != -1) & (fathers != -1) & (mothers == fathers)
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=int(i),
+                detail=f"row {int(i)}: id={ctx.label(ids[i])} has mother == father == {ctx.label(mothers[i])}",
+            )
+            for i in np.where(bad)[0]
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Graph structure
+# ---------------------------------------------------------------------------
+
+
+def _self_loops(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row listed as its own mother, then per row listed as its own father."""
+    ids, mothers, fathers = ctx.require_id_parents()
+    return _verdict(
+        [
+            Finding(id=int(ids[i]), row=int(i), detail=f"row {int(i)}: id={ctx.label(ids[i])} listed as own {role}")
+            for role, parents in (("mother", mothers), ("father", fathers))
+            for i in np.where(parents == ids)[0]
+        ]
+    )
+
+
+def _sex_role_findings(
+    role: str,
+    parents: np.ndarray,
+    ids: np.ndarray,
+    own_rows: np.ndarray,
+    sex: np.ndarray,
+    expected_sex: int,
+    label: Label,
+) -> list[Finding]:
+    """sex_role_consistency Findings for ids used as ``role`` with the wrong sex.
+
+    ``row`` is the individual's own row (where its sex is declared); the detail
+    names the row(s) that reference the id in this role so the log pins the
+    offending lines.
+    """
+    expected = "female" if expected_sex == SEX_FEMALE else "male"
+    bad = sex[own_rows] != expected_sex
     return [
         Finding(
-            check="acyclic",
-            id=int(ids[i]),
-            row=int(i),
-            detail=f"id={label(ids[i])} could not be topologically ordered (in a cycle)",
+            id=int(pid),
+            row=int(own_row),
+            detail=f"id={label(pid)} used as {role} in {rows_phrase(np.where(parents == pid)[0])} but sex != {expected}",
         )
-        for i in np.where(depth < 0)[0]
+        for pid, own_row in zip(ids[bad], own_rows[bad], strict=True)
     ]
 
 
-def _check_birth_year_range(
-    ids: np.ndarray,
-    birth_year: np.ndarray,
-    year_min: int,
-    year_max: int,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect known birth years outside ``[year_min, year_max]``.
+def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
+    """IDs used as mother with resolved sex != female, or as father with sex != male.
 
-    Sentinel ``-1`` (unknown) is skipped. One Finding per offending row.
+    Always runs: the override clears asserted-vs-role contradictions only for
+    rows used in a SINGLE role; a row asserted M and used as BOTH mother and
+    father stays unoverridable and must still FAIL. Rows whose sex started
+    unknown are left to ``sex_role_ambiguity`` and ``unknown_sex``.
     """
-    known = birth_year != -1
-    bad = known & ((birth_year < year_min) | (birth_year > year_max))
-    return [
-        Finding(
-            check="birth_year_range",
-            id=int(ids[i]),
-            row=int(i),
-            detail=(
-                f"id={label(ids[i])} birth_year={int(birth_year[i])} is outside the sanity range [{year_min}, {year_max}]"
-            ),
+    imp = ctx.imputation
+    _, mothers, fathers = ctx.require_id_parents()
+    findings: list[Finding] = []
+    for role, parents, refs, expected_sex in (
+        ("mother", mothers, ctx.mother_refs, SEX_FEMALE),
+        ("father", fathers, ctx.father_refs, SEX_MALE),
+    ):
+        present = refs.rows != -1
+        keep = present.copy()
+        keep[present] = ~imp.original_unknown_mask[refs.rows[present]]
+        findings += _sex_role_findings(
+            role, parents, refs.ids[keep], refs.rows[keep], imp.imputed_sex, expected_sex, ctx.label
         )
-        for i in np.where(bad)[0]
-    ]
+    if findings:
+        return _verdict(findings)
+    # Clean: annotate the PASS ("PASS (N overridden from role)") when the override fired.
+    n = int(imp.overridden_mask.sum()) if ctx.config.override_asserted_sex else 0
+    return CheckResult(CheckStatus.PASS, note=f"{n} overridden from role" if n > 0 else None)
 
 
-def _check_birth_year_topology(
-    ids: np.ndarray,
-    mothers: np.ndarray,
-    fathers: np.ndarray,
-    birth_year: np.ndarray,
-    id_index: IdIndex,
-    *,
-    label: Label,
-) -> list[Finding]:
-    """Detect parent-child edges with ``child.birth_year < parent.birth_year``.
+def _unknown_sex(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row still unsexed after imputation, except those ``sex_role_ambiguity`` reports."""
+    imp = ctx.imputation
+    orphan_mask = (imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask
+    if ctx.config.allow_missing_sex:
+        return CheckResult(
+            CheckStatus.SKIP, note=f"bypassed via --allow-missing-sex ({int(orphan_mask.sum())} tolerated)"
+        )
+    ids = ctx.ids
+    assert ids is not None
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=int(i),
+                detail=f"id={ctx.label(ids[i])} has unknown sex and is not referenced as a parent; cannot be imputed",
+            )
+            for i in np.where(orphan_mask)[0]
+        ]
+    )
 
-    Edges where either endpoint has ``birth_year == -1`` are skipped. One
-    Finding per offending edge.
+
+def _acyclic(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row in or below a cycle (``depth == -1``; see ``structural_depth``)."""
+    ids, _, _ = ctx.require_id_parents()
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=int(i),
+                detail=f"id={ctx.label(ids[i])} could not be topologically ordered (in a cycle)",
+            )
+            for i in np.where(ctx.depth < 0)[0]
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Birth years (optional)
+# ---------------------------------------------------------------------------
+
+
+def _birth_year_dtype(ctx: ValidationContext) -> CheckResult:
+    column = ctx.config.birth_year_col
+    if column is None:
+        return CheckResult(CheckStatus.SKIP, note="no --birth-year-col specified")
+    if column not in ctx.df_raw.columns:
+        return CheckResult(CheckStatus.SKIP, note=f"column {column!r} not present in file")
+    try:
+        ctx.birth_year = as_birth_year_col(ctx.df_raw[column], column)
+    except PedigreeError as e:
+        return _failed(str(e))
+    return _verdict([])
+
+
+def _birth_year_range(ctx: ValidationContext) -> CheckResult:
+    """One Finding per known birth year outside ``[--birth-year-min, --birth-year-max]``; ``-1`` is unknown."""
+    ids, birth_year = ctx.ids, ctx.birth_year
+    assert ids is not None
+    assert birth_year is not None
+    year_min, year_max = ctx.config.birth_year_min, ctx.config.by_max
+    bad = (birth_year != -1) & ((birth_year < year_min) | (birth_year > year_max))
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=int(i),
+                detail=(
+                    f"id={ctx.label(ids[i])} birth_year={int(birth_year[i])} is outside the sanity range "
+                    f"[{year_min}, {year_max}]"
+                ),
+            )
+            for i in np.where(bad)[0]
+        ]
+    )
+
+
+def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
+    """One Finding per parent-child edge with ``child.birth_year < parent.birth_year``.
+
+    Edges where either endpoint's birth year is unknown (``-1``) are skipped.
     """
+    ids, mothers, fathers = ctx.require_id_parents()
+    birth_year = ctx.birth_year
+    assert birth_year is not None
     findings: list[Finding] = []
     for role, parents in (("mother", mothers), ("father", fathers)):
-        parent_rows = id_index.get_indexer(parents)
+        parent_rows = ctx.id_index.get_indexer(parents)
         edges = (parents != -1) & (parent_rows != -1)
         if not edges.any():
             continue
         child_rows = np.where(edges)[0]
-        prows = parent_rows[child_rows]
         child_by = birth_year[child_rows]
-        parent_by = birth_year[prows]
-        both_known = (child_by != -1) & (parent_by != -1)
-        bad = both_known & (child_by < parent_by)
+        parent_by = birth_year[parent_rows[child_rows]]
+        bad = (child_by != -1) & (parent_by != -1) & (child_by < parent_by)
         for i in np.where(bad)[0]:
             row_idx = int(child_rows[i])
             findings.append(
                 Finding(
-                    check="birth_year_topology",
                     id=int(ids[row_idx]),
                     row=row_idx,
                     detail=(
-                        f"id={label(ids[row_idx])} birth_year={int(child_by[i])} < "
-                        f"{role} (id={label(parents[row_idx])}) "
+                        f"id={ctx.label(ids[row_idx])} birth_year={int(child_by[i])} < "
+                        f"{role} (id={ctx.label(parents[row_idx])}) "
                         f"birth_year={int(parent_by[i])}"
                     ),
                 )
             )
-    return findings
+    return _verdict(findings)
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+
+class FailPolicy(Enum):
+    """What a Check's ``FAIL`` does to the pedigree ``validate`` writes (ADR 0005).
+
+    The policy decides both modes: whether plain ``validate`` BLOCKs or writes
+    the pedigree as-is, and whether ``--drop-offending`` can resolve the FAIL
+    by removing the flagged individual(s).
+    """
+
+    # No row removal fixes it (missing column, parse failure, negative id):
+    # BLOCKs in both modes.
+    BLOCK = "block"
+    # BLOCKs plain validate; --drop-offending removes the flagged ids.
+    BLOCK_OR_DROP = "block_or_drop"
+    # Plain validate writes the pedigree with the contradiction kept;
+    # --drop-offending removes the flagged ids.
+    KEEP_OR_DROP = "keep_or_drop"
+    # Repaired by founder synthesis; never BLOCKs and is never dropped.
+    AUTOFIX = "autofix"
+
+
+@dataclass(frozen=True)
+class Check:
+    """One registry entry: a named integrity test, its prerequisites, display label and Fail Policy."""
+
+    name: str
+    requires: tuple[str, ...]
+    run: Callable[[ValidationContext], CheckResult]
+    label: str
+    fail_policy: FailPolicy
+    # The BLOCKED line plain validate prints for this Check, with any flag that
+    # tolerates it. Defaults to the Check name.
+    block_message: str | None = None
+
+
+# Prerequisite shorthand: id_dtype parses the id and both parent columns.
+_IDS = ("id_dtype", "negative_ids", "duplicate_ids")
+
+CHECKS: tuple[Check, ...] = (
+    Check(
+        "required_columns",
+        (),
+        _required_columns,
+        "required columns present",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "empty_pedigree",
+        ("required_columns",),
+        _empty_pedigree,
+        "pedigree is non-empty",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "id_dtype",
+        ("required_columns",),
+        _id_dtype,
+        "every row has an id",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "sex_tokens",
+        ("required_columns",),
+        _sex_tokens,
+        "sex column tokens recognized",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "negative_ids",
+        ("id_dtype",),
+        _negative_ids,
+        "no negative IDs",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "duplicate_ids",
+        ("id_dtype",),
+        _duplicate_ids,
+        "no duplicate IDs",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="duplicate IDs detected",
+    ),
+    Check(
+        "parent_token_range_mother",
+        ("id_dtype",),
+        partial(_parent_token_range, role="mother"),
+        "mother IDs in valid range",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "parent_token_range_father",
+        ("id_dtype",),
+        partial(_parent_token_range, role="father"),
+        "father IDs in valid range",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "parent_refs_present_mother",
+        _IDS,
+        partial(_parent_refs_present, role="mother"),
+        "mother IDs present in pedigree",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
+        "parent_refs_present_father",
+        _IDS,
+        partial(_parent_refs_present, role="father"),
+        "father IDs present in pedigree",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
+        "parent_refs_sex_conflict",
+        _IDS,
+        _parent_refs_sex_conflict,
+        "no missing-parent sex conflicts",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="sex conflict on missing parent(s); pass --no-sex-check to default to sex=F",
+    ),
+    Check(
+        "sex_role_ambiguity",
+        (*_IDS, "sex_tokens"),
+        _sex_role_ambiguity,
+        "no role-ambiguous unsexed individuals",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message=(
+            "present individual(s) with unknown sex used as BOTH mother and father "
+            "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
+        ),
+    ),
+    Check(
+        "self_loops",
+        _IDS,
+        _self_loops,
+        "no self-loops",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
+        "parents_distinct",
+        _IDS,
+        _parents_distinct,
+        "mother and father distinct",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="rows with mother == father (cannot disambiguate)",
+    ),
+    Check(
+        "sex_role_consistency",
+        (*_IDS, "sex_tokens"),
+        _sex_role_consistency,
+        "sex consistent with parent role",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
+        "unknown_sex",
+        (*_IDS, "sex_tokens"),
+        _unknown_sex,
+        "all individuals have resolved sex",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
+    ),
+    Check(
+        "acyclic",
+        # Not parent_refs_present_*: a parent with no row counts as a founder
+        # for depth, so a cycle is found (and BLOCKs) even when a parent is
+        # missing (pedsum#22).
+        (*_IDS, "parents_distinct"),
+        _acyclic,
+        "acyclic (no descent cycles)",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message="cycle detected",
+    ),
+    Check(
+        "birth_year_dtype",
+        ("required_columns",),
+        _birth_year_dtype,
+        "birth_year column parses as numeric",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "birth_year_range",
+        ("id_dtype", "birth_year_dtype"),
+        _birth_year_range,
+        "birth years within sanity range",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
+        "birth_year_topology",
+        (*_IDS, "birth_year_dtype"),
+        _birth_year_topology,
+        "child birth_year >= parent birth_year",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+)
+
+# Derived from the registry (single source of truth).
+_CHECK_ORDER: tuple[str, ...] = tuple(c.name for c in CHECKS)
+CHECK_LABELS: dict[str, str] = {c.name: c.label for c in CHECKS}
+
+# Checks `validate --drop-offending` can resolve by removing the flagged
+# individual(s). Derived from the registry so the set never drifts.
+DROPPABLE_CHECKS: frozenset[str] = frozenset(
+    c.name for c in CHECKS if c.fail_policy in (FailPolicy.BLOCK_OR_DROP, FailPolicy.KEEP_OR_DROP)
+)
+
+
+def blocking_failures(results: Mapping[str, CheckResult], *, drop_offending: bool) -> list[tuple[str, str]]:
+    """The FAILed Checks that stop ``validate`` writing a pedigree, as ``(name, message)``.
+
+    In registry order. Under ``--drop-offending`` only ``FailPolicy.BLOCK``
+    Checks block (the rest are removed); in plain ``validate``
+    ``BLOCK_OR_DROP`` Checks block too. The message is the Check's
+    ``block_message``, else its name.
+    """
+    blocking = {FailPolicy.BLOCK} if drop_offending else {FailPolicy.BLOCK, FailPolicy.BLOCK_OR_DROP}
+    return [
+        (c.name, c.block_message or c.name)
+        for c in CHECKS
+        if c.fail_policy in blocking and c.name in results and results[c.name].status == CheckStatus.FAIL
+    ]
+
+
+# Curated *display* grouping for the stderr summary. Order within a group
+# intentionally differs from execution order (e.g. parents_distinct), so this
+# stays an explicit constant rather than a derivation of _CHECK_ORDER.
+CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Columns & parsing",
+        (
+            "required_columns",
+            "empty_pedigree",
+            "id_dtype",
+            "sex_tokens",
+        ),
+    ),
+    ("IDs", ("negative_ids", "duplicate_ids")),
+    (
+        "Parent references",
+        (
+            "parent_token_range_mother",
+            "parent_token_range_father",
+            "parent_refs_present_mother",
+            "parent_refs_present_father",
+            "parents_distinct",
+            "parent_refs_sex_conflict",
+            "sex_role_ambiguity",
+        ),
+    ),
+    (
+        "Graph structure",
+        (
+            "self_loops",
+            "sex_role_consistency",
+            "unknown_sex",
+            "acyclic",
+        ),
+    ),
+    (
+        "Birth years (optional)",
+        (
+            "birth_year_dtype",
+            "birth_year_range",
+            "birth_year_topology",
+        ),
+    ),
+)

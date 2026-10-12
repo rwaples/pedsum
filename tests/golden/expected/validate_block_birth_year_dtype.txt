@@ -1,0 +1,6 @@
+exit: 2
+artifacts: ['validate.log']
+=== validate.log ===
+check	id	row	detail	n_refs
+birth_year_dtype			birth-year column 'birth_year' must be numeric (integer or float calendar year, with -1/NA/blank for unknown); failed to parse: unable to parse value(s) ['abc'] as numeric	
+

@@ -188,12 +188,12 @@ def test_incest_fold_agrees_between_engines(tmp_path):
 
 def test_incest_fold_matches_per_individual_pair_lists(tmp_path):
     """The folded counts equal the pair lists pedigree-graph materialises."""
-    from pedsum.pairs import _build_pedigree_graph
-    from pedsum.validate import load_and_validate
+    from pedsum.pairs import build_pedigree_graph
+    from pedsum.validate import ValidationConfig, load_and_validate
 
     ped = write_ped(tmp_path / "incest.tsv", _INCEST_PEDIGREE)
-    df, _labels = load_and_validate(ped)
-    pg = _build_pedigree_graph(df)
+    df, _labels = load_and_validate(ped, ValidationConfig())
+    pg = build_pedigree_graph(df)
     pair_lists = pg.relationship_pairs(max_degree=5)
     streamed = pg.relationship_counts(max_degree=5)
     for code in _ALL_CODES:

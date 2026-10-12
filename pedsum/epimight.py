@@ -121,7 +121,7 @@ PLACEHOLDER_COLUMNS: tuple[str, ...] = (
     "dead_at_year",
 )
 
-#: Column order of the relative-pairs export (build_relative_pairs).
+#: Column order of the relative-pairs export (iter_relative_pairs).
 RELATIVE_PAIR_COLUMNS: tuple[str, ...] = ("id1", "id2", "relationship_kind", "kinship")
 
 
@@ -269,13 +269,33 @@ def iter_relative_pairs(
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
     exact_kinship: bool = False,
 ) -> Iterator[pl.DataFrame]:
-    """Yield the relative pairs one relationship kind at a time, in output order.
+    """Yield the relative pairs backing the skeleton's counts, one relationship kind at a time.
 
     Kinds come out in sorted order, one frame per distinct code in ``rels``
-    (empty when the kind has no pairs), each sorted by ``id1, id2``. Their
-    concatenation is :func:`build_relative_pairs`, so a writer can append the
-    frames as they come without holding every kind, or sorting the whole list,
-    at once. See :func:`build_relative_pairs` for the columns and orientation.
+    (empty when the kind has no pairs), each sorted by ``id1, id2``, so a
+    writer can append the frames as they come without holding every kind, or
+    sorting the whole list, at once.
+
+    One row per relative pair per relationship code, with columns
+    ``id1, id2, relationship_kind, kinship``. For directional kinds (``PO``,
+    ``Av``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
+    symmetric kinds are canonicalized so ``id1 < id2``.
+
+    ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
+    (identical for every pair of a kind) — not computed from the pedigree. Because
+    the EPIMIGHT codes overlap, a maternal half-sib pair is listed under both
+    ``HS`` and ``mHS`` and MZ twins appear as ``FS``, so the nominal value is the
+    dominant-case coefficient. With ``exact_kinship=True`` an extra
+    ``kinship_exact`` column carries the **exact pedigree** kinship from
+    ``pg.pair_kinship`` — inbreeding-, MZ-, and multi-path-aware, so it can
+    exceed the nominal value (e.g. inbred sibs, double first cousins).
+    pedigree-graph computes the kinship recurrence in **float32** (its pinned
+    numerical contract); the column is widened to float64 for the export, so
+    the values it carries are float32-origin and a float64 recomputation can
+    differ in the low bits. Its cost scales with pair count × pedigree depth.
+
+    ``df`` is the frame from ``load_and_validate`` and ``pg`` a
+    ``PedigreeGraph`` built from it (row order must match ``df``).
     """
     rels = validate_relationship_codes(rels)
     ids = df["id"].to_numpy()
@@ -317,51 +337,6 @@ def iter_relative_pairs(
         yield frame
         # Drop this kind before building the next, so at most one is held.
         del frame
-
-
-def build_relative_pairs(
-    df: pl.DataFrame,
-    pg: PedigreeGraph,
-    *,
-    rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
-    exact_kinship: bool = False,
-) -> pl.DataFrame:
-    """Build the long list of relative pairs backing the skeleton's counts.
-
-    One row per relative pair per relationship code, with columns
-    ``id1, id2, relationship_kind, kinship``. For directional kinds (``PO``,
-    ``Av``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
-    symmetric kinds are canonicalized so ``id1 < id2``. This concatenates
-    :func:`iter_relative_pairs`; the CLI writes that iterator kind by kind
-    instead, so it never holds the whole list.
-
-    ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
-    (identical for every pair of a kind) — not computed from the pedigree. Because
-    the EPIMIGHT codes overlap, a maternal half-sib pair is listed under both
-    ``HS`` and ``mHS`` and MZ twins appear as ``FS``, so the nominal value is the
-    dominant-case coefficient. With ``exact_kinship=True`` an extra
-    ``kinship_exact`` column carries the **exact pedigree** kinship from
-    ``pg.pair_kinship`` — inbreeding-, MZ-, and multi-path-aware, so it can
-    exceed the nominal value (e.g. inbred sibs, double first cousins).
-    pedigree-graph computes the kinship recurrence in **float32** (its pinned
-    numerical contract); the column is widened to float64 for the export, so
-    the values it carries are float32-origin and a float64 recomputation can
-    differ in the low bits.
-
-    Args:
-        df: the frame from ``load_and_validate`` (provides the ``id`` column).
-        pg: a ``PedigreeGraph`` built from ``df`` (row order must match ``df``);
-            supplies the pair blocks and the exact kinship.
-        rels: EPIMIGHT relationship codes to emit, in output order.
-        exact_kinship: add a ``kinship_exact`` column with exact pedigree kinship.
-            Runs the kinship recurrence over every pair (no ``n×n`` matrix), so
-            cost scales with pair count × pedigree depth.
-
-    Returns:
-        A DataFrame of relative pairs sorted by ``relationship_kind``, ``id1``,
-        ``id2``. Empty (with the right columns) when no pairs exist.
-    """
-    return pl.concat(iter_relative_pairs(df, pg, rels=rels, exact_kinship=exact_kinship))
 
 
 def relationship_diagnostics(frame: pl.DataFrame, rels: tuple[str, ...]) -> list[tuple[str, int, float]]:

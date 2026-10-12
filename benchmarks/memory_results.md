@@ -1,8 +1,8 @@
 # pedsum summarize — peak-RSS measurements
 
 Rerunnable record for the measure-first memory work. Regenerate inputs and
-re-run the profiler with the commands in `README.md`; raw per-run JSON lives in
-`benchmarks/results/`.
+re-run the profiler with the commands in `README.md`. The raw per-run JSON was
+removed from the tree; `git log --diff-filter=D -- benchmarks/results` finds it.
 
 - **Machine:** 12 cores, 30 GiB RAM, Linux. Sampler: `/proc/self/statm`, ~20 ms.
 - **In-process profiler** (`profile_memory.py`): RSS is per-process, so it is

@@ -9,27 +9,27 @@ import shutil
 import subprocess
 from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Union
 
-import numpy as np
 import polars as pl
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
-from pedsum.parse import _read_pedigree_table, plink_sex
-from pedsum.pedigree_ops import IdIndex
-from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
-from pedsum.sections import _numeric_distribution
-from pedsum.validate import _CHECK_GROUPS, _CHECK_LABELS
+from pedsum.checks import CHECK_GROUPS, CHECK_LABELS
+from pedsum.parse import plink_sex, read_aligned_columns
+from pedsum.redaction import SAFE_MIN_CELL
+from pedsum.schema import SECTION_SPECS, categorise_pedigree, split_individual_distributions, split_summary
+from pedsum.sections import INBREEDING_COLUMNS, Distribution, numeric_distribution
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Iterator
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
     from pedsum.ids import IdLabels
+    from pedsum.validate import ValidationConfig
 
 #: One value in the ``relationship_pairs`` section: a count (``None`` when the
 #: code was not computed) or the ``by_degree`` rollup.
@@ -55,7 +55,7 @@ _NUMERIC_COLS = (
 # pedsum's own provenance columns that ride along in a re-ingestible
 # ``validate.tsv.gz``.  When such a file is later summarized they collide with
 # the freshly derived columns; the stale copy is regenerated, so it is dropped
-# rather than preserved under an ``_input`` suffix (see _write_annotated_tsv).
+# rather than preserved under an ``_input`` suffix (see write_annotated_tsv).
 _RESERVED_PROVENANCE_COLS = frozenset({"sex_source"})
 
 
@@ -113,7 +113,18 @@ _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
 )
 
 
-def _build_effective_size_data(
+def _meta(path: Path, cmd: str, n_total: int | None) -> dict:
+    """The block every report starts with, in this key order: what ran on which input, and how many rows."""
+    return {
+        "input": str(path),
+        "command": cmd,
+        "version": VERSION,
+        "generated_at": _now_iso(),
+        "n_total": n_total,
+    }
+
+
+def build_effective_size_data(
     path: Path,
     cmd: str,
     n_total: int | None,
@@ -123,11 +134,7 @@ def _build_effective_size_data(
 ) -> dict:
     """The ``effective_size.yaml`` payload: the summary's meta block, then the run status and every estimator."""
     return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n_total,
+        **_meta(path, cmd, n_total),
         "status": status,
         "estimators_requested": requested,
         "effective_size": effective_size,
@@ -139,84 +146,51 @@ def _build_effective_size_data(
 ASSORTATIVE_MATING_FIGURES = 4
 
 
-def _build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
+def build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
     """The ``assortative_mating.yaml`` payload: the summary's meta block, then the Mate Correlation section."""
-    return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n_total,
-        "assortative_mating": assortative_mating,
-    }
+    return {**_meta(path, cmd, n_total), "assortative_mating": assortative_mating}
 
 
-def _build_pedigree_data(
+def build_pedigree_data(
     path: Path,
     cmd: str,
     size: dict,
-    sibships: dict,
+    sibships: dict | None,
     pairs: dict,
     inbreeding: dict | None,
     mating_pairs: dict | None,
     relationship_summary: dict | None,
-    aggregates: dict | None = None,
-    sex_concordance: dict | None = None,
+    aggregates: dict,
+    sex_concordance: dict | None,
     *,
     max_degree: int = 5,
 ) -> dict:
     """Build the flat pedigree-level payload.
 
-    ``_write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
-    ``_build_summary_data`` categorises it into the two summary YAMLs.
+    ``write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
+    ``build_summary_data`` categorises it into the two summary YAMLs. Each
+    section arrives as YAML-ready native types; a None section is absent.
     """
-    sibship_section: dict | None
-    if sibships.get("empty"):
-        sibship_section = None
-    else:
-        sibship_section = {
-            "n_sibships": int(sibships["n_sibships"]),
-            "mean": float(sibships["mean"]),
-            "median": float(sibships["median"]),
-            "q1": float(sibships["q1"]),
-            "q3": float(sibships["q3"]),
-            "size_dist": {str(k): float(v) for k, v in sibships["size_dist"].items()},
-        }
-    inb_section: dict | None
-    if inbreeding is None:
-        inb_section = None
-    else:
-        inb_section = {
-            "n_inbred": int(inbreeding["n_inbred"]),
-            "frac_inbred": float(inbreeding["frac_inbred"]),
-            "mean_F": float(inbreeding["mean_F"]),
-            "max_F": float(inbreeding["max_F"]),
-            "hist": {str(k): float(v) for k, v in inbreeding["hist"].items()},
-        }
     return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": int(size["n_total"]),
+        **_meta(path, cmd, size["n_total"]),
         "max_degree_enumerated": max_degree,
         "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
-        "sibship_size": sibship_section,
+        "sibship_size": sibships,
         "mating_pairs": mating_pairs,
         # Opt-in (`--sex-concordance`); None keeps the section out of every
         # output entirely, which is what holds the slim YAML line budget.
         "offspring_sex_concordance": sex_concordance,
         "relationship_summary": relationship_summary,
-        "reproduction": (aggregates or {}).get("reproduction", {}),
-        "genealogy": (aggregates or {}).get("genealogy", {}),
-        "founder_contribution": (aggregates or {}).get("founder_contribution", {}),
-        "founder_summary": (aggregates or {}).get("founder_summary", {}),
-        "components": (aggregates or {}).get("components", {}),
-        "sex_summary": (aggregates or {}).get("sex_summary", {}),
-        "depth_summary": (aggregates or {}).get("depth_summary", []),
+        "reproduction": aggregates["reproduction"],
+        "genealogy": aggregates["genealogy"],
+        "founder_contribution": aggregates["founder_contribution"],
+        "founder_summary": aggregates["founder_summary"],
+        "components": aggregates["components"],
+        "sex_summary": aggregates["sex_summary"],
+        "depth_summary": aggregates["depth_summary"],
         "pairs_engine": str(pairs.get("_engine", "unknown")),
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
-        "inbreeding": inb_section,
+        "inbreeding": inbreeding,
     }
 
 
@@ -235,287 +209,83 @@ def _serialise_pair_entry(value: PairEntry) -> object:
     return int(value)
 
 
-def _build_individual_data(
+def build_individual_data(
     idf: pl.DataFrame,
     path: Path,
     cmd: str,
-    include_inbreeding: bool,
 ) -> dict:
     """Canonical nested dict for the per-individual distribution report."""
-    n = len(idf)
-    distributions: dict[str, dict] = {}
-    for col in _NUMERIC_COLS:
-        if col in {"F", "n_distinct_ancestors"} and not include_inbreeding:
-            continue
-        if col not in idf.columns:
-            continue
-        distributions[col] = _numeric_distribution(idf[col])
-
-    out: dict = {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n,
-        "distributions": distributions,
-    }
-    return out
+    distributions = {col: numeric_distribution(idf[col]) for col in _NUMERIC_COLS if col in idf.columns}
+    return {**_meta(path, cmd, len(idf)), "distributions": distributions}
 
 
 _SUMMARY_META_KEYS = ("input", "command", "version", "generated_at", "n_total")
 
-SAFE_MIN_CELL = 5
 
-
-def _drop_distribution_extrema(obj: object) -> None:
-    """Remove min/max from nested distribution dicts for safe-attempt output."""
-    if isinstance(obj, dict):
-        if {"mean", "q1", "median", "q3", "min", "max"}.issubset(obj.keys()):
-            obj.pop("min", None)
-            obj.pop("max", None)
-        for v in obj.values():
-            _drop_distribution_extrema(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            _drop_distribution_extrema(v)
-
-
-def _null_below(d: dict, keys, min_cell: int) -> None:
-    """Null each of ``keys`` in ``d`` whose int value is in ``(0, min_cell)``.
-
-    Missing / ``None`` values collapse to 0 via ``or 0`` and are left
-    untouched (the ``0 <`` guard fails), matching the original per-site
-    small-cell tests.
-    """
-    for k in keys:
-        if 0 < int(d.get(k, 0) or 0) < min_cell:
-            d[k] = None
-
-
-def _redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_keys) -> None:
-    """Small-cell redaction for a grouped row keyed by ``n``.
-
-    If the group's ``n`` is below ``min_cell``, null every key except those
-    in ``keep``. Otherwise null only the ``small_keys`` whose own value is
-    below ``min_cell`` (via :func:`_null_below`).
-    """
-    if int(row.get("n", 0)) < min_cell:
-        for k in list(row):
-            if k not in keep:
-                row[k] = None
-    else:
-        _null_below(row, small_keys, min_cell)
-
-
-# Offspring Sex Concordance: every key that carries inference or a derived rate
-# over the eligible set. Suppressed wholesale when the grouping rests on fewer
-# than ``min_cell`` eligible groups; eligibility metadata is retained (and
-# small-cell-nulled) so the reader still sees why nothing was reported.
-_CONCORDANCE_INFERENCE_KEYS: tuple[str, ...] = (
-    "conditioning_male_fraction",
-    "n_within_group_pairs",
-    "max_group_pair_share",
-    "observed_pair_concordance",
-    "expected_pair_concordance",
-    "excess_concordance",
-    "direction",
-    "z",
-    "p_analytical",
-    "p_analytical_holm",
-    "p_holm",
-    "p_source",
-    "all_resolved_excess_concordance",
-)
-
-_CONCORDANCE_COUNT_KEYS: tuple[str, ...] = (
-    "n_groups_total",
-    "n_groups_eligible",
-    "n_groups_incomplete",
-    "n_groups_too_small",
-    "n_offspring_total",
-    "n_offspring_eligible",
-    "n_offspring_sex_excluded",
-    "n_offspring_in_small_groups",
-)
-
-
-def _redact_concordance_block(block: dict, min_cell: int) -> None:
-    """Small-cell redaction for one Offspring Sex Concordance grouping.
-
-    Recurses once into the ``all_resolved`` sensitivity block, which carries
-    the same eligibility/statistic keys and none of the outer wrappers.
-    Permutation count and seed survive — they describe the procedure,
-    not the pedigree.
-    """
-    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
-        for key in _CONCORDANCE_INFERENCE_KEYS:
-            if key in block:
-                block[key] = None
-        if "male_proportion_distribution" in block:
-            block["male_proportion_distribution"] = None
-        if "by_group_size" in block:
-            block["by_group_size"] = []
-        perms = block.get("permutations")
-        if isinstance(perms, dict):
-            perms["p_raw"] = None
-            perms["p_holm"] = None
-
-    for row in block.get("by_group_size") or []:
-        if int(row.get("n_groups", 0)) < min_cell:
-            for key in list(row):
-                if key not in ("group_size", "n_groups"):
-                    row[key] = None
-        else:
-            _null_below(row, ("n_offspring",), min_cell)
-
-    _null_below(block, _CONCORDANCE_COUNT_KEYS, min_cell)
-    by_source = block.get("eligible_by_sex_source")
-    if isinstance(by_source, dict):
-        _null_below(by_source, list(by_source), min_cell)
-
-    nested = block.get("all_resolved")
-    if isinstance(nested, dict):
-        _redact_concordance_block(nested, min_cell)
-
-
-def _apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
+def apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
     """Best-effort small-cell redaction (in place). Not a safe-harbor.
 
-    - Pedigree-level: nulls ``relationship_pairs`` codes and ``inbreeding``
-      fields below ``min_cell``; suppresses ``hist`` buckets whose implied
-      count (``frac × n_total``) is below the threshold; drops
-      ``next_components`` entries below it; nulls positional ``depth_counts``
-      entries below it.
-    - Individual-level: drops ``min``/``max`` from every distribution, nulls
-      ``nz`` below threshold.
+    Runs each summary section's ``SectionSpec.redact`` rule, removes the
+    extrema of every ``Distribution`` in the pedigree payload, and in each
+    per-individual distribution also nulls a small nonzero count.
     """
-    n_total = int(ped_data.get("n_total", 0))
-
-    sizes = ped_data.get("size_structure", {})
-    sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
-    sizes["depth_counts"] = [(g if g >= min_cell else None) for g in sizes.get("depth_counts", [])]
-    _null_below(sizes, ("largest_component",), min_cell)
-
-    _drop_distribution_extrema(ped_data)
-
-    sibship = ped_data.get("sibship_size")
-    mating = ped_data.get("mating_pairs")
-    n_pairs = int(mating.get("n_pairs", 0)) if mating is not None else 0
-    if sibship is not None and 0 < n_pairs < min_cell:
-        size_dist = sibship.get("size_dist")
-        if isinstance(size_dist, dict):
-            sibship["size_dist"] = dict.fromkeys(size_dist)
-
-    if mating is not None:
-        if 0 < int(mating.get("n_pairs", 0)) < min_cell:
-            for k in list(mating):
-                if k != "n_pairs":
-                    mating[k] = None
-        _null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
-
-    concordance = ped_data.get("offspring_sex_concordance")
-    if isinstance(concordance, dict):
-        for name, block in concordance.items():
-            if name != "null_model" and isinstance(block, dict):
-                _redact_concordance_block(block, min_cell)
-
-    rel_summary = ped_data.get("relationship_summary") or {}
-    _null_below(rel_summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
-    for section in ("related_pairs_by_closest_degree", "closest_relationship_per_individual"):
-        vals = rel_summary.get(section)
-        if isinstance(vals, dict):
-            _null_below(vals, list(vals), min_cell)
-    for row in rel_summary.get("related_pair_density_by_depth", []):
-        _redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
-        )
-
-    reproduction = ped_data.get("reproduction", {})
-    _null_below(reproduction, ("n_reproductive", "n_terminal"), min_cell)
-
-    founder = ped_data.get("founder_contribution", {})
-    _null_below(
-        founder,
-        ("n_founders_with_descendants", "n_founders_without_descendants"),
-        min_cell,
-    )
-
-    founder_summary = ped_data.get("founder_summary", {})
-    for row in founder_summary.get("by_depth", []):
-        _redact_small_group(row, ("depth", "n"), min_cell, ("active_founders",))
-    bottleneck = founder_summary.get("bottleneck")
-    if isinstance(bottleneck, dict):
-        _null_below(bottleneck, ("min_active_founders",), min_cell)
-
-    comps_full = ped_data.get("components", {})
-    _null_below(comps_full, ("singletons",), min_cell)
-
-    sex_summary = ped_data.get("sex_summary", {})
-    for stats in sex_summary.values():
-        _redact_small_group(
-            stats,
-            ("n",),
-            min_cell,
-            ("n_founders", "n_reproductive", "n_terminal", "n_inbred"),
-        )
-
-    for row in ped_data.get("depth_summary", []):
-        _redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
-        )
-
-    pairs = ped_data.get("relationship_pairs", {})
-    for code in list(pairs):
-        if code == "by_degree":
-            _null_below(pairs["by_degree"], list(pairs["by_degree"]), min_cell)
-        elif isinstance(pairs[code], int):
-            _null_below(pairs, (code,), min_cell)
-
-    inb = ped_data.get("inbreeding")
-    if inb is not None:
-        if 0 < int(inb.get("n_inbred", 0)) < min_cell:
-            inb["n_inbred"] = None
-            inb["frac_inbred"] = None
-            inb["mean_F"] = None
-            inb["max_F"] = None
-        for bucket, frac in list(inb.get("hist", {}).items()):
-            if frac is None:
-                continue
-            if 0 < frac * n_total < min_cell:
-                inb["hist"][bucket] = None
-
-    for dist in ind_data.get("distributions", {}).values():
-        dist.pop("min", None)
-        dist.pop("max", None)
-        _null_below(dist, ("nz",), min_cell)
+    n_total = int(ped_data["n_total"])
+    for spec in SECTION_SPECS:
+        value = ped_data.get(spec.name)
+        if spec.redact is not None and value is not None:
+            spec.redact(value, min_cell, n_total)
+    _strip_extrema(ped_data)
+    distributions = ind_data["distributions"]
+    for col, dist in distributions.items():
+        small_nz = 0 < (dist.nz or 0) < min_cell
+        distributions[col] = replace(dist.without_extrema(), nz=None if small_nz else dist.nz)
 
 
-def _build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:
+def _strip_extrema(obj: dict | list) -> None:
+    """Replace every ``Distribution`` nested in ``obj`` by its copy without extrema."""
+    items = obj.items() if isinstance(obj, dict) else enumerate(obj)
+    for key, value in list(items):
+        if isinstance(value, Distribution):
+            obj[key] = value.without_extrema()
+        elif isinstance(value, (dict, list)):
+            _strip_extrema(value)
+
+
+def as_plain(payload: dict) -> dict:
+    """``payload`` with each ``Distribution`` rendered as its mapping, for the writers that walk dicts and lists."""
+    return {k: _plain(v) for k, v in payload.items()}
+
+
+def _plain(obj: object) -> object:
+    if isinstance(obj, Distribution):
+        return obj.as_dict()
+    if isinstance(obj, dict):
+        return {k: _plain(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_plain(v) for v in obj]
+    return obj
+
+
+def build_summary_data(ped_data: dict, ind_data: dict) -> tuple[dict, dict]:
     """Build the (slim, extra) categorised YAML payloads from flat dicts.
 
     Pipeline: strip meta → categorise → split per ``SUMMARY_SCHEMA``.
     The same meta block sits at the top
     of both files so each is self-identifying. Per-individual
     ``distributions`` gets its own slim/extra split via
-    ``_split_individual_distributions``.
+    ``split_individual_distributions``.
 
     ``ped_data`` is left untouched (the TSV writers read it directly).
     """
     meta = {k: ped_data[k] for k in _SUMMARY_META_KEYS}
 
     flat_ped = {k: v for k, v in ped_data.items() if k not in _SUMMARY_META_KEYS}
-    nested_ped = _categorise_pedigree(flat_ped)
-    slim_ped, extra_ped = _split_summary(nested_ped)
+    nested_ped = categorise_pedigree(flat_ped)
+    slim_ped, extra_ped = split_summary(nested_ped)
 
     ind_payload = {k: v for k, v in ind_data.items() if k not in _SUMMARY_META_KEYS}
     dists = ind_payload.get("distributions", {})
-    slim_dists, extra_dists = _split_individual_distributions(dists)
+    slim_dists, extra_dists = split_individual_distributions(dists)
     base_ind = {k: v for k, v in ind_payload.items() if k != "distributions"}
     slim_ind = dict(base_ind)
     extra_ind = dict(base_ind)
@@ -562,7 +332,7 @@ def _round_floats(obj: object, ndigits: int = 4, figures: int = 0) -> object:
     return obj
 
 
-def _write_yaml(data: dict, path: Path, figures: int = 0) -> None:
+def write_yaml(data: dict, path: Path, figures: int = 0) -> None:
     """Write data as YAML to path (creates parent dirs); floats rounded as ``_round_floats`` does."""
     with atomic_output(path) as tmp, tmp.open("w") as fh:
         yaml.safe_dump(_round_floats(data, figures=figures), fh, sort_keys=False, default_flow_style=False)
@@ -580,7 +350,7 @@ def _render_cell(value: object) -> str | None:
     return str(value)
 
 
-def _write_long_tsv(data: dict, path: Path) -> None:
+def write_long_tsv(data: dict, path: Path) -> None:
     """Write data flattened to a long-form TSV; floats rounded to 4dp."""
     rows = list(_flatten_long(_round_floats(data)))
     df = pl.DataFrame(
@@ -596,7 +366,7 @@ def _write_long_tsv(data: dict, path: Path) -> None:
         df.write_csv(tmp, separator="\t")
 
 
-def _prepare_out_dir(path: Path) -> int:
+def prepare_out_dir(path: Path) -> int:
     """Create ``path`` as a directory if needed; refuse if it is a file.
 
     Returns 0 on success, 1 if the path exists as a non-directory.
@@ -626,7 +396,7 @@ def _csv_ready(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
+def to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
     """Write ``df`` as gzipped TSV; uses pigz when available, else gzip level 1.
 
     Output is standard .gz either way.
@@ -655,9 +425,10 @@ def _to_csv_gz(df: pl.DataFrame, out_path: Path) -> None:
         df.write_csv(fh, separator="\t")  # ty: ignore[no-matching-overload]
 
 
-def _write_annotated_tsv(
+def write_annotated_tsv(
     in_path: Path,
-    args: argparse.Namespace,
+    config: ValidationConfig,
+    sep: str,
     idf: pl.DataFrame,
     out_path: Path,
     labels: IdLabels,
@@ -671,34 +442,29 @@ def _write_annotated_tsv(
     PLINK's coding (1=male, 2=female, 0=unknown). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
-    raw = _read_pedigree_table(in_path, sep=getattr(args, "sep", "auto"), dtype=str if labels.is_string else None)
+    raw = read_aligned_columns(
+        in_path, sep, config.id_col, idf["id"].to_numpy(), labels, infer_types=not labels.is_string
+    )
+    if raw[config.id_col].null_count():
+        # An idf row the input lacks: rows were added or dropped between the
+        # input and idf, not a benign reorder.
+        raise PedigreeError("internal: row order mismatch between input and individual table")
     rename_map = {
-        args.id_col: "id",
-        args.sex_col: "sex",
-        args.mother_col: "mother",
-        args.father_col: "father",
+        config.id_col: "id",
+        config.sex_col: "sex",
+        config.mother_col: "mother",
+        config.father_col: "father",
     }
     rename_map = {k: v for k, v in rename_map.items() if k != v}
     if rename_map:
         raw = raw.rename(rename_map)
 
-    raw_ids = labels.codes(raw["id"])
-    idf_ids = idf["id"].to_numpy()
-    if not np.array_equal(raw_ids, idf_ids):
-        # ``load_and_validate`` may have reordered rows into topological
-        # order when the input was not already sorted parents-before-
-        # children.  Realign the raw read to ``idf`` order by ID.
-        perm = IdIndex(raw_ids).get_indexer(idf_ids)
-        if (perm == -1).any() or len(perm) != len(idf_ids):
-            # Truly mismatched (rows added or dropped between input and
-            # idf) — not a benign reorder.
-            raise PedigreeError("internal: row order mismatch between input and individual table")
-        raw = raw[perm]
-
     canonical = ("id", "sex", "mother", "father")
     extras = raw.drop([c for c in canonical if c in raw.columns])
 
-    derived_cols = set(idf.columns) - set(canonical)
+    # The inbreeding columns stay reserved under --no-inbreeding, so an input
+    # column of that name keeps its _input suffix instead of passing as computed.
+    derived_cols = (set(idf.columns) | set(INBREEDING_COLUMNS)) - set(canonical)
     collisions = [c for c in extras.columns if c in derived_cols]
 
     # A re-ingested pedsum output carries its own provenance columns (e.g.
@@ -722,10 +488,10 @@ def _write_annotated_tsv(
     idf = idf.with_columns(pl.Series("sex", plink_sex(idf["sex"].to_numpy())))
     idf = labels.relabel(idf, "id", "mother", "father")
     annotated = pl.concat([idf, extras], how="horizontal", strict=True)
-    _to_csv_gz(annotated, out_path)
+    to_csv_gz(annotated, out_path)
 
 
-def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
+def format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -> str:
     """Render the validate summary as grouped sections with friendly labels.
 
     The internal check names remain in ``.validate.log``; only the on-screen
@@ -733,30 +499,30 @@ def _format_check_summary(path: Path, n_total: int, results: list[CheckResult]) 
     are skipped defensively rather than crashing the formatter.
     """
     by_check = {r.name: r for r in results}
-    width = max(len(label) for label in _CHECK_LABELS.values()) + 1
+    width = max(len(label) for label in CHECK_LABELS.values()) + 1
     lines = [f"pedsum: validating {path} (N={n_total:,})"]
     total_findings = 0
-    for group_name, check_names in _CHECK_GROUPS:
+    for group_name, check_names in CHECK_GROUPS:
         lines.append("")
         lines.append(group_name)
         for name in check_names:
             r = by_check.get(name)
             if r is None:
                 continue  # defensive: tolerate missing check names
-            label = _CHECK_LABELS.get(name, name)
+            label = CHECK_LABELS.get(name, name)
             line = f"  {label} {'.' * (width - len(label))} {r.status}"
             if r.status == "FAIL":
                 line += f" ({r.count})"
                 total_findings += r.count
-            elif r.skip_reason and r.status in ("SKIP", "PASS"):
-                line += f" ({r.skip_reason})"
+            elif r.note:
+                line += f" ({r.note})"
             lines.append(line)
     lines.append("")
     lines.append(f"result: {total_findings} finding(s)")
     return "\n".join(lines) + "\n"
 
 
-def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
+def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
     """Tab-separated log: one row per finding (check / id / row / detail / n_refs).
 
     ``labels`` is None when the id column did not parse, so no finding has an id.
@@ -777,25 +543,19 @@ def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabel
         df.write_csv(tmp, separator="\t")
 
 
-def _write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
+def write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
     """Tab-separated manifest of `validate --drop-offending` removals.
 
-    One row per distinct ``(id, check, round)`` — the id removed, the Check that
+    One row per ``(id, check, round)``, which ``reduce_pedigree`` emits distinct: the id removed, the Check that
     flagged it, and the reduction round in which it was dropped (later rounds
     record offenders spawned by earlier drops). Written even when nothing was
     dropped (header only) so downstream tooling can rely on its presence.
     """
-    seen: set[tuple[str, str, int]] = set()
-    rows: list[tuple[str, str, int]] = []
-    for fid, check, rnd in dropped:
-        if (fid, check, rnd) not in seen:
-            seen.add((fid, check, rnd))
-            rows.append((fid, check, rnd))
     df = pl.DataFrame(
         {
-            "id": [r[0] for r in rows],
-            "check": [r[1] for r in rows],
-            "round": [r[2] for r in rows],
+            "id": [r[0] for r in dropped],
+            "check": [r[1] for r in dropped],
+            "round": [r[2] for r in dropped],
         },
         schema={"id": pl.String, "check": pl.String, "round": pl.Int64},
     )

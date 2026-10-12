@@ -8,7 +8,7 @@ from conftest import load_validate_tsv_gz, run_pedsum, write_ped
 from pedigree_graph import PedigreeGraph
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
-from pedsum.fixed_pedigree import _build_phantom_parents, _next_free_id
+from pedsum.fixed_pedigree import _build_phantom_parents, next_free_id
 
 # 1-4 founders; 5 and 6 are full sibs; 7 (a daughter of 5) lacks a father and
 # 8 (a son of 6) lacks a mother, so their child 9 is inbred; 10 lacks a father
@@ -49,7 +49,7 @@ def test_phantoms_fill_each_missing_slot_once():
     ids = np.array([1, 2, 3, 4, 5])
     mothers = np.array([-1, -1, 1, -1, 50])
     fathers = np.array([-1, -1, -1, 2, -1])
-    assert _next_free_id(ids, mothers, fathers) == 51
+    assert next_free_id(ids, mothers, fathers) == 51
     new_m, new_f, phantoms = _build_phantom_parents(mothers, fathers, 51)
     assert phantoms == [{"id": 51, "sex": SEX_MALE}, {"id": 52, "sex": SEX_FEMALE}, {"id": 53, "sex": SEX_MALE}]
     np.testing.assert_array_equal(new_m, [-1, -1, 1, 52, 50])

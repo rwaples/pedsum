@@ -1,0 +1,87 @@
+exit: 0
+artifacts: ['pipeline_input.tsv', 'relative_pairs.tsv']
+=== pipeline_input.tsv ===
+person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relatives_diagnosed	born_at_year	dead_at_year
+B01	trait1			1C	0		1961	
+B02	trait1			1C	0		1961	
+C01	trait1			1C	1		1962	
+C02	trait1			1C	1		1962	
+C03	trait1			1C	2		1962	
+001	trait1			1C	0		1963	
+B01	trait1			1G	0		1961	
+B02	trait1			1G	0		1961	
+C01	trait1			1G	2		1962	
+C02	trait1			1G	2		1962	
+C03	trait1			1G	2		1962	
+001	trait1			1G	4		1963	
+B01	trait1			Av	0		1961	
+B02	trait1			Av	0		1961	
+C01	trait1			Av	1		1962	
+C02	trait1			Av	1		1962	
+C03	trait1			Av	1		1962	
+001	trait1			Av	1		1963	
+B01	trait1			FS	1		1961	
+B02	trait1			FS	1		1961	
+C01	trait1			FS	1		1962	
+C02	trait1			FS	1		1962	
+C03	trait1			FS	0		1962	
+001	trait1			FS	0		1963	
+B01	trait1			HS	0		1961	
+B02	trait1			HS	0		1961	
+C01	trait1			HS	0		1962	
+C02	trait1			HS	0		1962	
+C03	trait1			HS	1		1962	
+001	trait1			HS	1		1963	
+B01	trait1			PO	2		1961	
+B02	trait1			PO	2		1961	
+C01	trait1			PO	2		1962	
+C02	trait1			PO	2		1962	
+C03	trait1			PO	1		1962	
+001	trait1			PO	2		1963	
+B01	trait1			mHS	0		1961	
+B02	trait1			mHS	0		1961	
+C01	trait1			mHS	0		1962	
+C02	trait1			mHS	0		1962	
+C03	trait1			mHS	0		1962	
+001	trait1			mHS	0		1963	
+B01	trait1			pHS	0		1961	
+B02	trait1			pHS	0		1961	
+C01	trait1			pHS	0		1962	
+C02	trait1			pHS	0		1962	
+C03	trait1			pHS	1		1962	
+001	trait1			pHS	1		1963	
+
+=== relative_pairs.tsv ===
+id1	id2	relationship_kind	kinship
+C01	C03	1C	0.0625
+C02	C03	1C	0.0625
+001	A01	1G	0.125
+001	A02	1G	0.125
+001	B01	1G	0.125
+001	B03	1G	0.125
+C01	A01	1G	0.125
+C01	A02	1G	0.125
+C02	A01	1G	0.125
+C02	A02	1G	0.125
+C03	A01	1G	0.125
+C03	A02	1G	0.125
+001	C02	Av	0.125
+C01	B02	Av	0.125
+C02	B02	Av	0.125
+C03	B01	Av	0.125
+B01	B02	FS	0.25
+C01	C02	FS	0.25
+001	C03	HS	0.125
+001	B02	PO	0.25
+001	C01	PO	0.25
+B01	A01	PO	0.25
+B01	A02	PO	0.25
+B02	A01	PO	0.25
+B02	A02	PO	0.25
+C01	B01	PO	0.25
+C01	B03	PO	0.25
+C02	B01	PO	0.25
+C02	B03	PO	0.25
+C03	B02	PO	0.25
+001	C03	pHS	0.125
+

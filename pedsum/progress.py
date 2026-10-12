@@ -1,4 +1,4 @@
-"""A terminal progress bar for pedigree-graph's long relationship calls.
+"""Progress reporting: phase timing (``timed``) and a terminal bar for pedigree-graph's long relationship calls.
 
 pedigree-graph reports a running relationship call through its ``progress=``
 keyword (its ADR 0017). :func:`relationship_progress` yields what to pass
@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, TextIO
 
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+
+from pedsum.base import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -95,3 +98,41 @@ def relationship_progress(
     finally:
         if bar is not None:
             bar.close()
+
+
+# Module-level stack of the active ``timed`` labels, innermost last. Touched
+# only by the benchmark RSS profiler (``benchmarks/profile_memory.py``) so it
+# can attribute each sample to the phase running when it was taken; empty and
+# inert in normal runs.
+_PROFILE_PHASE_STACK: list[str] = []
+
+
+def current_profile_phase() -> str | None:
+    """Return the innermost active ``timed`` label, or None outside any block.
+
+    Exposed for the benchmark RSS profiler so it can attribute sampled RSS to a
+    phase without depending on the private stack variable's name.
+    """
+    # One slice, not a check then an index: the memory watchdog calls this
+    # from its own thread while the main thread pops labels.
+    (label,) = _PROFILE_PHASE_STACK[-1:] or (None,)
+    return label
+
+
+@contextmanager
+def timed(label: str) -> Iterator[None]:
+    """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block.
+
+    Also pushes ``label`` onto a module-level phase stack for the block's
+    duration so the benchmark profiler can attribute RSS samples to it. The
+    push/pop is exception-safe (``finally``); the INFO log stays *after* the
+    block so — exactly as before — it fires only on normal exit, never when the
+    wrapped block raises.
+    """
+    t0 = time.perf_counter()
+    _PROFILE_PHASE_STACK.append(label)
+    try:
+        yield
+    finally:
+        _PROFILE_PHASE_STACK.pop()
+    logger.info("%s in %.2fs", label, time.perf_counter() - t0)

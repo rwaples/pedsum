@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import gzip
-
 import numpy as np
 import polars as pl
 import pytest
 import yaml
-from conftest import EXAMPLE, run_pedsum, write_ped
+from conftest import EXAMPLE, load_annotated_tsv_gz, run_pedsum, write_ped
 from pedigree_graph import PedigreeGraph
 from pedigree_graph._ne_rates import _equivalent_generations
 from pedigree_graph.effective_size import ne_individual_delta_f
@@ -72,8 +70,7 @@ def test_summarize_writes_ecg_column_and_distribution(tmp_path):
     out = tmp_path / "out"
     res = run_pedsum(["summarize", "--in", str(ped), "--out", str(out)])
     assert res.returncode == 0, res.stderr
-    with gzip.open(out / "annotated.tsv.gz", "rt") as fh:
-        ann = pl.read_csv(fh, separator="\t")
+    ann = load_annotated_tsv_gz(out)
     assert dict(zip(ann["id"].to_list(), ann["ecg"].to_list(), strict=True)) == pytest.approx(
         {1: 0, 2: 0, 3: 1, 4: 0, 5: 1.5, 6: 1, 7: 2.25}
     )

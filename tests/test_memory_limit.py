@@ -17,7 +17,7 @@ from conftest import EXAMPLE, run_pedsum
 
 from pedsum import report
 from pedsum.memory import EXIT_MEMORY_LIMIT, MemoryWatchdog, memory_headroom_bytes, parse_size, resolve_limit
-from pedsum.report import _to_csv_gz, _write_long_tsv, _write_yaml, atomic_output
+from pedsum.report import atomic_output, to_csv_gz, write_long_tsv, write_yaml
 
 GiB = 2**30
 
@@ -151,13 +151,13 @@ def test_failing_phase_lookup_still_exits_3():
 
 
 def test_current_profile_phase_reads_the_innermost_label():
-    """The phase lookup returns the innermost ``_timed`` label, or None outside any block."""
-    from pedsum.cli import _current_profile_phase, _timed
+    """The phase lookup returns the innermost ``timed`` label, or None outside any block."""
+    from pedsum.progress import current_profile_phase, timed
 
-    assert _current_profile_phase() is None
-    with _timed("outer"), _timed("inner"):
-        assert _current_profile_phase() == "inner"
-    assert _current_profile_phase() is None
+    assert current_profile_phase() is None
+    with timed("outer"), timed("inner"):
+        assert current_profile_phase() == "inner"
+    assert current_profile_phase() is None
 
 
 def test_failing_callback_is_logged_and_skipped(caplog):
@@ -276,17 +276,17 @@ def test_writer_failure_keeps_previous_output(tmp_path, monkeypatch, writer):
 
     if writer == "yaml":
         monkeypatch.setattr(report.yaml, "safe_dump", _raise_after_partial_yaml)
-        call = functools.partial(_write_yaml, {"a": 1}, target)
+        call = functools.partial(write_yaml, {"a": 1}, target)
     else:
         monkeypatch.setattr(pl.DataFrame, "write_csv", _raise_after_partial_csv)
         if writer == "long_tsv":
-            call = functools.partial(_write_long_tsv, {"a": 1}, target)
+            call = functools.partial(write_long_tsv, {"a": 1}, target)
         else:
             if writer == "csv_gz_gzip":
                 monkeypatch.setattr(report.shutil, "which", lambda _name: None)
             elif report.shutil.which("pigz") is None:
                 pytest.skip("pigz not on PATH")
-            call = functools.partial(_to_csv_gz, df, target)
+            call = functools.partial(to_csv_gz, df, target)
 
     with pytest.raises(RuntimeError, match="part-way"):
         call()
@@ -296,7 +296,7 @@ def test_writer_failure_keeps_previous_output(tmp_path, monkeypatch, writer):
 
 def test_writers_publish_parseable_output(tmp_path):
     """A successful YAML write is complete and leaves no temporary."""
-    _write_yaml({"a": 1.23456}, tmp_path / "s.yaml")
+    write_yaml({"a": 1.23456}, tmp_path / "s.yaml")
     assert yaml.safe_load((tmp_path / "s.yaml").read_text()) == {"a": 1.2346}
     assert _no_partials(tmp_path)
 

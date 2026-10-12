@@ -188,6 +188,8 @@ Flags:
   the inbreeding summary section. On by default. F is the single most
   expensive computation in pedsum, and its time grows with rows and
   steeply with **Depth** (see [Deep pedigrees](#deep-pedigrees)).
+  `--no-inbreeding` leaves `F` and `n_distinct_ancestors` out of
+  `annotated.tsv.gz`.
 - `--max-degree N` — count relationship pairs up to degree `N` (1 to 5,
   default 5). Codes past `N`, and their `by_degree` entries, are null:
   not counted, which is different from zero. `structure.max_degree_enumerated`

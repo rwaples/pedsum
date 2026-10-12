@@ -10,19 +10,17 @@ from hypothesis import strategies as st
 
 from pedsum.base import PedigreeError
 from pedsum.ids import _plain_ints, parse_ids
-from pedsum.parse import _PARENT_MISSING_TOKENS, _as_birth_year_col, _replace_missing_with
+from pedsum.parse import PARENT_MISSING_TOKENS, _replace_missing_with, as_birth_year_col
 
-_MISSING_TEXT_TOKENS = tuple(sorted(t for t in _PARENT_MISSING_TOKENS if t))
+_MISSING_TEXT_TOKENS = tuple(sorted(t for t in PARENT_MISSING_TOKENS if t))
 _INVALID_NUMERIC_TOKENS = ("abc", "12x", "1,2", "--", "M", "year2020")
 
 
-def _parse_parents(tokens: list, *, zero_as_missing: bool = False) -> np.ndarray:
+def _parse_parents(tokens: list) -> np.ndarray:
     """Mother codes for ``tokens``, beside integer ids 1..n and no fathers."""
     n = len(tokens)
     ids = pl.Series([str(i) for i in range(1, n + 1)])
-    _, mothers, _, _ = parse_ids(
-        ids, pl.Series(tokens, dtype=pl.String), pl.Series(["-1"] * n), zero_as_missing=zero_as_missing
-    )
+    _, mothers, _, _ = parse_ids(ids, pl.Series(tokens, dtype=pl.String), pl.Series(["-1"] * n))
     return mothers
 
 
@@ -54,25 +52,16 @@ def test_missing_parent_tokens_parse_to_sentinel(tokens: list[str | None]) -> No
 def test_replace_missing_with_uses_requested_sentinel(tokens: list[str | None]) -> None:
     """Missing-token normalization uses the caller-provided sentinel exactly."""
     sentinel = "<missing>"
-    cleaned = _replace_missing_with(pl.Series(tokens, dtype=pl.String), _PARENT_MISSING_TOKENS, sentinel)
+    cleaned = _replace_missing_with(pl.Series(tokens, dtype=pl.String), PARENT_MISSING_TOKENS, sentinel)
     assert cleaned.to_list() == [sentinel] * len(tokens)
 
 
 @given(st.lists(st.integers(min_value=0, max_value=1_000_000), min_size=1, max_size=100))
 def test_parent_int_parser_preserves_integer_tokens(values: list[int]) -> None:
-    """Valid integer parent IDs round-trip when zero is not treated as missing."""
+    """Valid integer parent IDs round-trip, zero included."""
     tokens = [f"  {value}  " for value in values]
     parsed = _parse_parents(tokens)
     assert parsed.tolist() == values
-
-
-@given(st.lists(st.integers(min_value=0, max_value=1_000_000), min_size=1, max_size=100))
-def test_parent_int_parser_can_treat_zero_as_missing(values: list[int]) -> None:
-    """PLINK-style zero-as-missing maps only literal zero to ``-1``."""
-    tokens = [str(value) for value in values]
-    parsed = _parse_parents(tokens, zero_as_missing=True)
-    expected = [-1 if value == 0 else value for value in values]
-    assert parsed.tolist() == expected
 
 
 @given(
@@ -88,7 +77,7 @@ def test_parent_int_parser_can_treat_zero_as_missing(values: list[int]) -> None:
 def test_birth_year_parser_matches_int32_cast(tokens: list[str]) -> None:
     """Birth-year parsing accepts numeric tokens and follows NumPy int32 casting."""
     series = pl.Series(tokens, dtype=pl.String)
-    parsed = _as_birth_year_col(series, "birth_year")
+    parsed = as_birth_year_col(series, "birth_year")
     expected = np.array([float(t) for t in tokens], dtype=np.float64).astype(np.int32)
     assert parsed.dtype == np.int32
     assert np.array_equal(parsed, expected)
@@ -98,7 +87,7 @@ _ID_TOKENS = st.one_of(
     st.integers(min_value=-3, max_value=30).map(str),
     st.sampled_from(["001", "01", "1.0", "2.9", "+5", "-0", "A1", "a1", "x", "1e3"]),
     st.text(alphabet="abc019_-.", min_size=1, max_size=4).map(str.strip).filter(bool),
-).filter(lambda t: t.upper() not in _PARENT_MISSING_TOKENS)  # a missing token is not an id
+).filter(lambda t: t.upper() not in PARENT_MISSING_TOKENS)  # a missing token is not an id
 
 
 @given(
@@ -113,7 +102,7 @@ def test_ids_print_back_as_written(id_tokens: list[str], parent_tokens: list[str
         pl.Series(id_tokens), pl.Series(parents), pl.Series(list(reversed(parents)))
     )
     assert labels.strings(ids).to_list() == id_tokens
-    expected_parents = ["-1" if t.upper() in _PARENT_MISSING_TOKENS or t == "-1" else t for t in parents]
+    expected_parents = ["-1" if t.upper() in PARENT_MISSING_TOKENS or t == "-1" else t for t in parents]
     assert labels.strings(mothers).to_list() == expected_parents
     assert labels.strings(fathers).to_list() == list(reversed(expected_parents))
     tokens = id_tokens + expected_parents
@@ -150,7 +139,7 @@ def test_missing_id_is_an_error() -> None:
 def test_birth_year_parser_rejects_non_numeric_tokens(token: str) -> None:
     """Birth-year parsing rejects non-numeric non-missing tokens."""
     with pytest.raises(PedigreeError):
-        _as_birth_year_col(pl.Series([token], dtype=pl.String), "birth_year")
+        as_birth_year_col(pl.Series([token], dtype=pl.String), "birth_year")
 
 
 def _python_plain(token: str) -> bool:

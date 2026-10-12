@@ -9,14 +9,19 @@ which makes precise assertions noisy).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from conftest import write_ped as _write_ped
 
-import pedigree_summary as ps
+from pedsum.validate import ValidationConfig, validate_pedigree
+
+if TYPE_CHECKING:
+    from pedsum.checks import CheckResult
 
 
-def _results_by_name(path) -> dict[str, ps.CheckResult]:
+def _results_by_name(path) -> dict[str, CheckResult]:
     """Run validate_pedigree and return results indexed by check name."""
-    _, results, _, _ = ps.validate_pedigree(path)
+    _, results, _, _ = validate_pedigree(path, ValidationConfig())
     return {r.name: r for r in results}
 
 
@@ -45,7 +50,7 @@ def test_missing_id_skips_id_dependent_checks(tmp_path):
         "acyclic",
     ):
         assert results[name].status == "SKIP", name
-        assert results[name].skip_reason, name
+        assert results[name].note, name
 
 
 def test_string_ids_run_every_check(tmp_path):
@@ -98,7 +103,7 @@ def test_missing_required_column_returns_with_required_columns_fail(tmp_path):
         if name == "required_columns":
             continue
         assert r.status == "SKIP", name
-        assert r.skip_reason == "required_columns failed", name
+        assert r.note == "required_columns failed", name
 
 
 def test_bad_sex_token_skips_sex_role_checks(tmp_path):
@@ -114,4 +119,4 @@ def test_bad_sex_token_skips_sex_role_checks(tmp_path):
     assert results["sex_tokens"].status == "FAIL"
     for name in ("sex_role_ambiguity", "sex_role_consistency", "unknown_sex"):
         assert results[name].status == "SKIP", name
-        assert results[name].skip_reason == "sex_tokens failed", name
+        assert results[name].note == "sex_tokens failed", name

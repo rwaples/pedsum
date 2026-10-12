@@ -1,7 +1,11 @@
-# ty config for pedsum (uses standalone ruff.toml, no pyproject.toml).
+# ty config for pedsum (ruff reads ruff.toml; pyproject.toml holds the package metadata).
 [environment]
 python-version = "3.14"
-# pedigree_graph is an import-hook editable install; point ty at its source.
+# Resolve pedigree_graph from the sibling checkout's source, which ty ranks
+# above site-packages (checked 2026-10-12 with a stub package on extra-paths).
+# tools/family_worktree.py lays out a family worktree so this path resolves
+# there too. The sibling checkout can be ahead of or behind the pedigree-graph
+# wheel pixi.lock installs (0.12.3), so ty checks against the checkout.
 extra-paths = ["../pedigree-graph"]
 
 [src]

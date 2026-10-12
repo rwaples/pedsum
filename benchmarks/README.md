@@ -1,9 +1,8 @@
 # pedsum memory benchmarks
 
-Tooling for the *measure-first* memory-reduction work on `pedsum summarize`
-(see the plan in `i-want-to-make-structured-narwhal.md`). No optimization is
-merged before its before/after peak-RSS delta is recorded in
-`memory_results.md`.
+Tooling for measuring pedsum's wall time and peak RSS. Optimizations and
+refactors are gated on before/after medians (`profile_memory.py --compare`);
+`memory_results.md` records the memory-reduction work on `pedsum summarize`.
 
 ## What's here
 
@@ -11,13 +10,19 @@ merged before its before/after peak-RSS delta is recorded in
   (seed + parameters). **Generated inputs are not checked in**; regenerate them
   from the commands below so baselines stay reproducible without committing
   large TSVs.
-- `profile_memory.py` — in-process peak-RSS profiler. Runs
-  `pedsum.cli._run_summarize` (reusing `_parse_args`) while a background thread
-  samples `/proc/self/statm`, attributing per-phase peaks via
-  `pedsum.cli._current_profile_phase()`.
+- `profile_memory.py` — wall-time and peak-RSS profiler for any subcommand.
+  Each repeat runs in a child process; peak RSS is `wait4`'s `ru_maxrss`, and
+  a sampler in the child attributes approximate per-phase peaks via
+  `pedsum.progress.current_profile_phase()`. `--compare BASELINE.json` exits 1
+  when the exit codes differ from the baseline's, or when the median command
+  time (the child's `main()`, without interpreter startup and imports) or the
+  median peak RSS exceeds 1.05x the baseline's.
 - `bench_pytest_workers.sh` — repeatable pytest-xdist worker/thread sweep. It
   compares the serial suite with pinned and unpinned parallel cells and samples
   aggregate RSS across the whole pytest process tree.
+- `bench_pedsum.sh` with `simace_scenarios.yaml` — times `pedsum summarize` on a
+  pedigree simACE simulates (`simace run <scenario> --until simulate`); see the
+  script header.
 - `memory_results.md` — the recorded baseline / before-after table.
 
 The `assortative-mating` subcommand has its own tooling:
@@ -74,41 +79,30 @@ extra-column count / seed) that the profiler reads for its metadata line.
 ## Capturing a baseline / before-after
 
 ```bash
-# Streaming, narrow
-python benchmarks/profile_memory.py --label narrow/streaming --repeats 3 --warmup 1 \
-    --json-out benchmarks/results/narrow_streaming.json \
-    -- summarize --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out --birth-year-col birth_year
+# Before the change: 1 warm-up + 5 measured runs.
+python benchmarks/profile_memory.py --label validate/1m --repeats 5 \
+    --json-out /tmp/validate_before.json \
+    -- validate --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out --birth-year-col birth_year
 
-# Matrix, narrow
-python benchmarks/profile_memory.py --label narrow/matrix --repeats 3 --warmup 1 \
-    --json-out benchmarks/results/narrow_matrix.json \
-    -- summarize --in /tmp/ped_200k_narrow.tsv --out /tmp/prof_out \
-       --birth-year-col birth_year --per-individual-pairs
+# After the change: the same command gated against the baseline (exit 1 on a regression).
+python benchmarks/profile_memory.py --label validate/1m --repeats 5 \
+    --compare /tmp/validate_before.json \
+    -- validate --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out --birth-year-col birth_year
 ```
 
-Diagnostic rows that isolate pair-count RSS (a later F peak can otherwise
-hide whether releasing pair matrices lowered the overall peak):
+Everything after `--` is a pedsum argv, so any subcommand works.
+`summarize` at `--max-degree 5` takes tens of minutes on 1M rows; gate
+it at `--max-degree 2` unless the change touches pair counting.
 
-```bash
-python benchmarks/profile_memory.py --label narrow/streaming/no-f --repeats 2 --warmup 1 \
-    -- summarize --in /tmp/ped_1m_narrow.tsv --out /tmp/prof_out --birth-year-col birth_year \
-       --no-inbreeding
-```
-
-Since 0.15.0 `summarize` computes no Ne, so profiles have no
-effective-size phase, and results recorded before then (the
-`effective_size` key in `benchmarks/results/*.json`) are not comparable
-on total peak or runtime. The profiler drives `summarize` only;
-`effective-size` has no profile.
-
-For expensive ~1M-row cells use `--repeats 2`; for smaller inputs `--repeats 3`.
-Pass `--baseline <prior.json>` to flag (not block) >20% runtime regressions.
+Since 0.15.0 `summarize` computes no Ne, so the peaks and runtimes in
+`memory_results.md`, recorded before then, are not comparable to a current run.
 
 ## Repeats / interpretation
 
-- 1 warm-up + 3 measured repeats (small/medium) or ≥2 (expensive ~1M-row).
-- The profiler reports median peak RSS and the observed range; RSS varies with
-  allocator/cache state, so compare medians.
-- Per-phase peaks attribute RSS to the active `_timed` block. Samples taken
+- 1 warm-up + 5 measured repeats. A single-run comparison is not evidence.
+- The profiler reports medians and the observed range; RSS varies with
+  allocator/cache state, so compare medians. Check the CPU clock and load
+  before measuring.
+- Per-phase peaks attribute RSS to the active `timed` block. Samples taken
   outside any block (e.g. YAML serialization) land under `(unprofiled)`. This
   intentionally prioritizes phase attribution over CLI startup/import RSS.

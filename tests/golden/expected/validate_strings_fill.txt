@@ -1,0 +1,21 @@
+exit: 1
+artifacts: ['validate.log', 'validate.tsv.gz']
+=== validate.log ===
+check	id	row	detail	n_refs
+parent_refs_present_mother	Z99		id=Z99 referenced as mother 1 time(s) but no row has this id	1
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year	ref	sex_source
+Z99	2	-1	-1			
+_pedsum_phantom_1	1	-1	-1			
+_pedsum_phantom_2	2	-1	-1			
+A01	1			1950	0	input
+A02	2	.		1950	0	input
+B03	1	Z99	_pedsum_phantom_1	1976	1	input
+B01	2	A02	A01	1975	0	input
+B02	1	A02	A01	1977	0	input
+C01	2	B01	B03	2000	1	input
+C02	1	B01	B03	2002	1	input
+C03	2	_pedsum_phantom_2	B02	2003	1	input
+001	1	C01	B02	2025	1	input
+

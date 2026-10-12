@@ -290,6 +290,11 @@ whole command.
   with two encodings in one column and broke type inference in other
   readers. Synthesized founders now get `2`/`1` instead of `F`/`M`.
   `sex_source` still records which rows pedsum changed.
+- **`summarize --no-inbreeding` leaves `F` and `n_distinct_ancestors` out
+  of `annotated.tsv.gz`**. They were written as zeros, which read as
+  computed values: no individual inbred, no ancestors. An input column
+  with either name still gets the `_input` suffix, so it cannot pass as
+  computed.
 
 ### Fixed
 
@@ -300,6 +305,17 @@ whole command.
   to drop" under `--drop-offending`, and the written file then failed its
   own re-validation. `acyclic` now runs on every pedigree whose IDs parse:
   plain `validate` BLOCKs, and `--drop-offending` drops the cycle members.
+- **A missing `--birth-year-col` is named in `validate.log`.** When
+  `summarize`, `effective-size`, `assortative-mating` or `epimight-input`
+  stopped because the named birth-year column was not in the file, the
+  `validate.log` it wrote had a header and no rows, while the console said
+  to fix the reported issues. The log now carries the `required_columns`
+  finding naming the column.
+- **`validate` no longer deletes its own input.** With `--in
+  OUT/validate.tsv.gz --out OUT`, the cleanup of a previous run's outputs
+  removed the input before reading it, and the run exited 2 with "input
+  file not found". `validate` now exits 2 before touching `OUT` when
+  `--in` is one of its outputs there, and asks for another `--out`.
 - **`validate --help` describes `--sex-col` as the other commands do**:
   M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
   offered the 0=female, 1=male coding that 0.15 removed.

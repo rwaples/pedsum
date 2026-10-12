@@ -13,7 +13,8 @@ import yaml
 from conftest import EXAMPLE, REPO, run_pedsum, write_ped, write_stripped_pedigree
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
-from pedsum import cli
+from pedsum.cli import effective_size
+from pedsum.cli.parser import parse_args
 from pedsum.memory import EXIT_MEMORY_LIMIT, GiB, MemoryWatchdog
 
 COANCESTRY = ("ne_coancestry", "ne_group_coancestry")
@@ -170,19 +171,19 @@ def test_unknown_sex_is_refused(tmp_path):
 _BREACH_SCRIPT = """
 import sys, time
 import numpy as np
-from pedsum import cli
+from pedsum.cli import effective_size, main
 from pedsum.memory import read_rss_bytes
 
-real = cli.compute_effective_size
+real = effective_size.compute_effective_size
 
 def estimators_allocate(pg, names):
     block = np.ones(600 * 2**20, dtype=np.uint8)
     time.sleep(30)
     return real(pg, names)
 
-cli.compute_effective_size = estimators_allocate
+effective_size.compute_effective_size = estimators_allocate
 limit = read_rss_bytes() + 300 * 2**20
-sys.exit(cli.main([*sys.argv[1:], "--max-memory", str(limit)]))
+sys.exit(main([*sys.argv[1:], "--max-memory", str(limit)]))
 """
 
 
@@ -229,19 +230,19 @@ def test_breach_with_a_single_estimator(tmp_path):
 _LOAD_BREACH_SCRIPT = """
 import sys, time
 import numpy as np
-from pedsum import cli
+from pedsum.cli import common, main
 from pedsum.memory import read_rss_bytes
 
-real = cli.load_and_validate
+real = common.load_and_validate
 
 def load_allocates(*args, **kwargs):
     block = np.ones(600 * 2**20, dtype=np.uint8)
     time.sleep(30)
     return real(*args, **kwargs)
 
-cli.load_and_validate = load_allocates
+common.load_and_validate = load_allocates
 limit = read_rss_bytes() + 300 * 2**20
-sys.exit(cli.main([*sys.argv[1:], "--max-memory", str(limit)]))
+sys.exit(main([*sys.argv[1:], "--max-memory", str(limit)]))
 """
 
 
@@ -270,7 +271,7 @@ def test_breach_while_loading_replaces_an_earlier_complete_file(tmp_path):
 
 
 def _args(tmp_path, *extra):
-    return cli._parse_args(["effective-size", "--in", str(EXAMPLE), "--out", str(tmp_path / "out"), *extra])
+    return parse_args(["effective-size", "--in", str(EXAMPLE), "--out", str(tmp_path / "out"), *extra])
 
 
 def test_breach_during_final_publication_keeps_the_complete_file(tmp_path, monkeypatch, caplog):
@@ -287,7 +288,7 @@ def test_breach_during_final_publication_keeps_the_complete_file(tmp_path, monke
             sampled_high.set()
         return rss[0]
 
-    real_write = cli._write_yaml
+    real_write = effective_size.write_yaml
 
     def slow_write(data, path):
         if data["status"] == "complete":
@@ -295,11 +296,11 @@ def test_breach_during_final_publication_keeps_the_complete_file(tmp_path, monke
             assert release.wait(timeout=30)
         real_write(data, path)
 
-    monkeypatch.setattr(cli, "_write_yaml", slow_write)
+    monkeypatch.setattr(effective_size, "write_yaml", slow_write)
     args = _args(tmp_path)
     wd = MemoryWatchdog(GiB, poll_s=0.01, rss_reader=reader, exit_fn=exits.append)
     with caplog.at_level(logging.INFO), wd:
-        runner = threading.Thread(target=lambda: codes.append(cli._run_effective_size(args, "cmd", wd)))
+        runner = threading.Thread(target=lambda: codes.append(effective_size.run_effective_size(args, "cmd", wd)))
         runner.start()
         assert entered.wait(timeout=60)
         rss[0] = 2 * GiB
@@ -325,7 +326,7 @@ def test_breach_before_final_publication_wins(tmp_path, monkeypatch):
         exits.append(code)
         exited.set()
 
-    real_compute = cli.compute_effective_size
+    real_compute = effective_size.compute_effective_size
 
     def compute_waits_for_breach(pg, names):
         out = real_compute(pg, names)
@@ -333,10 +334,10 @@ def test_breach_before_final_publication_wins(tmp_path, monkeypatch):
         assert exited.wait(timeout=5)
         return out
 
-    monkeypatch.setattr(cli, "compute_effective_size", compute_waits_for_breach)
+    monkeypatch.setattr(effective_size, "compute_effective_size", compute_waits_for_breach)
     args = _args(tmp_path, "--estimators", "all")
     with MemoryWatchdog(GiB, poll_s=0.01, rss_reader=lambda: rss[0], exit_fn=record_exit) as wd:
-        assert cli._run_effective_size(args, "cmd", wd) == 0
+        assert effective_size.run_effective_size(args, "cmd", wd) == 0
     assert exits == [EXIT_MEMORY_LIMIT]
     data = _load(args.out_dir / "effective_size.yaml")
     assert data["status"] == "stopped_memory_limit"
@@ -464,8 +465,8 @@ def test_every_null_ne_has_a_reason(tmp_path):
 
 def _run_es_in_process(tmp_path, pedigree, *extra):
     out_dir = tmp_path / "out"
-    args = cli._parse_args(["effective-size", "--in", str(pedigree), "--out", str(out_dir), *extra])
-    assert cli._run_effective_size(args, "cmd", MemoryWatchdog(None)) == 0
+    args = parse_args(["effective-size", "--in", str(pedigree), "--out", str(out_dir), *extra])
+    assert effective_size.run_effective_size(args, "cmd", MemoryWatchdog(None)) == 0
     return _load(out_dir / "effective_size.yaml")["effective_size"]["ne_individual_delta_f"]
 
 
