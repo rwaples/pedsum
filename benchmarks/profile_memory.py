@@ -32,7 +32,9 @@ Everything after ``--`` is the verbatim pedsum argv. ``--out`` is rewritten to
 a fresh directory per repeat. A ``<--in>.meta.json`` sidecar (from
 ``generate_pedigree.py``) is read when present to record rows / max depth /
 extra-column count. Non-zero exit codes are recorded, not fatal, because
-``validate`` exits 1 whenever it reports a finding.
+``validate`` exits 1 whenever it reports a finding. A child that ends without
+returning from ``main()`` (the memory watchdog's ``os._exit``, an uncaught
+exception) has no ``cmd_s``; its exit code and peak RSS still count.
 """
 
 from __future__ import annotations
@@ -146,12 +148,9 @@ def _run_once(argv: list[str], out_dir: Path) -> dict:
     proc = subprocess.Popen([sys.executable, __file__, "--child", str(timing_path), "--", *argv])
     _, status, usage = os.wait4(proc.pid, 0)
     wall = time.perf_counter() - t0
-    exit_code = os.waitstatus_to_exitcode(status)
-    if not timing_path.exists():
-        raise SystemExit(f"pedsum {' '.join(argv)} did not return (exit {exit_code}); nothing to measure")
-    timing = json.loads(timing_path.read_text())
+    timing = json.loads(timing_path.read_text()) if timing_path.exists() else {"cmd_s": None, "per_phase": {}}
     return {
-        "exit_code": exit_code,
+        "exit_code": os.waitstatus_to_exitcode(status),
         "cmd_s": timing["cmd_s"],
         "wall_s": wall,
         # Linux reports ru_maxrss in KiB.
@@ -178,11 +177,18 @@ def _detect_metadata(argv: list[str]) -> dict:
     }
 
 
+def _spread(name: str, values: list[float]) -> dict:
+    """``{name}_median``, ``_min`` and ``_max`` of ``values``, or ``None`` each when there are none."""
+    if not values:
+        return {f"{name}_median": None, f"{name}_min": None, f"{name}_max": None}
+    return {f"{name}_median": statistics.median(values), f"{name}_min": min(values), f"{name}_max": max(values)}
+
+
 def _aggregate(runs: list[dict]) -> dict:
-    """Median + range of command time, wall time and peak RSS over measured runs; per-phase medians."""
-    cmds = [r["cmd_s"] for r in runs]
-    walls = [r["wall_s"] for r in runs]
-    rss = [r["maxrss_mib"] for r in runs]
+    """Median + range of command time, wall time and peak RSS over measured runs; per-phase medians.
+
+    Command time is over the runs that returned from ``main()``.
+    """
     phase_names = {name for r in runs for name in r["per_phase"]}
     per_phase: dict[str, dict] = {}
     for name in phase_names:
@@ -195,15 +201,9 @@ def _aggregate(runs: list[dict]) -> dict:
     return {
         "n_runs": len(runs),
         "exit_codes": sorted({r["exit_code"] for r in runs}),
-        "cmd_s_median": statistics.median(cmds),
-        "cmd_s_min": min(cmds),
-        "cmd_s_max": max(cmds),
-        "wall_s_median": statistics.median(walls),
-        "wall_s_min": min(walls),
-        "wall_s_max": max(walls),
-        "maxrss_mib_median": statistics.median(rss),
-        "maxrss_mib_min": min(rss),
-        "maxrss_mib_max": max(rss),
+        **_spread("cmd_s", [r["cmd_s"] for r in runs if r["cmd_s"] is not None]),
+        **_spread("wall_s", [r["wall_s"] for r in runs]),
+        **_spread("maxrss_mib", [r["maxrss_mib"] for r in runs]),
         "per_phase": per_phase,
     }
 
@@ -212,14 +212,19 @@ def compare(agg: dict, baseline: dict) -> list[str]:
     """Regressions of ``agg`` against ``baseline``: other exit codes, or a median above ``GATE_RATIO`` x the baseline's.
 
     A run that exits differently did different work, so its times say nothing
-    about the change.
+    about the change. Command time is compared only when both sides have one.
     """
+    if "cmd_s_median" not in baseline:
+        raise SystemExit("the baseline has no cmd_s_median; re-record it with this version of profile_memory.py")
     failures = []
     if agg["exit_codes"] != baseline["exit_codes"]:
         line = f"exit_codes: {agg['exit_codes']} vs baseline {baseline['exit_codes']}"
         print(line)
         failures.append(line)
     for key, unit in (("cmd_s_median", "s"), ("maxrss_mib_median", " MiB")):
+        if agg[key] is None or baseline[key] is None:
+            print(f"{key}: {agg[key]} vs baseline {baseline[key]} (not compared)")
+            continue
         ratio = agg[key] / baseline[key]
         line = f"{key}: {agg[key]:.2f}{unit} vs baseline {baseline[key]:.2f}{unit} ({ratio:.3f}x)"
         print(line)
@@ -234,8 +239,13 @@ def _print_report(label: str, meta: dict, agg: dict) -> None:
         f"{meta['subcommand']} input={meta['input']} rows={meta['rows']} max_depth={meta['max_depth']} "
         f"extra_cols={meta['extra_cols']} exit_codes={agg['exit_codes']}"
     )
+    command = (
+        "no run returned from main()"
+        if agg["cmd_s_median"] is None
+        else f"median {agg['cmd_s_median']:.2f}s (range {agg['cmd_s_min']:.2f}-{agg['cmd_s_max']:.2f})"
+    )
     print(
-        f"command: median {agg['cmd_s_median']:.2f}s (range {agg['cmd_s_min']:.2f}-{agg['cmd_s_max']:.2f}); "
+        f"command: {command}; "
         f"process wall: median {agg['wall_s_median']:.2f}s; "
         f"peak RSS (wait4): median {agg['maxrss_mib_median']:.1f} MiB "
         f"(range {agg['maxrss_mib_min']:.1f}-{agg['maxrss_mib_max']:.1f}) over {agg['n_runs']} run(s)"
