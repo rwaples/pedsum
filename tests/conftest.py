@@ -9,25 +9,16 @@ import io
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from pedsum.cli import main
+from pedsum.pedigree_ops import IdIndex, _parent_rows
+
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
-SCRIPT = REPO / "pedigree_summary.py"
-
-# Make the repo-root ``pedigree_summary`` shim importable for every test,
-# regardless of collection order or how pytest is invoked. conftest.py is
-# imported before any test module, so this replaces the per-file
-# ``sys.path.insert`` hacks the direct-import tests used to carry.
-if str(REPO) not in sys.path:
-    sys.path.insert(0, str(REPO))
-
-from pedsum.cli import main  # noqa: E402
-from pedsum.pedigree_ops import IdIndex, _parent_rows  # noqa: E402
 
 if TYPE_CHECKING:
     import numpy as np

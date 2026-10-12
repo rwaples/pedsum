@@ -18,7 +18,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-import pedigree_summary as ps
+from pedsum.base import SEX_MALE
+from pedsum.pairs import _build_pedigree_graph
+from pedsum.validate import load_and_validate
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"
 
@@ -36,8 +38,8 @@ _SNAPSHOT = {
 
 
 def _build_pg_and_df():
-    df, _labels = ps.load_and_validate(EXAMPLE)
-    pg = ps._build_pedigree_graph(df)
+    df, _labels = load_and_validate(EXAMPLE)
+    pg = _build_pedigree_graph(df)
     df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
     return pg, df
 
@@ -86,4 +88,4 @@ def test_sex_preserved_through_compaction():
     )
     # Spot-check the male/female totals match (a silent zeros default
     # would make pg.sex.sum() == 0).
-    assert int(pg.sex.sum()) == int((df["sex"].to_numpy() == ps.SEX_MALE).sum())
+    assert int(pg.sex.sum()) == int((df["sex"].to_numpy() == SEX_MALE).sum())

@@ -3,7 +3,7 @@
 `load_and_validate` (summarize, fail-fast) and `validate_pedigree` (validate,
 accumulating) share one `CHECKS` registry and one `_run_checks` runner — see
 `docs/adr/0002-validation-check-registry.md`. Each Check carries its
-prerequisites, label, and group; `_CHECK_ORDER` and `_CHECK_LABELS` are derived
+prerequisites and label; `_CHECK_ORDER` and `_CHECK_LABELS` are derived
 from the registry. `_CHECK_GROUPS` is a curated *display* order (it intentionally
 differs from execution order) and stays explicit.
 """
@@ -213,7 +213,6 @@ class ValidationContext:
     mother_col: str
     father_col: str
     birth_year_col: str | None
-    zero_as_missing: bool
     allow_missing_sex: bool
     override_asserted_sex: bool
     birth_year_min: int
@@ -343,7 +342,6 @@ class Check:
     requires: tuple[str, ...]
     run: Callable[[ValidationContext], CheckOutcome]
     label: str
-    group: str
     fail_policy: FailPolicy
     # The BLOCKED line plain validate prints for this Check, with any flag that
     # tolerates it. Defaults to the Check name.
@@ -379,7 +377,6 @@ def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
             df[ctx.id_col],
             df[ctx.mother_col],
             df[ctx.father_col],
-            zero_as_missing=ctx.zero_as_missing,
             labels=ctx.fixed_labels,
         )
     except PedigreeError as e:
@@ -573,7 +570,6 @@ CHECKS: tuple[Check, ...] = (
         (),
         _ck_required_columns,
         "required columns present",
-        "Columns & parsing",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -581,7 +577,6 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _ck_empty_pedigree,
         "pedigree is non-empty",
-        "Columns & parsing",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -589,7 +584,6 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _ck_id_dtype,
         "every row has an id",
-        "Columns & parsing",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -597,7 +591,6 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _ck_sex_tokens,
         "sex column tokens recognized",
-        "Columns & parsing",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -605,7 +598,6 @@ CHECKS: tuple[Check, ...] = (
         ("id_dtype",),
         _ck_negative_ids,
         "no negative IDs",
-        "IDs",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -613,7 +605,6 @@ CHECKS: tuple[Check, ...] = (
         ("id_dtype",),
         _ck_duplicate_ids,
         "no duplicate IDs",
-        "IDs",
         FailPolicy.BLOCK_OR_DROP,
         block_message="duplicate IDs detected",
     ),
@@ -622,7 +613,6 @@ CHECKS: tuple[Check, ...] = (
         ("id_dtype",),
         _ck_parent_token_range_mother,
         "mother IDs in valid range",
-        "Parent references",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -630,7 +620,6 @@ CHECKS: tuple[Check, ...] = (
         ("id_dtype",),
         _ck_parent_token_range_father,
         "father IDs in valid range",
-        "Parent references",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -638,7 +627,6 @@ CHECKS: tuple[Check, ...] = (
         _IDS,
         _ck_parent_refs_present_mother,
         "mother IDs present in pedigree",
-        "Parent references",
         FailPolicy.AUTOFIX,
     ),
     Check(
@@ -646,7 +634,6 @@ CHECKS: tuple[Check, ...] = (
         _IDS,
         _ck_parent_refs_present_father,
         "father IDs present in pedigree",
-        "Parent references",
         FailPolicy.AUTOFIX,
     ),
     Check(
@@ -654,7 +641,6 @@ CHECKS: tuple[Check, ...] = (
         _IDS,
         _ck_parent_refs_sex_conflict,
         "no missing-parent sex conflicts",
-        "Parent references",
         FailPolicy.BLOCK_OR_DROP,
         block_message="sex conflict on missing parent(s); pass --no-sex-check to default to sex=F",
     ),
@@ -663,7 +649,6 @@ CHECKS: tuple[Check, ...] = (
         (*_IDS, "sex_tokens"),
         _ck_sex_role_ambiguity,
         "no role-ambiguous unsexed individuals",
-        "Parent references",
         FailPolicy.BLOCK_OR_DROP,
         block_message=(
             "present individual(s) with unknown sex used as BOTH mother and father "
@@ -675,7 +660,6 @@ CHECKS: tuple[Check, ...] = (
         _IDS,
         _ck_self_loops,
         "no self-loops",
-        "Graph structure",
         FailPolicy.KEEP_OR_DROP,
     ),
     Check(
@@ -683,7 +667,6 @@ CHECKS: tuple[Check, ...] = (
         _IDS,
         _ck_parents_distinct,
         "mother and father distinct",
-        "Parent references",
         FailPolicy.BLOCK_OR_DROP,
         block_message="rows with mother == father (cannot disambiguate)",
     ),
@@ -692,7 +675,6 @@ CHECKS: tuple[Check, ...] = (
         (*_IDS, "sex_tokens"),
         _ck_sex_role_consistency,
         "sex consistent with parent role",
-        "Graph structure",
         FailPolicy.KEEP_OR_DROP,
     ),
     Check(
@@ -700,7 +682,6 @@ CHECKS: tuple[Check, ...] = (
         (*_IDS, "sex_tokens"),
         _ck_unknown_sex,
         "all individuals have resolved sex",
-        "Graph structure",
         FailPolicy.BLOCK_OR_DROP,
         block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
     ),
@@ -712,7 +693,6 @@ CHECKS: tuple[Check, ...] = (
         (*_IDS, "parents_distinct"),
         _ck_acyclic,
         "acyclic (no descent cycles)",
-        "Graph structure",
         FailPolicy.BLOCK_OR_DROP,
         block_message="cycle detected",
     ),
@@ -721,7 +701,6 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _ck_birth_year_dtype,
         "birth_year column parses as numeric",
-        "Birth years (optional)",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -729,7 +708,6 @@ CHECKS: tuple[Check, ...] = (
         ("id_dtype", "birth_year_dtype"),
         _ck_birth_year_range,
         "birth years within sanity range",
-        "Birth years (optional)",
         FailPolicy.KEEP_OR_DROP,
     ),
     Check(
@@ -737,7 +715,6 @@ CHECKS: tuple[Check, ...] = (
         (*_IDS, "birth_year_dtype"),
         _ck_birth_year_topology,
         "child birth_year >= parent birth_year",
-        "Birth years (optional)",
         FailPolicy.KEEP_OR_DROP,
     ),
 )
@@ -875,7 +852,6 @@ def _build_context_from_df(
     sex_col: str,
     mother_col: str,
     father_col: str,
-    zero_as_missing: bool,
     allow_missing_sex: bool,
     override_asserted_sex: bool,
     birth_year_col: str | None,
@@ -898,7 +874,6 @@ def _build_context_from_df(
         mother_col=mother_col,
         father_col=father_col,
         birth_year_col=birth_year_col,
-        zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
         birth_year_min=birth_year_min,
@@ -915,7 +890,6 @@ def _build_context(
     sex_col: str,
     mother_col: str,
     father_col: str,
-    zero_as_missing: bool,
     allow_missing_sex: bool,
     override_asserted_sex: bool,
     birth_year_col: str | None,
@@ -938,7 +912,6 @@ def _build_context(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
         birth_year_col=birth_year_col,
@@ -960,7 +933,6 @@ def load_and_validate(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
     override_asserted_sex: bool = True,
     birth_year_col: str | None = None,
@@ -991,7 +963,6 @@ def load_and_validate(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
         birth_year_col=birth_year_col,
@@ -1016,7 +987,6 @@ def validate_pedigree(
     sex_col: str = "sex",
     mother_col: str = "mother",
     father_col: str = "father",
-    zero_as_missing: bool = False,
     allow_missing_sex: bool = False,
     override_asserted_sex: bool = True,
     birth_year_col: str | None = None,
@@ -1038,7 +1008,6 @@ def validate_pedigree(
         sex_col=sex_col,
         mother_col=mother_col,
         father_col=father_col,
-        zero_as_missing=zero_as_missing,
         allow_missing_sex=allow_missing_sex,
         override_asserted_sex=override_asserted_sex,
         birth_year_col=birth_year_col,

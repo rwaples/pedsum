@@ -977,7 +977,6 @@ def _validation_kwargs(args: argparse.Namespace) -> dict:
         "sex_col": args.sex_col,
         "mother_col": args.mother_col,
         "father_col": args.father_col,
-        "zero_as_missing": False,
         "allow_missing_sex": args.allow_missing_sex,
         "override_asserted_sex": not args.no_override_asserted_sex,
         "birth_year_col": args.birth_year_col,
@@ -1470,12 +1469,8 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
     return outcome.exit_code
 
 
-def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> int:
-    """Write ``frame`` to ``<out_dir>/<stem>.tsv`` (and ``.parquet`` if requested).
-
-    Returns 0 on success. (polars writes parquet natively, so ``--parquet``
-    no longer needs pyarrow.)
-    """
+def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> None:
+    """Write ``frame`` to ``<out_dir>/<stem>.tsv`` (and ``.parquet`` if requested)."""
     tsv_path = out_dir / f"{stem}.tsv"
     with atomic_output(tsv_path) as tmp:
         frame.write_csv(tmp, separator="\t")
@@ -1485,7 +1480,6 @@ def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parq
         with atomic_output(parquet_path) as tmp:
             frame.write_parquet(tmp)
         logger.info("wrote %s", parquet_path)
-    return 0
 
 
 def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parquet: bool) -> None:
@@ -1519,8 +1513,8 @@ def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parq
 
 
 def _run_epimight_input(args: argparse.Namespace) -> int:
-    _commit_thread_budget(args)
     """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
+    _commit_thread_budget(args)
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     try:
@@ -1558,9 +1552,7 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
         )
 
     out_dir = args.out_dir
-    rc = _write_epimight_table(frame, out_dir, "pipeline_input", parquet=args.parquet)
-    if rc != 0:
-        return rc
+    _write_epimight_table(frame, out_dir, "pipeline_input", parquet=args.parquet)
     # Summarize the skeleton now and free it, so it is not resident under --pairs.
     diagnostics = relationship_diagnostics(frame, rels)
     del frame

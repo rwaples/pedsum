@@ -21,7 +21,7 @@ from pedsum.checks import (
     _check_sex_role_consistency,
     _summarize_findings,
 )
-from pedsum.ids import IdLabels, parse_ids
+from pedsum.ids import IdLabels
 from pedsum.parse import (
     _decode_sex,
     _format_id_sample,
@@ -29,7 +29,7 @@ from pedsum.parse import (
     _read_pedigree_table,
     _sniff_delimiter,
 )
-from pedsum.pedigree_ops import IdIndex, ParentRefs, _group_mating_pairs, _id_list, _structural_depth
+from pedsum.pedigree_ops import IdIndex, ParentRefs, _group_mating_pairs, _structural_depth
 from pedsum.report import (
     _apply_safe_attempt,
     _build_individual_data,
@@ -40,7 +40,6 @@ from pedsum.report import (
     _prepare_out_dir,
     _round_floats,
     _write_annotated_tsv,
-    _write_dropped_manifest,
 )
 from pedsum.schema import (
     SectionSpec,
@@ -117,12 +116,6 @@ class TestParseEdgeCases:
         auto = _read_pedigree_table(comma, dtype=str)
         assert auto.to_dicts() == [{"id": "1", "sex": "F", "mother": "-1", "father": "-1"}]
 
-    def test_parent_ids_zero_as_missing(self) -> None:
-        """PLINK-style zero parent IDs are normalised to -1 when requested."""
-        ids = pl.Series(["1", "2", "3"])
-        _, mothers, _, _ = parse_ids(ids, pl.Series(["0", "2", "NA"]), pl.Series(["-1"] * 3), zero_as_missing=True)
-        np.testing.assert_array_equal(mothers, np.array([-1, 2, -1], dtype=np.int64))
-
 
 class TestCheckEdgeCases:
     """Validation check producers cover clean, offending, and formatting cases."""
@@ -189,11 +182,6 @@ class TestCheckEdgeCases:
 
 class TestPedigreeOpsAndPairsEdgeCases:
     """Low-level pedigree helper edge cases."""
-
-    def test_id_list_short_and_long(self) -> None:
-        """ID list rendering shows all short inputs and truncates long inputs."""
-        assert _id_list([3, 4]) == "3, 4"
-        assert _id_list(range(7), max_show=3) == "0, 1, 2, ... (7 total)"
 
     def test_mating_pairs_empty_and_present_parent_pairs(self) -> None:
         """Mating-pair grouping handles no-full-parent and full-parent sibling groups."""
@@ -423,16 +411,6 @@ class TestReportEdgeCases:
         out = tmp_path / "already_file"
         out.write_text("x")
         assert _prepare_out_dir(out) == 1
-
-    def test_write_dropped_manifest_deduplicates_rows(self, tmp_path) -> None:
-        """Dropped manifests emit distinct id/check/round rows only once."""
-        path = tmp_path / "dropped.tsv"
-        _write_dropped_manifest([("1", "self_loops", 1), ("1", "self_loops", 1), ("2", "negative_ids", 2)], path)
-        df = pl.read_csv(path, separator="\t")
-        assert df.to_dicts() == [
-            {"id": 1, "check": "self_loops", "round": 1},
-            {"id": 2, "check": "negative_ids", "round": 2},
-        ]
 
     def test_write_annotated_tsv_detects_true_row_mismatch(self, tmp_path) -> None:
         """Annotated TSV writing raises when the input rows cannot realign to the individual table."""

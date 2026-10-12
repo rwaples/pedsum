@@ -8,8 +8,8 @@ collaborator-facing surface; this file is for maintainers.
 The implementation is the `pedsum/` package. The installed `pedsum` command
 and `python -m pedsum` (`pedsum/__main__.py`) both call `pedsum.cli:main`.
 `pedigree_summary.py` is a thin runnable shim (`python pedigree_summary.py …`)
-for an uninstalled checkout; it also re-exports the symbols the test suite
-imports directly. Modules, in dependency order (each imports only
+for an uninstalled checkout; it re-exports nothing, and tests import from
+`pedsum.*`. Modules, in dependency order (each imports only
 from those above it):
 
 | Module | Responsibility |

@@ -16,13 +16,11 @@ _MISSING_TEXT_TOKENS = tuple(sorted(t for t in _PARENT_MISSING_TOKENS if t))
 _INVALID_NUMERIC_TOKENS = ("abc", "12x", "1,2", "--", "M", "year2020")
 
 
-def _parse_parents(tokens: list, *, zero_as_missing: bool = False) -> np.ndarray:
+def _parse_parents(tokens: list) -> np.ndarray:
     """Mother codes for ``tokens``, beside integer ids 1..n and no fathers."""
     n = len(tokens)
     ids = pl.Series([str(i) for i in range(1, n + 1)])
-    _, mothers, _, _ = parse_ids(
-        ids, pl.Series(tokens, dtype=pl.String), pl.Series(["-1"] * n), zero_as_missing=zero_as_missing
-    )
+    _, mothers, _, _ = parse_ids(ids, pl.Series(tokens, dtype=pl.String), pl.Series(["-1"] * n))
     return mothers
 
 
@@ -60,19 +58,10 @@ def test_replace_missing_with_uses_requested_sentinel(tokens: list[str | None]) 
 
 @given(st.lists(st.integers(min_value=0, max_value=1_000_000), min_size=1, max_size=100))
 def test_parent_int_parser_preserves_integer_tokens(values: list[int]) -> None:
-    """Valid integer parent IDs round-trip when zero is not treated as missing."""
+    """Valid integer parent IDs round-trip, zero included."""
     tokens = [f"  {value}  " for value in values]
     parsed = _parse_parents(tokens)
     assert parsed.tolist() == values
-
-
-@given(st.lists(st.integers(min_value=0, max_value=1_000_000), min_size=1, max_size=100))
-def test_parent_int_parser_can_treat_zero_as_missing(values: list[int]) -> None:
-    """PLINK-style zero-as-missing maps only literal zero to ``-1``."""
-    tokens = [str(value) for value in values]
-    parsed = _parse_parents(tokens, zero_as_missing=True)
-    expected = [-1 if value == 0 else value for value in values]
-    assert parsed.tolist() == expected
 
 
 @given(

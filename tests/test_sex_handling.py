@@ -9,7 +9,10 @@ import pytest
 from conftest import parent_rows, run_pedsum
 from conftest import write_ped as _write_ped
 
-import pedigree_summary as ps
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
+from pedsum.parse import _decode_sex
+from pedsum.sections import compute_size_structure
+from pedsum.validate import load_and_validate
 
 # ---------------------------------------------------------------------------
 # Decoding: words and PLINK's 1=male, 2=female, 0=unknown
@@ -19,16 +22,16 @@ import pedigree_summary as ps
 def test_decode_plink_numeric_codes():
     """1/2/0 decode as male/female/unknown with no WARNING when a 2 is present."""
     s = pl.Series(["0", "1", "2", "0"])
-    out = ps._decode_sex(s)
-    assert out.tolist() == [ps.SEX_UNKNOWN, ps.SEX_MALE, ps.SEX_FEMALE, ps.SEX_UNKNOWN]
+    out = _decode_sex(s)
+    assert out.tolist() == [SEX_UNKNOWN, SEX_MALE, SEX_FEMALE, SEX_UNKNOWN]
 
 
 def test_decode_only_ones_reads_plink_without_warning(caplog):
     """A column of 1s is all male, with no WARNING: there is one numeric coding."""
     s = pl.Series(["1", "1", "1", "1"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        out = ps._decode_sex(s)
-    assert (out == ps.SEX_MALE).all()
+        out = _decode_sex(s)
+    assert (out == SEX_MALE).all()
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
@@ -70,7 +73,7 @@ def test_decode_words_only_no_warning(caplog):
     """Word-only sex columns produce NO WARNING."""
     s = pl.Series(["M", "F", "Male", "Female"])
     with caplog.at_level(logging.WARNING, logger="pedigree_summary"):
-        ps._decode_sex(s)
+        _decode_sex(s)
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
 
 
@@ -87,8 +90,8 @@ def test_removed_sex_encoding_flags_exit_2(tmp_path, flag):
 def test_sex_missing_tokens_recognized():
     """Empty / NA / -1 / 0 / U / Unknown all decode to SEX_UNKNOWN."""
     s = pl.Series(["M", "F", "", "NA", "-1", "0", "U", "Unknown"])
-    out = ps._decode_sex(s)
-    assert out.tolist() == [ps.SEX_MALE, ps.SEX_FEMALE, *[ps.SEX_UNKNOWN] * 6]
+    out = _decode_sex(s)
+    assert out.tolist() == [SEX_MALE, SEX_FEMALE, *[SEX_UNKNOWN] * 6]
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +109,9 @@ def test_missing_sex_imputed_from_mother_role(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},  # uses 2 as mother
         ],
     )
-    df, _labels = ps.load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_FEMALE
+    assert int(row["sex"]) == SEX_FEMALE
 
 
 def test_missing_sex_imputed_from_father_role(tmp_path):
@@ -121,9 +124,9 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
             {"id": 3, "sex": "M", "mother": 1, "father": 2},  # uses 2 as father
         ],
     )
-    df, _labels = ps.load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_MALE
+    assert int(row["sex"]) == SEX_MALE
 
 
 def test_missing_sex_unresolvable_without_flag_raises(tmp_path):
@@ -136,8 +139,8 @@ def test_missing_sex_unresolvable_without_flag_raises(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},  # orphan, no role
         ],
     )
-    with pytest.raises(ps.PedigreeError, match="unknown_sex"):
-        ps.load_and_validate(ped)
+    with pytest.raises(PedigreeError, match="unknown_sex"):
+        load_and_validate(ped)
 
 
 def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
@@ -150,8 +153,8 @@ def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
-    assert (df["sex"] == ps.SEX_UNKNOWN).any()
+    df, _labels = load_and_validate(ped, allow_missing_sex=True)
+    assert (df["sex"] == SEX_UNKNOWN).any()
 
 
 def test_n_unknown_sex_in_size_structure(tmp_path):
@@ -164,8 +167,8 @@ def test_n_unknown_sex_in_size_structure(tmp_path):
             {"id": 3, "sex": "", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
-    summary, _ = ps.compute_size_structure(df, *parent_rows(df))
+    df, _labels = load_and_validate(ped, allow_missing_sex=True)
+    summary, _ = compute_size_structure(df, *parent_rows(df))
     assert summary["n_male"] + summary["n_female"] + summary["n_unknown_sex"] == summary["n_total"]
     assert summary["n_unknown_sex"] == 1
 
@@ -187,16 +190,16 @@ def _ambig_pedigree(path):
 def test_sex_role_ambiguity_raises_in_load_without_flag(tmp_path):
     """Without --allow-missing-sex, ambiguity blocks load_and_validate."""
     ped = _ambig_pedigree(tmp_path / "p.tsv")
-    with pytest.raises(ps.PedigreeError, match="sex_role_ambiguity"):
-        ps.load_and_validate(ped)
+    with pytest.raises(PedigreeError, match="sex_role_ambiguity"):
+        load_and_validate(ped)
 
 
 def test_load_and_validate_allows_sex_ambiguity_with_flag(tmp_path):
     """With allow_missing_sex=True, ambiguous row passes with sex==SEX_UNKNOWN."""
     ped = _ambig_pedigree(tmp_path / "p.tsv")
-    df, _labels = ps.load_and_validate(ped, allow_missing_sex=True)
+    df, _labels = load_and_validate(ped, allow_missing_sex=True)
     row = df.filter(pl.col("id") == 7).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_UNKNOWN
+    assert int(row["sex"]) == SEX_UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -278,9 +281,9 @@ def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = ps.load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_FEMALE
+    assert int(row["sex"]) == SEX_FEMALE
     assert row["sex_source"] == "imputed_from_role"
 
 
@@ -294,9 +297,9 @@ def test_impute_overrides_asserted_f_used_as_father(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = ps.load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     row = df.filter(pl.col("id") == 1).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_MALE
+    assert int(row["sex"]) == SEX_MALE
     assert row["sex_source"] == "imputed_from_role"
 
 
@@ -310,8 +313,8 @@ def test_no_override_asserted_sex_disables_override(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    with pytest.raises(ps.PedigreeError, match="sex_role_consistency"):
-        ps.load_and_validate(ped, override_asserted_sex=False)
+    with pytest.raises(PedigreeError, match="sex_role_consistency"):
+        load_and_validate(ped, override_asserted_sex=False)
 
 
 def test_asserted_sex_with_both_roles_still_hard_blocks(tmp_path):
@@ -328,8 +331,8 @@ def test_asserted_sex_with_both_roles_still_hard_blocks(tmp_path):
     )
     # Override can't choose F vs M (topology is ambiguous); the mother-role
     # contradiction produces a consistency finding and the check hard-blocks.
-    with pytest.raises(ps.PedigreeError, match="sex_role_consistency"):
-        ps.load_and_validate(ped)
+    with pytest.raises(PedigreeError, match="sex_role_consistency"):
+        load_and_validate(ped)
 
 
 def test_assertion_kept_when_no_role(tmp_path):
@@ -343,7 +346,7 @@ def test_assertion_kept_when_no_role(tmp_path):
             {"id": 4, "sex": "M", "mother": -1, "father": -1},  # orphan, no role
         ],
     )
-    df, _labels = ps.load_and_validate(ped)
+    df, _labels = load_and_validate(ped)
     row = df.filter(pl.col("id") == 4).row(0, named=True)
-    assert int(row["sex"]) == ps.SEX_MALE
+    assert int(row["sex"]) == SEX_MALE
     assert row["sex_source"] == "input"

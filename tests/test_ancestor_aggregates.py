@@ -13,13 +13,9 @@ import numpy as np
 import polars as pl
 from conftest import parent_rows
 
-from pedigree_summary import (
-    SEX_FEMALE,
-    SEX_MALE,
-    _build_individual_data,
-    compute_aggregate_sections,
-    compute_founder_summary,
-)
+from pedsum.base import SEX_FEMALE, SEX_MALE
+from pedsum.report import _build_individual_data
+from pedsum.sections import compute_aggregate_sections, compute_founder_summary
 
 
 def _individual_df() -> pl.DataFrame:

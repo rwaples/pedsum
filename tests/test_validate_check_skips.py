@@ -9,14 +9,19 @@ which makes precise assertions noisy).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from conftest import write_ped as _write_ped
 
-import pedigree_summary as ps
+from pedsum.validate import validate_pedigree
+
+if TYPE_CHECKING:
+    from pedsum.checks import CheckResult
 
 
-def _results_by_name(path) -> dict[str, ps.CheckResult]:
+def _results_by_name(path) -> dict[str, CheckResult]:
     """Run validate_pedigree and return results indexed by check name."""
-    _, results, _, _ = ps.validate_pedigree(path)
+    _, results, _, _ = validate_pedigree(path)
     return {r.name: r for r in results}
 
 

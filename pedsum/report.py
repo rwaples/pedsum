@@ -780,22 +780,16 @@ def _write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabel
 def _write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
     """Tab-separated manifest of `validate --drop-offending` removals.
 
-    One row per distinct ``(id, check, round)`` — the id removed, the Check that
+    One row per ``(id, check, round)``, which ``reduce_pedigree`` emits distinct: the id removed, the Check that
     flagged it, and the reduction round in which it was dropped (later rounds
     record offenders spawned by earlier drops). Written even when nothing was
     dropped (header only) so downstream tooling can rely on its presence.
     """
-    seen: set[tuple[str, str, int]] = set()
-    rows: list[tuple[str, str, int]] = []
-    for fid, check, rnd in dropped:
-        if (fid, check, rnd) not in seen:
-            seen.add((fid, check, rnd))
-            rows.append((fid, check, rnd))
     df = pl.DataFrame(
         {
-            "id": [r[0] for r in rows],
-            "check": [r[1] for r in rows],
-            "round": [r[2] for r in rows],
+            "id": [r[0] for r in dropped],
+            "check": [r[1] for r in dropped],
+            "round": [r[2] for r in dropped],
         },
         schema={"id": pl.String, "check": pl.String, "round": pl.Int64},
     )

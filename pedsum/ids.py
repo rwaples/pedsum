@@ -164,8 +164,7 @@ class IdLabels:
 class _Column:
     """One ID column, stripped once.
 
-    ``missing`` marks missing tokens (null, ``NA``, ``.``, ... and ``0`` under
-    ``zero_as_missing``). A scan with ints also has ``values``, each token as
+    ``missing`` marks missing tokens (null, ``NA``, ``.``, ...). A scan with ints also has ``values``, each token as
     int64 (0 where it is not a plain integer), and ``strings``, the indexes of
     tokens that are neither: the string IDs that put a file in string mode.
     """
@@ -180,7 +179,7 @@ class _Column:
 _MISSING_MAX_LEN = max(len(t) for t in _PARENT_MISSING_TOKENS)
 
 
-def _scan(series: pl.Series, *, ints: bool, zero_as_missing: bool = False) -> _Column:
+def _scan(series: pl.Series, *, ints: bool) -> _Column:
     """Strip a column and find its missing tokens, plus its integers when ``ints``.
 
     Only short tokens can be missing tokens, and with ``ints`` only the short
@@ -199,8 +198,6 @@ def _scan(series: pl.Series, *, ints: bool, zero_as_missing: bool = False) -> _C
     sub_missing = (sub.is_null() | sub.str.to_uppercase().is_in(sorted(_PARENT_MISSING_TOKENS))).fill_null(False)
     missing = np.zeros(len(tokens), dtype=bool)
     missing[rows[sub_missing.to_numpy()]] = True
-    if zero_as_missing:
-        missing |= (tokens == "0").fill_null(False).to_numpy()
     if nonplain is None:
         return _Column(tokens, missing)
     return _Column(tokens, missing, values, nonplain[~missing[nonplain]])
@@ -211,7 +208,6 @@ def parse_ids(
     mother_series: pl.Series,
     father_series: pl.Series,
     *,
-    zero_as_missing: bool = False,
     labels: IdLabels | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, IdLabels]:
     """Parse the id and parent columns to int64 codes; missing parents are ``-1``.
@@ -235,8 +231,8 @@ def parse_ids(
     fixed = labels.tokens if labels is not None else None
     # The parents' integers matter only while integer mode is still possible.
     ints = fixed is None and len(ids.strings) == 0
-    mothers = _scan(mother_series, ints=ints, zero_as_missing=zero_as_missing)
-    fathers = _scan(father_series, ints=ints, zero_as_missing=zero_as_missing)
+    mothers = _scan(mother_series, ints=ints)
+    fathers = _scan(father_series, ints=ints)
     columns = (ids, mothers, fathers)
 
     m_values, f_values = mothers.values, fathers.values

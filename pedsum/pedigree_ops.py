@@ -12,13 +12,6 @@ if TYPE_CHECKING:
     import polars as pl
 
 
-def _id_list(ids, max_show: int = 5) -> str:
-    ids = list(ids)
-    if len(ids) <= max_show:
-        return ", ".join(str(i) for i in ids)
-    return ", ".join(str(i) for i in ids[:max_show]) + f", ... ({len(ids)} total)"
-
-
 def unique_ints(values: np.ndarray) -> np.ndarray:
     """Sorted distinct values of a 1-D integer array, identical to ``np.unique(values)``."""
     # A flagless np.unique takes numpy's hash-table path (numpy 2.5.2), ~30x

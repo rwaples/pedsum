@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 import polars as pl
-from conftest import REPO, SCRIPT, load_validate_tsv_gz, run_pedsum
+from conftest import REPO, load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
 
@@ -257,7 +257,7 @@ def test_drop_manifest_is_ordered_and_independent_of_hash_seed(tmp_path):
     for seed in ("1", "2", "3"):
         out = tmp_path / f"out{seed}"
         res = subprocess.run(
-            [sys.executable, str(SCRIPT), "validate", "--in", str(ped), "--out", str(out), "--drop-offending"],
+            [sys.executable, "-m", "pedsum", "validate", "--in", str(ped), "--out", str(out), "--drop-offending"],
             cwd=REPO,
             env={**os.environ, "PYTHONHASHSEED": seed},
             capture_output=True,
