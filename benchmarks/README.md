@@ -1,9 +1,8 @@
 # pedsum memory benchmarks
 
-Tooling for the *measure-first* memory-reduction work on `pedsum summarize`
-(see the plan in `i-want-to-make-structured-narwhal.md`). No optimization is
-merged before its before/after peak-RSS delta is recorded in
-`memory_results.md`.
+Tooling for measuring pedsum's wall time and peak RSS. Optimizations and
+refactors are gated on before/after medians (`profile_memory.py --compare`);
+`memory_results.md` records the memory-reduction work on `pedsum summarize`.
 
 ## What's here
 
@@ -19,6 +18,9 @@ merged before its before/after peak-RSS delta is recorded in
 - `bench_pytest_workers.sh` — repeatable pytest-xdist worker/thread sweep. It
   compares the serial suite with pinned and unpinned parallel cells and samples
   aggregate RSS across the whole pytest process tree.
+- `bench_pedsum.sh` with `simace_scenarios.yaml` — times `pedsum summarize` on a
+  pedigree simACE simulates (`simace run <scenario> --until simulate`); see the
+  script header.
 - `memory_results.md` — the recorded baseline / before-after table.
 
 The `assortative-mating` subcommand has its own tooling:

@@ -1,12 +1,12 @@
 # pedsum runtime / RAM benchmark pedigrees, simulated by simACE.
 #
 # Copy this file to the simACE umbrella's config/bench_pedsum.yaml (scenario files
-# are auto-discovered there) and run the simulate target; bench_pedsum.sh then
-# reads the pedigree from <umbrella>/results/bench_pedsum/<scenario>/rep1/.
+# are auto-discovered there) and run `pixi run simace run <scenario> --until simulate`;
+# bench_pedsum.sh then reads the pedigree from
+# <umbrella>/results/bench_pedsum/<scenario>/rep1/pedigree.parquet, exports it to TSV
+# and feeds it to `python -m pedsum summarize`.
 #
 # Rows = N × G_ped (one row per individual per recorded generation).
-# Only the simulate target is needed: results/bench_pedsum/<scenario>/rep1/pedigree.full.parquet
-# is exported to TSV and fed to `pedigree_summary.py summarize`.
 
 pedsum_2M:
   seed: 70001
