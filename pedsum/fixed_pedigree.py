@@ -92,10 +92,12 @@ def fix_pedigree(
     assert ctx.id_labels is not None
     labels = ctx.id_labels
     imp = ctx.imputation
-    _log_sex_imputation(imp, allow_missing_sex=ctx.allow_missing_sex)
+    _log_sex_imputation(imp, allow_missing_sex=ctx.config.allow_missing_sex)
 
     n = len(ids)
-    founders = _build_added_founders(mothers, fathers, ctx.id_index, ctx.no_sex_check) if synthesize_founders else []
+    founders = (
+        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check) if synthesize_founders else []
+    )
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:

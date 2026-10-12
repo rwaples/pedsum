@@ -10,7 +10,6 @@ differs from execution order) and stays explicit.
 
 from __future__ import annotations
 
-import inspect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -54,6 +53,7 @@ from pedsum.parse import (
 from pedsum.pedigree_ops import IdIndex, ParentRefs, _parent_rows, _structural_depth
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
@@ -198,40 +198,69 @@ def _try_parse(
         return None, CheckOutcome("FAIL", [Finding(check=check_name, detail=str(e))], 1)
 
 
+@dataclass(frozen=True)
+class ValidationConfig:
+    """The column names, tolerances and birth-year bounds a validation run takes from the CLI."""
+
+    id_col: str = "id"
+    sex_col: str = "sex"
+    mother_col: str = "mother"
+    father_col: str = "father"
+    birth_year_col: str | None = None
+    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN
+    birth_year_max: int | None = None
+    allow_missing_sex: bool = False
+    override_asserted_sex: bool = True
+    # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
+    # not as a CLI post-filter, so the tolerance composes wherever _run_checks
+    # runs: validate, the drop-offending loop, and its self-verify.
+    no_sex_check: bool = False
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> ValidationConfig:
+        """The config of a parsed command line; only ``validate`` has ``--no-sex-check``."""
+        return cls(
+            id_col=args.id_col,
+            sex_col=args.sex_col,
+            mother_col=args.mother_col,
+            father_col=args.father_col,
+            birth_year_col=args.birth_year_col,
+            birth_year_min=args.birth_year_min,
+            birth_year_max=args.birth_year_max,
+            allow_missing_sex=args.allow_missing_sex,
+            override_asserted_sex=not args.no_override_asserted_sex,
+            no_sex_check=getattr(args, "no_sex_check", False),
+        )
+
+    @property
+    def by_max(self) -> int:
+        """Resolved birth-year upper bound (default: current calendar year + 1)."""
+        return self.birth_year_max if self.birth_year_max is not None else _birth_year_default_max()
+
+
 @dataclass
 class ValidationContext:
     """Mutable state threaded through every Check's ``run(ctx)``.
 
     Parse Checks populate the array fields (parsing *is* the Check); all other
     Checks read them. ``id_index`` and ``imputation`` are derived once on first
-    access. Carries the CLI config a Check needs (column names, flags, bounds).
+    access.
     """
 
     df_raw: pl.DataFrame
-    id_col: str
-    sex_col: str
-    mother_col: str
-    father_col: str
-    birth_year_col: str | None
-    allow_missing_sex: bool
-    override_asserted_sex: bool
-    birth_year_min: int
-    birth_year_max: int | None
-    # summarize requires a named --birth-year-col to exist (raises if absent);
-    # validate treats a missing one as an inapplicable SKIP.
-    require_birth_year_col: bool
-    # --no-sex-check tolerates parent_refs_sex_conflict (SKIP); lives in the
-    # context so the tolerance composes inside _run_checks (validate, the
-    # drop-offending loop, and its self-verify) rather than as a cli post-filter.
-    no_sex_check: bool = False
+    config: ValidationConfig
+    # summarize's run: raise on the first FAIL, and require a named
+    # --birth-year-col to exist. Otherwise every FAIL is recorded and a missing
+    # birth-year column is an inapplicable SKIP.
+    fail_fast: bool = False
+    # The --drop-offending rounds parse with the input's labels, so the ID
+    # mode and string-mode codes stay fixed while rows are dropped.
+    fixed_labels: IdLabels | None = None
     # Populated by the parse Checks.
     ids: np.ndarray | None = None
     mothers: np.ndarray | None = None
     fathers: np.ndarray | None = None
     id_labels: IdLabels | None = None
-    # The --drop-offending rounds parse with the input's labels, so the ID
-    # mode and string-mode codes stay fixed while rows are dropped.
-    fixed_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
 
@@ -277,7 +306,7 @@ class ValidationContext:
             self.ids,
             self.mother_refs.ids,
             self.father_refs.ids,
-            override_asserted_sex=self.override_asserted_sex,
+            override_asserted_sex=self.config.override_asserted_sex,
         )
 
     def get_imputation(self) -> _SexImputation | None:
@@ -295,23 +324,6 @@ class ValidationContext:
         assert self.mothers is not None
         assert self.fathers is not None
         return self.ids, self.mothers, self.fathers
-
-    def rebuild_kwargs(self) -> dict:
-        """This context's config as ``_build_context_from_df`` kwargs.
-
-        Rebuilds a context from another frame (a ``--drop-offending`` round)
-        under the same columns, flags and bounds, so the tolerances compose.
-        Read off that function's parameters, so a new flag cannot be left out.
-        """
-        params = inspect.signature(_build_context_from_df).parameters
-        kwargs = {name: getattr(self, name) for name in params if name != "df"}
-        kwargs["require_birth_year_col"] = False
-        return kwargs
-
-    @property
-    def by_max(self) -> int:
-        """Resolved birth-year upper bound (default: current calendar year + 1)."""
-        return self.birth_year_max if self.birth_year_max is not None else _birth_year_default_max()
 
 
 class FailPolicy(Enum):
@@ -354,11 +366,12 @@ class Check:
 
 
 def _ck_required_columns(ctx: ValidationContext) -> CheckOutcome:
-    # summarize (require_birth_year_col) treats a named --birth-year-col as
-    # required; validate omits it and lets birth_year_dtype SKIP instead.
-    needed = {ctx.id_col, ctx.sex_col, ctx.mother_col, ctx.father_col}
-    if ctx.require_birth_year_col and ctx.birth_year_col is not None:
-        needed.add(ctx.birth_year_col)
+    # summarize (fail_fast) treats a named --birth-year-col as required;
+    # validate omits it and lets birth_year_dtype SKIP instead.
+    config = ctx.config
+    needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
+    if ctx.fail_fast and config.birth_year_col is not None:
+        needed.add(config.birth_year_col)
     miss = needed - set(ctx.df_raw.columns)
     if miss:
         msg = f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}"
@@ -374,9 +387,9 @@ def _ck_id_dtype(ctx: ValidationContext) -> CheckOutcome:
     df = ctx.df_raw
     try:
         ctx.ids, ctx.mothers, ctx.fathers, ctx.id_labels = parse_ids(
-            df[ctx.id_col],
-            df[ctx.mother_col],
-            df[ctx.father_col],
+            df[ctx.config.id_col],
+            df[ctx.config.mother_col],
+            df[ctx.config.father_col],
             labels=ctx.fixed_labels,
         )
     except PedigreeError as e:
@@ -393,7 +406,7 @@ def _warn_zero_female_coding(ctx: ValidationContext) -> None:
     """
     if ctx.ids is None or ctx.mothers is None:
         return
-    tokens = ctx.df_raw[ctx.sex_col].cast(pl.String).str.strip_chars()
+    tokens = ctx.df_raw[ctx.config.sex_col].cast(pl.String).str.strip_chars()
     zero = (tokens == "0").fill_null(False).to_numpy()
     if not zero.any() or (tokens == "2").any():
         return
@@ -410,7 +423,7 @@ def _warn_zero_female_coding(ctx: ValidationContext) -> None:
 def _ck_sex_tokens(ctx: ValidationContext) -> CheckOutcome:
     ctx.sex, fail = _try_parse(
         "sex_tokens",
-        lambda: _decode_sex(ctx.df_raw[ctx.sex_col]),
+        lambda: _decode_sex(ctx.df_raw[ctx.config.sex_col]),
     )
     if fail:
         return fail
@@ -452,7 +465,7 @@ def _ck_parent_refs_present_father(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_parent_refs_sex_conflict(ctx: ValidationContext) -> CheckOutcome:
-    if ctx.no_sex_check:
+    if ctx.config.no_sex_check:
         return CheckOutcome("SKIP", skip_reason="bypassed via --no-sex-check")
     assert ctx.mothers is not None
     assert ctx.fathers is not None
@@ -473,7 +486,7 @@ def _ck_parents_distinct(ctx: ValidationContext) -> CheckOutcome:
 
 def _ck_sex_role_ambiguity(ctx: ValidationContext) -> CheckOutcome:
     imp = ctx.imputation
-    if ctx.allow_missing_sex:
+    if ctx.config.allow_missing_sex:
         n = int(imp.ambiguous_mask.sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
     ids, mothers, fathers = ctx.require_id_parents()
@@ -508,13 +521,13 @@ def _ck_sex_role_consistency(ctx: ValidationContext) -> CheckOutcome:
         return CheckOutcome("FAIL", findings, len(findings))
     # Clean: surface the override count as a PASS annotation
     # ("PASS (N overridden from role)") when the override fired.
-    n = int(imp.overridden_mask.sum()) if ctx.override_asserted_sex else 0
+    n = int(imp.overridden_mask.sum()) if ctx.config.override_asserted_sex else 0
     return CheckOutcome("PASS", count=n, skip_reason=(f"{n} overridden from role" if n > 0 else None))
 
 
 def _ck_unknown_sex(ctx: ValidationContext) -> CheckOutcome:
     imp = ctx.imputation
-    if ctx.allow_missing_sex:
+    if ctx.config.allow_missing_sex:
         n = int(((imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
         return CheckOutcome("SKIP", skip_reason=f"bypassed via --allow-missing-sex ({n} tolerated)")
     assert ctx.ids is not None
@@ -527,13 +540,14 @@ def _ck_acyclic(ctx: ValidationContext) -> CheckOutcome:
 
 
 def _ck_birth_year_dtype(ctx: ValidationContext) -> CheckOutcome:
-    if ctx.birth_year_col is None:
+    column = ctx.config.birth_year_col
+    if column is None:
         return CheckOutcome("SKIP", skip_reason="no --birth-year-col specified")
-    if ctx.birth_year_col not in ctx.df_raw.columns:
-        return CheckOutcome("SKIP", skip_reason=f"column {ctx.birth_year_col!r} not present in file")
+    if column not in ctx.df_raw.columns:
+        return CheckOutcome("SKIP", skip_reason=f"column {column!r} not present in file")
     ctx.birth_year, fail = _try_parse(
         "birth_year_dtype",
-        lambda: _as_birth_year_col(ctx.df_raw[ctx.birth_year_col], ctx.birth_year_col),  # ty: ignore[invalid-argument-type]
+        lambda: _as_birth_year_col(ctx.df_raw[column], column),
     )
     return fail or _PASS
 
@@ -542,7 +556,7 @@ def _ck_birth_year_range(ctx: ValidationContext) -> CheckOutcome:
     assert ctx.ids is not None
     assert ctx.birth_year is not None
     return _from_findings(
-        _check_birth_year_range(ctx.ids, ctx.birth_year, ctx.birth_year_min, ctx.by_max, label=ctx.label)
+        _check_birth_year_range(ctx.ids, ctx.birth_year, ctx.config.birth_year_min, ctx.config.by_max, label=ctx.label)
     )
 
 
@@ -802,18 +816,14 @@ _CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # ---------------------------------------------------------------------------
 
 
-def _run_checks(
-    ctx: ValidationContext,
-    *,
-    on_fail: str,
-) -> tuple[dict[str, CheckResult], list[Finding]]:
+def _run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Finding]]:
     """Run every Check in registry order against ``ctx``.
 
     A Check whose prerequisite did not ``PASS`` is auto-``SKIP``ped: a FAILed
     prerequisite yields ``"<prereq> failed"``, a SKIPped one propagates its own
     reason (so ``required_columns failed`` / ``no --birth-year-col specified``
-    flow transitively). ``on_fail="raise"`` raises on the first ``FAIL``
-    (summarize); ``on_fail="accumulate"`` records it and continues (validate).
+    flow transitively). A ``fail_fast`` context raises on the first ``FAIL``
+    (summarize); otherwise each is recorded and the run continues (validate).
     """
     results: dict[str, CheckResult] = {}
     findings: list[Finding] = []
@@ -829,7 +839,7 @@ def _run_checks(
             continue
         outcome = check.run(ctx)
         if outcome.status == "FAIL":
-            if on_fail == "raise":
+            if ctx.fail_fast:
                 # The id parse Check runs before any Check that names an id.
                 label = ctx.label if ctx.id_labels is not None else str
                 raise PedigreeError(_summarize_findings(outcome.findings, label))
@@ -845,102 +855,12 @@ def _run_checks(
     return results, findings
 
 
-def _build_context_from_df(
-    df: pl.DataFrame,
-    *,
-    id_col: str,
-    sex_col: str,
-    mother_col: str,
-    father_col: str,
-    allow_missing_sex: bool,
-    override_asserted_sex: bool,
-    birth_year_col: str | None,
-    birth_year_min: int,
-    birth_year_max: int | None,
-    require_birth_year_col: bool,
-    no_sex_check: bool = False,
-) -> ValidationContext:
-    """Assemble a `ValidationContext` from an in-memory DataFrame (no file read).
-
-    Used by `_build_context` (after reading the file) and by the
-    `validate --drop-offending` loop, which rebuilds a context from the reduced
-    pedigree each round so `_run_checks` re-runs the *same* registry — no second
-    check sequence (ADR 0002).
-    """
-    return ValidationContext(
-        df_raw=df,
-        id_col=id_col,
-        sex_col=sex_col,
-        mother_col=mother_col,
-        father_col=father_col,
-        birth_year_col=birth_year_col,
-        allow_missing_sex=allow_missing_sex,
-        override_asserted_sex=override_asserted_sex,
-        birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max,
-        require_birth_year_col=require_birth_year_col,
-        no_sex_check=no_sex_check,
-    )
-
-
-def _build_context(
-    path: Path,
-    *,
-    id_col: str,
-    sex_col: str,
-    mother_col: str,
-    father_col: str,
-    allow_missing_sex: bool,
-    override_asserted_sex: bool,
-    birth_year_col: str | None,
-    birth_year_min: int,
-    birth_year_max: int | None,
-    sep: str,
-    require_birth_year_col: bool,
-    log_read: bool,
-    no_sex_check: bool = False,
-) -> ValidationContext:
-    """Read the table and assemble a `ValidationContext` (shared by both modes)."""
-    t0 = time.perf_counter()
-    df = _read_pedigree_table(path, sep=sep, dtype=str)
-    if log_read:
-        logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
-    _maybe_warn_csv(df)
-    return _build_context_from_df(
-        df,
-        id_col=id_col,
-        sex_col=sex_col,
-        mother_col=mother_col,
-        father_col=father_col,
-        allow_missing_sex=allow_missing_sex,
-        override_asserted_sex=override_asserted_sex,
-        birth_year_col=birth_year_col,
-        birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max,
-        require_birth_year_col=require_birth_year_col,
-        no_sex_check=no_sex_check,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Public drivers
 # ---------------------------------------------------------------------------
 
 
-def load_and_validate(
-    path: Path,
-    id_col: str = "id",
-    sex_col: str = "sex",
-    mother_col: str = "mother",
-    father_col: str = "father",
-    allow_missing_sex: bool = False,
-    override_asserted_sex: bool = True,
-    birth_year_col: str | None = None,
-    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
-    birth_year_max: int | None = None,
-    sep: str = "auto",
-    no_sex_check: bool = False,
-) -> tuple[pl.DataFrame, IdLabels]:
+def load_and_validate(path: Path, config: ValidationConfig, *, sep: str = "auto") -> tuple[pl.DataFrame, IdLabels]:
     """Load TSV, run all QC fail-fast, return the validated pedigree and its ID labels.
 
     The frame's id, mother and father columns hold int64 ID codes, which the
@@ -957,23 +877,11 @@ def load_and_validate(
     writes for this input.
     """
     t0 = time.perf_counter()
-    ctx = _build_context(
-        path,
-        id_col=id_col,
-        sex_col=sex_col,
-        mother_col=mother_col,
-        father_col=father_col,
-        allow_missing_sex=allow_missing_sex,
-        override_asserted_sex=override_asserted_sex,
-        birth_year_col=birth_year_col,
-        birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max,
-        sep=sep,
-        require_birth_year_col=True,
-        log_read=True,
-        no_sex_check=no_sex_check,
-    )
-    _run_checks(ctx, on_fail="raise")
+    df = _read_pedigree_table(path, sep=sep, dtype=str)
+    logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
+    _maybe_warn_csv(df)
+    ctx = ValidationContext(df, config, fail_fast=True)
+    _run_checks(ctx)
     # Every Check passed, so no parent is missing and there is no founder to
     # synthesize: the frame is the input rows of the pedigree validate would write.
     fp = fix_pedigree(ctx, synthesize_founders=False)
@@ -982,18 +890,7 @@ def load_and_validate(
 
 
 def validate_pedigree(
-    path: Path,
-    id_col: str = "id",
-    sex_col: str = "sex",
-    mother_col: str = "mother",
-    father_col: str = "father",
-    allow_missing_sex: bool = False,
-    override_asserted_sex: bool = True,
-    birth_year_col: str | None = None,
-    birth_year_min: int = _BIRTH_YEAR_DEFAULT_MIN,
-    birth_year_max: int | None = None,
-    sep: str = "auto",
-    no_sex_check: bool = False,
+    path: Path, config: ValidationConfig, *, sep: str = "auto"
 ) -> tuple[int, list[CheckResult], list[Finding], ValidationContext]:
     """Run every Check accumulating.
 
@@ -1002,23 +899,10 @@ def validate_pedigree(
     every per-individual finding, and ``ctx`` carries the coerced arrays and raw
     DataFrame for ``_run_validate``'s auto-fix.
     """
-    ctx = _build_context(
-        path,
-        id_col=id_col,
-        sex_col=sex_col,
-        mother_col=mother_col,
-        father_col=father_col,
-        allow_missing_sex=allow_missing_sex,
-        override_asserted_sex=override_asserted_sex,
-        birth_year_col=birth_year_col,
-        birth_year_min=birth_year_min,
-        birth_year_max=birth_year_max,
-        sep=sep,
-        require_birth_year_col=False,
-        log_read=False,
-        no_sex_check=no_sex_check,
-    )
-    results, findings = _run_checks(ctx, on_fail="accumulate")
+    df = _read_pedigree_table(path, sep=sep, dtype=str)
+    _maybe_warn_csv(df)
+    ctx = ValidationContext(df, config)
+    results, findings = _run_checks(ctx)
     return len(ctx.df_raw), list(results.values()), findings, ctx
 
 
@@ -1094,9 +978,8 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     the *original* declared sex tokens persist — a parent that loses its only
     role correctly becomes `unknown_sex` the next round. See docs/adr/0003.
     """
-    mother_col = ctx0.mother_col
-    father_col = ctx0.father_col
-    rebuild_kwargs = ctx0.rebuild_kwargs()
+    mother_col = ctx0.config.mother_col
+    father_col = ctx0.config.father_col
     df_cur = ctx0.df_raw
     n_input_rows = len(df_cur)
     ctx = ctx0
@@ -1111,7 +994,7 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
         rnd += 1
         if rnd > n_input_rows + 1:
             raise PedigreeError("drop-offending failed to converge")
-        _results, findings = _run_checks(ctx, on_fail="accumulate")
+        _results, findings = _run_checks(ctx)
         droppable = [f for f in findings if f.check in DROPPABLE_CHECKS and f.id is not None]
         drop_ids = _round_drop_ids(droppable, ctx)
         if not drop_ids:
@@ -1157,8 +1040,7 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
             )
             .drop("__m_hit", "__f_hit")
         )
-        ctx = _build_context_from_df(df_cur, **rebuild_kwargs)
-        ctx.fixed_labels = ctx0.id_labels
+        ctx = ValidationContext(df_cur, ctx0.config, fixed_labels=ctx0.id_labels)
     return ReductionResult(
         df_current=df_cur,
         dropped=dropped,
@@ -1242,9 +1124,7 @@ def fix_validated(
 
     # Self-verify the written file under the invoked flags. It is always
     # tab-separated whatever the input's separator, so sniff it.
-    verify_params = inspect.signature(validate_pedigree).parameters
-    verify_kwargs = {k: v for k, v in ctx.rebuild_kwargs().items() if k in verify_params}
-    _n, vresults, _vf, _vctx = validate_pedigree(path, sep="auto", **verify_kwargs)
+    _n, vresults, _vf, _vctx = validate_pedigree(path, ctx.config, sep="auto")
     still_failing = sorted(r.name for r in vresults if r.status == "FAIL")
     if still_failing:
         raise PedigreeError(f"--drop-offending self-verify failed; reduced pedigree still FAILs: {still_failing}")
@@ -1262,9 +1142,9 @@ def _write_fixed(
     frame = render_fixed_pedigree(
         fp,
         ctx.df_raw,
-        id_col=ctx.id_col,
-        sex_col=ctx.sex_col,
-        mother_col=ctx.mother_col,
-        father_col=ctx.father_col,
+        id_col=ctx.config.id_col,
+        sex_col=ctx.config.sex_col,
+        mother_col=ctx.config.mother_col,
+        father_col=ctx.config.father_col,
     )
     return fp, write(frame, fp)

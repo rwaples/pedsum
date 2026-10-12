@@ -77,6 +77,7 @@ from pedsum.sections import (
 from pedsum.sex_concordance import compute_offspring_sex_concordance
 from pedsum.validate import (
     DROP_FRACTION_WARN,
+    ValidationConfig,
     fix_validated,
     load_and_validate,
     validate_pedigree,
@@ -963,33 +964,7 @@ def _timed(label: str) -> Iterator[None]:
     logger.info("%s in %.2fs", label, time.perf_counter() - t0)
 
 
-def _validation_kwargs(args: argparse.Namespace) -> dict:
-    """Shared validation config pulled off ``args``.
-
-    Both validation drivers — summarize's fail-fast ``load_and_validate`` and
-    validate's accumulating ``validate_pedigree`` (also re-run on summarize's
-    failure path to write the log) — take the same column-name / encoding /
-    tolerance options. Building them in one place keeps the call sites from
-    drifting.
-    """
-    return {
-        "id_col": args.id_col,
-        "sex_col": args.sex_col,
-        "mother_col": args.mother_col,
-        "father_col": args.father_col,
-        "allow_missing_sex": args.allow_missing_sex,
-        "override_asserted_sex": not args.no_override_asserted_sex,
-        "birth_year_col": args.birth_year_col,
-        "birth_year_min": args.birth_year_min,
-        "birth_year_max": args.birth_year_max,
-        "sep": args.sep,
-        # validate-only; summarize args lack it. The tolerance lives in the
-        # registry (ctx.no_sex_check) so it composes everywhere _run_checks runs.
-        "no_sex_check": getattr(args, "no_sex_check", False),
-    }
-
-
-def _write_validation_failure_log(args: argparse.Namespace) -> None:
+def _write_validation_failure_log(args: argparse.Namespace, config: ValidationConfig) -> None:
     """Persist a full ``validate.log`` after summarize's fail-fast validation bailed.
 
     ``load_and_validate`` raises on the *first* failing check carrying only a
@@ -1001,7 +976,7 @@ def _write_validation_failure_log(args: argparse.Namespace) -> None:
     """
     log_path = args.out_dir / "validate.log"
     try:
-        _, _, findings, ctx = validate_pedigree(args.in_path, **_validation_kwargs(args))
+        _, _, findings, ctx = validate_pedigree(args.in_path, config, sep=args.sep)
         _write_validate_log(findings, log_path, ctx.id_labels)
     except (PedigreeError, FileNotFoundError, OSError) as e:
         logger.error("could not write %s: %s", log_path, e)
@@ -1013,14 +988,15 @@ def _run_summarize(args: argparse.Namespace, cmd: str) -> int:
     if _prepare_out_dir(args.out_dir) != 0:
         return 1
     _commit_thread_budget(args)
+    config = ValidationConfig.from_args(args)
     try:
         # Wrapped so the read/validation peak is attributed to a phase by the
         # benchmark profiler; load_and_validate already logs its own timing.
         with _timed("load+validate"):
-            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, config, sep=args.sep)
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
-        _write_validation_failure_log(args)
+        _write_validation_failure_log(args, config)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
@@ -1246,12 +1222,13 @@ def _run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatc
         logger.error("wrote %s with the estimators that finished", out_path)
 
     watchdog.on_breach(publish_partial)
+    config = ValidationConfig.from_args(args)
     try:
         with _timed("load+validate"):
-            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, config, sep=args.sep)
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
-        _write_validation_failure_log(args)
+        _write_validation_failure_log(args, config)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
@@ -1327,12 +1304,13 @@ def _run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
         return 1
     _commit_thread_budget(args)
     _set_assortative_threads(physical_cores() if args.threads is None else args.threads)
+    config = ValidationConfig.from_args(args)
     try:
         with _timed("load+validate"):
-            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, config, sep=args.sep)
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
-        _write_validation_failure_log(args)
+        _write_validation_failure_log(args, config)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
@@ -1413,7 +1391,9 @@ def _run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 1
     _remove_stale_validate_outputs(args.out_dir)
     try:
-        n_total, results, findings, ctx = validate_pedigree(args.in_path, **_validation_kwargs(args))
+        n_total, results, findings, ctx = validate_pedigree(
+            args.in_path, ValidationConfig.from_args(args), sep=args.sep
+        )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
         return 2
@@ -1523,12 +1503,13 @@ def _run_epimight_input(args: argparse.Namespace) -> int:
         logger.error("%s", e)
         return 2
 
+    config = ValidationConfig.from_args(args)
     try:
         with _timed("load+validate"):
-            df, labels = load_and_validate(args.in_path, **_validation_kwargs(args))
+            df, labels = load_and_validate(args.in_path, config, sep=args.sep)
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
-        _write_validation_failure_log(args)
+        _write_validation_failure_log(args, config)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)

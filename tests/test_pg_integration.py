@@ -20,7 +20,7 @@ import polars as pl
 
 from pedsum.base import SEX_MALE
 from pedsum.pairs import _build_pedigree_graph
-from pedsum.validate import load_and_validate
+from pedsum.validate import ValidationConfig, load_and_validate
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"
 
@@ -38,7 +38,7 @@ _SNAPSHOT = {
 
 
 def _build_pg_and_df():
-    df, _labels = load_and_validate(EXAMPLE)
+    df, _labels = load_and_validate(EXAMPLE, ValidationConfig())
     pg = _build_pedigree_graph(df)
     df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
     return pg, df

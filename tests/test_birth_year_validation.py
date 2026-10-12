@@ -10,7 +10,7 @@ from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import PedigreeError
-from pedsum.validate import load_and_validate
+from pedsum.validate import ValidationConfig, load_and_validate
 
 
 def test_validate_without_birth_year_col_skips_all_three(tmp_path):
@@ -161,7 +161,7 @@ def test_load_and_validate_raises_on_topology_violation(tmp_path):
         ],
     )
     with pytest.raises(PedigreeError, match="birth_year_topology"):
-        load_and_validate(ped, birth_year_col="birth_year")
+        load_and_validate(ped, ValidationConfig(birth_year_col="birth_year"))
 
 
 def test_summarize_surfaces_range_violation_cleanly(tmp_path):

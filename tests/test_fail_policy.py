@@ -78,18 +78,20 @@ def test_skipped_and_absent_checks_never_block():
     assert blocking_failures(results, drop_offending=False) == [("required_columns", "required_columns")]
 
 
-def test_rebuild_kwargs_cover_every_validation_option(tmp_path):
-    """The reduction rebuild and the self-verify get every option validate_pedigree takes, but path and sep."""
-    import inspect
+def test_validation_config_carries_every_option():
+    """from_args reads every validation option, so the reduction rounds and the self-verify get them all."""
+    from dataclasses import fields
 
-    from pedsum.validate import _build_context_from_df, validate_pedigree
+    from pedsum.cli import _parse_args
+    from pedsum.validate import ValidationConfig
 
-    ped = tmp_path / "p.tsv"
-    ped.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n")
-    _n, _results, _findings, ctx = validate_pedigree(ped, allow_missing_sex=True, no_sex_check=True)
-    kwargs = ctx.rebuild_kwargs()
-    assert set(kwargs) == set(inspect.signature(_build_context_from_df).parameters) - {"df"}
-    assert set(inspect.signature(validate_pedigree).parameters) - {"path", "sep"} <= set(kwargs)
-    assert kwargs["allow_missing_sex"] is True
-    assert kwargs["no_sex_check"] is True
-    assert kwargs["require_birth_year_col"] is False
+    args = _parse_args(
+        [
+            "validate", "--in", "p.tsv", "--out", "o",
+            "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
+            "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000",
+            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check",
+        ]
+    )  # fmt: skip
+    config = ValidationConfig.from_args(args)
+    assert [f.name for f in fields(config) if getattr(config, f.name) == f.default] == []

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from conftest import write_ped as _write_ped
 
-from pedsum.validate import validate_pedigree
+from pedsum.validate import ValidationConfig, validate_pedigree
 
 if TYPE_CHECKING:
     from pedsum.checks import CheckResult
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 def _results_by_name(path) -> dict[str, CheckResult]:
     """Run validate_pedigree and return results indexed by check name."""
-    _, results, _, _ = validate_pedigree(path)
+    _, results, _, _ = validate_pedigree(path, ValidationConfig())
     return {r.name: r for r in results}
 
 

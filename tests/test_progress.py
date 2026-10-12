@@ -13,7 +13,7 @@ from pedigree_graph import RelationshipProgress
 
 from pedsum.pairs import _build_pedigree_graph
 from pedsum.progress import relationship_progress
-from pedsum.validate import load_and_validate
+from pedsum.validate import ValidationConfig, load_and_validate
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "example_pedigree.tsv"
 
@@ -141,7 +141,7 @@ def test_quiet_keeps_default_logging(info_logging):
 
 def test_counts_unchanged_under_the_bar(info_logging, monkeypatch):
     """Real reports through the bar leave the counts as they are without it."""
-    df, _labels = load_and_validate(EXAMPLE)
+    df, _labels = load_and_validate(EXAMPLE, ValidationConfig())
     pg = _build_pedigree_graph(df)
     expected = pg.relationship_counts(max_degree=5)
     # A tick far below the call's length, so the bar sees real reports.

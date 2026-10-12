@@ -22,7 +22,7 @@ from pedsum.assortative_mating import (
 from pedsum.base import PedigreeError
 from pedsum.parse import read_trait_columns
 from pedsum.report import ASSORTATIVE_MATING_FIGURES, _write_yaml
-from pedsum.validate import load_and_validate
+from pedsum.validate import ValidationConfig, load_and_validate
 
 
 def _tokens(*values) -> np.ndarray:
@@ -101,7 +101,7 @@ def test_classify_errors(tokens, stated, match):
 
 def _read(tmp_path, rows, columns, missing=()) -> tuple[pl.DataFrame, dict[str, np.ndarray]]:
     path = write_ped(tmp_path / "ped.tsv", rows)
-    df, labels = load_and_validate(path)
+    df, labels = load_and_validate(path, ValidationConfig())
     return df, read_trait_columns(path, "auto", "id", columns, df["id"].to_numpy(), labels, missing)
 
 
@@ -136,7 +136,7 @@ def test_ids_added_by_validate_are_missing(tmp_path):
     write_ped(tmp_path / "ped.tsv", rows)
     run_pedsum(["validate", "--in", str(tmp_path / "ped.tsv"), "--out", str(tmp_path / "v")])
     fixed = tmp_path / "v" / "validate.tsv.gz"
-    df, labels = load_and_validate(fixed)
+    df, labels = load_and_validate(fixed, ValidationConfig())
     out = read_trait_columns(fixed, "auto", "id", ["x"], df["id"].to_numpy(), labels)
     by_id = dict(zip(df["id"].to_list(), out["x"].tolist(), strict=True))
     assert by_id == {1: "0.5", 2: None, 3: "1.5"}

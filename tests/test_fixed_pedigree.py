@@ -7,13 +7,13 @@ from conftest import write_ped as _write_ped
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.fixed_pedigree import fix_pedigree, render_fixed_pedigree
-from pedsum.validate import fix_validated, validate_pedigree
+from pedsum.validate import ValidationConfig, fix_validated, validate_pedigree
 
 _COLS = {"id_col": "id", "sex_col": "sex", "mother_col": "mother", "father_col": "father"}
 
 
 def _fixed(path, **kwargs):
-    _n, _results, _findings, ctx = validate_pedigree(path)
+    _n, _results, _findings, ctx = validate_pedigree(path, ValidationConfig())
     fp = fix_pedigree(ctx, **kwargs)
     return fp, render_fixed_pedigree(fp, ctx.df_raw, **_COLS)
 
@@ -126,7 +126,7 @@ def test_frame_matches_the_arrays(tmp_path):
 
 def _outcome(path, **kwargs):
     """Run fix_validated on ``path``; return the outcome and the calls made to its writers, in order."""
-    _n, results, _findings, ctx = validate_pedigree(path)
+    _n, results, _findings, ctx = validate_pedigree(path, ValidationConfig())
     calls: list = []
 
     def write_pedigree(frame, fp):
