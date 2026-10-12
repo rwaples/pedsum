@@ -174,6 +174,17 @@ whole command.
   role became an added founder named `0`. The `parent_refs_present_*`
   hint for ID 0 and the `parent_token_range_*` detail name the flag
   instead of "convert to -1".
+- **Exact duplicate rows collapse to one** instead of blocking
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). A new Check,
+  `duplicate_rows` (Fail Policy `autofix`), removes each row that says
+  the same as an earlier one, with one Finding per copy, and plain
+  `validate` exits 1. Rows are compared as pedsum reads them (`NA` and `.`
+  are the same missing parent, `M` and `1` the same sex), other columns as
+  text. `duplicate_ids` now covers only an ID on rows that differ, and
+  still blocks. Before, `--drop-offending` removed both copies, so the
+  individual vanished and its offspring lost a parent. `summarize` refuses
+  a raw input with a duplicate row, as it does any FAIL; `validate.tsv.gz`
+  has none. Findings after a removed copy still name the input's rows.
 - **`validate` BLOCKs on every column- or parse-level failure**
   ([#21](https://github.com/rwaples/pedsum/issues/21)): a missing
   required column, a row without an id, an unrecognized sex token, a

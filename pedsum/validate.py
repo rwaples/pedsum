@@ -15,6 +15,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
+import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, SexSource, logger
 from pedsum.checks import CHECKS, CheckResult, CheckStatus, summarize_findings
@@ -31,8 +32,6 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
     from pathlib import Path
-
-    import polars as pl
 
     from pedsum.checks import Finding
     from pedsum.ids import IdLabels
@@ -210,12 +209,45 @@ class ValidationContext:
     id_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
+    # Set when duplicate_rows collapsed copies: each remaining row's position
+    # in the input, so Findings name the rows the user can find in the file.
+    input_rows: np.ndarray | None = None
+
+    def row(self, i: int | np.integer) -> int:
+        """Row ``i`` of the parsed arrays as its row in the input."""
+        return int(i) if self.input_rows is None else int(self.input_rows[i])
+
+    def rows(self, idx: np.ndarray) -> np.ndarray:
+        """Rows ``idx`` of the parsed arrays as their rows in the input."""
+        return idx if self.input_rows is None else self.input_rows[idx]
+
+    def keep_rows(self, keep: np.ndarray) -> None:
+        """Keep only the rows where ``keep`` is True, in the raw frame and every parsed array.
+
+        Runs before any Check reads the derived lookups (``id_index``, the parent
+        refs, ``depth``, ``imputation``); any already built is dropped.
+        """
+        self.df_raw = self.df_raw.filter(pl.Series(keep))
+        for name in ("ids", "mothers", "fathers", "sex", "birth_year"):
+            values = getattr(self, name)
+            if values is not None:
+                setattr(self, name, values[keep])
+        kept = np.flatnonzero(keep)
+        self.input_rows = kept if self.input_rows is None else self.input_rows[kept]
+        for name in ("sorted_ids", "id_index", "mother_refs", "father_refs", "depth", "imputation"):
+            self.__dict__.pop(name, None)
 
     @property
     def label(self) -> Callable[[int], str]:
         """Prints an id code as the input's ID; set by the id parse Check."""
         assert self.id_labels is not None
         return self.id_labels.label
+
+    @cached_property
+    def sorted_ids(self) -> np.ndarray:
+        """The parsed IDs sorted; one sort shared by the duplicate Checks."""
+        assert self.ids is not None
+        return np.sort(self.ids)
 
     @cached_property
     def id_index(self) -> IdIndex:

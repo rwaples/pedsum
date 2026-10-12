@@ -28,6 +28,7 @@ EXPECTED = {
     "birth_year_range": FailPolicy.KEEP_OR_DROP,
     "birth_year_topology": FailPolicy.KEEP_OR_DROP,
     "zero_parent_present": FailPolicy.BLOCK,
+    "duplicate_rows": FailPolicy.AUTOFIX,
     "parent_refs_present_mother": FailPolicy.AUTOFIX,
     "parent_refs_present_father": FailPolicy.AUTOFIX,
 }

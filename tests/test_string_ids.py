@@ -179,7 +179,7 @@ def test_drop_offending_keeps_string_mode_when_the_last_string_id_is_dropped(tmp
     """
     ped = _write(
         tmp_path / "p.tsv",
-        "id\tsex\tmother\tfather\n2\tF\t-1\t-1\nx\tM\t-1\t-1\nx\tM\t-1\t-1\n3\tM\t2\t-1\n",
+        "id\tsex\tmother\tfather\n2\tF\t-1\t-1\nx\tM\t-1\t-1\nx\tF\t-1\t-1\n3\tM\t2\t-1\n",
     )
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending", "--fill-half-founders"])

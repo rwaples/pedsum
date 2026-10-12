@@ -30,6 +30,8 @@ from pedsum.parse import plink_sex
 from pedsum.pedigree_ops import unique_ints
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pedsum.ids import IdLabels
     from pedsum.pedigree_ops import IdIndex
     from pedsum.validate import ValidationContext
@@ -97,7 +99,9 @@ def fix_pedigree(
 
     n = len(ids)
     founders = (
-        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check) if synthesize_founders else []
+        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check, ctx.rows)
+        if synthesize_founders
+        else []
     )
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
@@ -224,8 +228,9 @@ def _build_added_founders(
     fathers: np.ndarray,
     id_index: IdIndex,
     no_sex_check: bool,
+    input_rows: Callable[[np.ndarray], np.ndarray] = lambda rows: rows,
 ) -> list[dict]:
-    """Synthesize founder rows for missing parent IDs, sorted by ID."""
+    """Synthesize founder rows for missing parent IDs, sorted by ID; ``input_rows`` maps rows for the reasons."""
     moms_ref = unique_ints(mothers[mothers != -1])
     dads_ref = unique_ints(fathers[fathers != -1])
     moms_missing = set(moms_ref[id_index.get_indexer(moms_ref) == -1].tolist())
@@ -236,15 +241,15 @@ def _build_added_founders(
 
     out: list[dict] = []
     for mid in sorted(moms_only):
-        rows = np.where(mothers == mid)[0]
+        rows = input_rows(np.where(mothers == mid)[0])
         out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {rows_phrase(rows)}"})
     for did in sorted(dads_only):
-        rows = np.where(fathers == did)[0]
+        rows = input_rows(np.where(fathers == did)[0])
         out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {rows_phrase(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
-            rows_m = np.where(mothers == cid)[0]
-            rows_f = np.where(fathers == cid)[0]
+            rows_m = input_rows(np.where(mothers == cid)[0])
+            rows_f = input_rows(np.where(fathers == cid)[0])
             out.append(
                 {
                     "id": int(cid),

@@ -110,6 +110,10 @@ every edge where both endpoints are known). Findings are written to
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
+- Exact duplicate rows collapsed to the first (`duplicate_rows`): rows
+  compared as pedsum reads them, so `NA` and `.` are the same missing
+  parent, `M` and `1` the same sex and, with `--birth-year-col`, `1980` and
+  `1980.0` the same year; every other column is compared as text.
 - Sex imputed from parent role (F if used as a mother, M if used as
   a father) for any row whose original sex was missing.
 - The sex column written in PLINK's coding, `1` = male, `2` = female,
@@ -139,7 +143,7 @@ data first. Two kinds of failure hard-block:
   pedigree, and a parent written `0` that has no row (see
   `--missing-parent-token` under "Input format");
 - cycles (including a self-loop, an individual listed as its own
-  parent, which is a one-person cycle), duplicate IDs, a mother equal to
+  parent, which is a one-person cycle), an ID on rows that differ, a mother equal to
   the father, sex conflicts on missing parents, unresolved sex without
   `--allow-missing-sex`, and sex-role ambiguity. A cycle blocks even
   when some parent IDs are missing from the file.
@@ -186,7 +190,7 @@ records changes planned for several rows
 |---|---|---|
 | Parent ID with no row | Adds a founder row (exit 1). | Same, except purgeR (sets the parent to unknown, which changes founder, half-founder and sibship counts) and kinship2 `pedigree()` / pedtools `ped()` (refuse). |
 | Parent written `0` | Read as an ID. A `0` with no row blocks, naming `--missing-parent-token 0`, which reads it as missing. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
-| The same row twice | Blocks. | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
+| The same row twice | Keeps the first copy (exit 1). | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
 | Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
 | Recorded sex contradicts the only parent role | Overrides it from the role (`sex_source = imputed_from_role`). | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
