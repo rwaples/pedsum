@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
+from pedsum.pedigree_ops import cycle_components, rows_of_parents
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -58,8 +59,8 @@ class CheckStatus(StrEnum):
 class CheckResult:
     """One Check's verdict and its Findings; a FAIL has at least one.
 
-    ``note`` says why a Check was SKIPped, or annotates a PASS
-    (``3 overridden from role``). ``name`` is stamped by the runner.
+    ``note`` says why a Check was SKIPped, or annotates a PASS. ``name`` is
+    stamped by the runner.
     """
 
     status: CheckStatus
@@ -139,6 +140,7 @@ def _id_dtype(ctx: ValidationContext) -> CheckResult:
             df[config.mother_col],
             df[config.father_col],
             labels=ctx.fixed_labels,
+            missing_parent_tokens=config.missing_parent_tokens,
         )
     except PedigreeError as e:
         return _failed(str(e))
@@ -190,22 +192,70 @@ def _negative_ids(ctx: ValidationContext) -> CheckResult:
     values = ctx.id_labels.int_values(ids)
     return _verdict(
         [
-            Finding(id=int(ids[i]), row=int(i), detail=f"id={ctx.label(ids[i])} is negative; must be >= 0")
+            Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={ctx.label(ids[i])} is negative; must be >= 0")
             for i in np.where(values < 0)[0]
         ]
     )
 
 
+def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row that repeats an earlier row; the copies are removed from ``ctx``.
+
+    Rows are compared as read (ADR 0006): the ID, parents, sex and birth year
+    after parsing, so ``NA`` and ``.`` are the same missing parent and ``M``
+    and ``1`` the same sex, and every other column as text. Only rows whose
+    ID is on more than one row are compared.
+    """
+    ids, mothers, fathers = ctx.require_id_parents()
+    assert ctx.sex is not None
+    if not (ctx.sorted_ids[1:] == ctx.sorted_ids[:-1]).any():
+        return _verdict([])
+    order = np.argsort(ids, kind="stable")
+    same = ids[order][1:] == ids[order][:-1]
+    repeated = np.zeros(len(ids), dtype=bool)
+    repeated[order[1:][same]] = True
+    repeated[order[:-1][same]] = True
+    rows = np.flatnonzero(repeated)
+    config = ctx.config
+    parsed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
+    keys = {"__id": ids[rows], "__mother": mothers[rows], "__father": fathers[rows], "__sex": ctx.sex[rows]}
+    if ctx.birth_year is not None and config.birth_year_col is not None:
+        parsed.add(config.birth_year_col)
+        keys["__birth_year"] = ctx.birth_year[rows]
+    # Positional names, so no input column can collide with the key columns.
+    other = ctx.df_raw[rows].select(
+        pl.col(c).alias(f"__col{i}") for i, c in enumerate(ctx.df_raw.columns) if c not in parsed
+    )
+    frame = pl.DataFrame(keys).hstack(other).with_columns(__row=pl.Series(rows))
+    key_cols = [c for c in frame.columns if c != "__row"]
+    first = frame.select(pl.col("__row").min().over(key_cols)).to_series().to_numpy()
+    copies = first != rows
+    if not copies.any():
+        return _verdict([])
+    findings = [
+        Finding(
+            id=int(ids[r]),
+            row=ctx.row(r),
+            detail=f"row {ctx.row(r)} repeats row {ctx.row(f)} (id={ctx.label(ids[r])}); the copy is removed",
+        )
+        for r, f in zip(rows[copies], first[copies], strict=True)
+    ]
+    keep = np.ones(len(ids), dtype=bool)
+    keep[rows[copies]] = False
+    ctx.keep_rows(keep)
+    # The kept ids, still sorted: duplicate_ids reads them without sorting again.
+    ctx.__dict__["sorted_ids"] = ids[order][keep[order]]
+    return _verdict(findings)
+
+
 def _duplicate_ids(ctx: ValidationContext) -> CheckResult:
-    """One Finding per duplicated ID value."""
-    ids = ctx.ids
-    assert ids is not None
-    sorted_ids = ids[np.argsort(ids, kind="stable")]
+    """One Finding per ID on rows that differ (exact copies are ``duplicate_rows``')."""
+    sorted_ids = ctx.sorted_ids
     dup_mask = sorted_ids[1:] == sorted_ids[:-1]
     if not dup_mask.any():
         return _verdict([])
     dup_ids = np.unique(sorted_ids[1:][dup_mask])
-    return _verdict([Finding(id=int(d), detail=f"id={ctx.label(d)} appears more than once") for d in dup_ids])
+    return _verdict([Finding(id=int(d), detail=f"id={ctx.label(d)} is on rows that differ") for d in dup_ids])
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +271,13 @@ def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
     values = ctx.id_labels.int_values(parents)
     return _verdict(
         [
-            Finding(row=int(i), detail=f"row {int(i)}: {role} value {int(values[i])} < -1; missing parent must be -1")
+            Finding(
+                row=ctx.row(i),
+                detail=(
+                    f"row {ctx.row(i)}: {role} value {int(values[i])} < -1; a missing parent is -1, blank or NA "
+                    f"(or pass --missing-parent-token {int(values[i])})"
+                ),
+            )
             for i in np.where(values < -1)[0]
         ]
     )
@@ -243,8 +299,85 @@ def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
         name = ctx.label(mid)
         detail = f"id={name} referenced as {role} {n_refs} time(s) but no row has this id"
         if name == "0":
-            detail += " (if file uses 0/NA/blank as missing token, convert to -1)"
+            detail += " (if the file writes a missing parent as 0, pass --missing-parent-token 0)"
         findings.append(Finding(id=int(mid), detail=detail, n_refs=n_refs))
+    return _verdict(findings)
+
+
+def _zero_parent_present(ctx: ValidationContext) -> CheckResult:
+    """One Finding when a parent ID written ``0`` has no row of its own, in either role.
+
+    PLINK and most R cleaners write a missing parent as ``0``; pedsum reads it
+    as an ID unless ``--missing-parent-token 0`` says otherwise (ADR 0006).
+    """
+    _, mothers, fathers = ctx.require_id_parents()
+    assert ctx.id_labels is not None
+    zero = ctx.id_labels.code_of("0")
+    if zero is None or ctx.id_index.get_indexer([zero])[0] != -1:
+        return _verdict([])
+    roles = [
+        f"{role} in {rows_phrase(ctx.rows(rows))}"
+        for role, parents in (("mother", mothers), ("father", fathers))
+        if len(rows := np.flatnonzero(parents == zero))
+    ]
+    if not roles:
+        return _verdict([])
+    return _verdict(
+        [
+            Finding(
+                id=zero,
+                detail=(
+                    f"id=0 referenced as {' and as '.join(roles)} but no row has this id; "
+                    "if the file writes a missing parent as 0, pass --missing-parent-token 0"
+                ),
+            )
+        ]
+    )
+
+
+def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
+    """One Finding per parent link ``--break-cycles`` clears; the links are cleared in ``ctx``.
+
+    It clears every self-link, and within each descent cycle every link whose
+    parent is born after the child (ADR 0006). A cycle with no such link is
+    left for ``acyclic``. Clearing a link inside a cycle cannot put another
+    such link into a new cycle, so one pass suffices.
+    """
+    if not ctx.config.break_cycles:
+        return CheckResult(CheckStatus.SKIP, note="no --break-cycles")
+    ids, mothers, fathers = ctx.require_id_parents()
+    birth_year = ctx.birth_year
+    assert birth_year is not None
+    m_row, _ = rows_of_parents(mothers, ctx.id_index)
+    f_row, _ = rows_of_parents(fathers, ctx.id_index)
+    component = cycle_components(m_row, f_row)
+    findings: list[Finding] = []
+    for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
+        own = parents == ids
+        known = parent_rows >= 0
+        prow = np.where(known, parent_rows, 0)
+        child_by, parent_by = birth_year, birth_year[prow]
+        late = (
+            known
+            & ~own
+            & (component >= 0)
+            & (component == component[prow])
+            & (child_by != -1)
+            & (parent_by != -1)
+            & (parent_by > child_by)
+        )
+        for i in np.flatnonzero(own | late):
+            child, parent = ctx.label(ids[i]), ctx.label(parents[i])
+            if own[i]:
+                reason = f"listed as own {role}"
+            else:
+                reason = f"in a cycle, {role} born {int(parent_by[i])} after the child (born {int(child_by[i])})"
+            findings.append(
+                Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={child}: cleared {role} id={parent}, {reason}")
+            )
+            ctx.cleared_links.append((child, role, parent, reason))
+        if (own | late).any():
+            ctx.clear_parents(role, np.flatnonzero(own | late))
     return _verdict(findings)
 
 
@@ -260,8 +393,8 @@ def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
             Finding(
                 id=int(c),
                 detail=(
-                    f"id={ctx.label(c)} referenced as both mother ({rows_phrase(np.where(mothers == c)[0])}) "
-                    f"and father ({rows_phrase(np.where(fathers == c)[0])}) (sex ambiguous)"
+                    f"id={ctx.label(c)} referenced as both mother ({rows_phrase(ctx.rows(np.where(mothers == c)[0]))}) "
+                    f"and father ({rows_phrase(ctx.rows(np.where(fathers == c)[0]))}) (sex ambiguous)"
                 ),
             )
             for c in np.intersect1d(moms_missing, dads_missing)
@@ -291,12 +424,12 @@ def _sex_role_ambiguity(ctx: ValidationContext) -> CheckResult:
         rid = int(ids[row_idx])
         m_rows = np.where(mothers == rid)[0]
         f_rows = np.where(fathers == rid)[0]
-        mrow = int(m_rows[0]) if m_rows.size else -1
-        frow = int(f_rows[0]) if f_rows.size else -1
+        mrow = ctx.row(m_rows[0]) if m_rows.size else -1
+        frow = ctx.row(f_rows[0]) if f_rows.size else -1
         findings.append(
             Finding(
                 id=rid,
-                row=int(row_idx),
+                row=ctx.row(row_idx),
                 detail=(
                     f"id={ctx.label(rid)} has unknown sex AND is referenced as both "
                     f"mother (row {mrow}) and father (row {frow}); "
@@ -315,8 +448,8 @@ def _parents_distinct(ctx: ValidationContext) -> CheckResult:
         [
             Finding(
                 id=int(ids[i]),
-                row=int(i),
-                detail=f"row {int(i)}: id={ctx.label(ids[i])} has mother == father == {ctx.label(mothers[i])}",
+                row=ctx.row(i),
+                detail=f"row {ctx.row(i)}: id={ctx.label(ids[i])} has mother == father == {ctx.label(mothers[i])}",
             )
             for i in np.where(bad)[0]
         ]
@@ -333,7 +466,9 @@ def _self_loops(ctx: ValidationContext) -> CheckResult:
     ids, mothers, fathers = ctx.require_id_parents()
     return _verdict(
         [
-            Finding(id=int(ids[i]), row=int(i), detail=f"row {int(i)}: id={ctx.label(ids[i])} listed as own {role}")
+            Finding(
+                id=int(ids[i]), row=ctx.row(i), detail=f"row {ctx.row(i)}: id={ctx.label(ids[i])} listed as own {role}"
+            )
             for role, parents in (("mother", mothers), ("father", fathers))
             for i in np.where(parents == ids)[0]
         ]
@@ -348,6 +483,7 @@ def _sex_role_findings(
     sex: np.ndarray,
     expected_sex: int,
     label: Label,
+    input_rows: Callable[[np.ndarray], np.ndarray],
 ) -> list[Finding]:
     """sex_role_consistency Findings for ids used as ``role`` with the wrong sex.
 
@@ -361,10 +497,56 @@ def _sex_role_findings(
         Finding(
             id=int(pid),
             row=int(own_row),
-            detail=f"id={label(pid)} used as {role} in {rows_phrase(np.where(parents == pid)[0])} but sex != {expected}",
+            detail=(
+                f"id={label(pid)} used as {role} in {rows_phrase(input_rows(np.where(parents == pid)[0]))} "
+                f"but sex != {expected}"
+            ),
         )
-        for pid, own_row in zip(ids[bad], own_rows[bad], strict=True)
+        for pid, own_row in zip(ids[bad], input_rows(own_rows[bad]), strict=True)
     ]
+
+
+def _sex_role_override(ctx: ValidationContext) -> CheckResult:
+    """One Finding per recorded sex overridden from the only parent role the individual has.
+
+    The override is a repair (ADR 0001 0.9, ADR 0006): an asserted M used only
+    as a mother becomes F, an asserted F used only as a father becomes M.
+    ``--no-override-asserted-sex`` turns it off, and ``sex_role_consistency``
+    then flags the contradiction instead.
+    """
+    if not ctx.config.override_asserted_sex:
+        return CheckResult(CheckStatus.SKIP, note="off (--no-override-asserted-sex)")
+    imp = ctx.imputation
+    ids, mothers, fathers = ctx.require_id_parents()
+    assert ctx.sex is not None
+    findings = []
+    overridden = np.flatnonzero(imp.overridden_mask)
+    for role, parents, recorded, now in (("mother", mothers, "M", "F"), ("father", fathers, "F", "M")):
+        own = overridden[ctx.sex[overridden] == (SEX_MALE if role == "mother" else SEX_FEMALE)]
+        for i, naming in zip(own, _rows_naming(parents, ids[own]), strict=True):
+            findings.append(
+                Finding(
+                    id=int(ids[i]),
+                    row=ctx.row(i),
+                    detail=(
+                        f"id={ctx.label(ids[i])} recorded {recorded} but used only as {role} in "
+                        f"{rows_phrase(ctx.rows(naming))}; sex set to {now}"
+                    ),
+                )
+            )
+    findings.sort(key=lambda f: f.row or 0)
+    return _verdict(findings)
+
+
+def _rows_naming(parents: np.ndarray, pids: np.ndarray) -> list[np.ndarray]:
+    """For each id in ``pids``, the rows whose parent column names it, ascending; one sort in all."""
+    if len(pids) == 0:
+        return []
+    order = np.argsort(parents, kind="stable")
+    ordered = parents[order]
+    lo = np.searchsorted(ordered, pids, side="left")
+    hi = np.searchsorted(ordered, pids, side="right")
+    return [order[a:b] for a, b in zip(lo, hi, strict=True)]
 
 
 def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
@@ -373,7 +555,7 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
     Always runs: the override clears asserted-vs-role contradictions only for
     rows used in a SINGLE role; a row asserted M and used as BOTH mother and
     father stays unoverridable and must still FAIL. Rows whose sex started
-    unknown are left to ``sex_role_ambiguity`` and ``unknown_sex``.
+    unknown are left to ``sex_role_ambiguity``.
     """
     imp = ctx.imputation
     _, mothers, fathers = ctx.require_id_parents()
@@ -386,35 +568,9 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
         keep = present.copy()
         keep[present] = ~imp.original_unknown_mask[refs.rows[present]]
         findings += _sex_role_findings(
-            role, parents, refs.ids[keep], refs.rows[keep], imp.imputed_sex, expected_sex, ctx.label
+            role, parents, refs.ids[keep], refs.rows[keep], imp.imputed_sex, expected_sex, ctx.label, ctx.rows
         )
-    if findings:
-        return _verdict(findings)
-    # Clean: annotate the PASS ("PASS (N overridden from role)") when the override fired.
-    n = int(imp.overridden_mask.sum()) if ctx.config.override_asserted_sex else 0
-    return CheckResult(CheckStatus.PASS, note=f"{n} overridden from role" if n > 0 else None)
-
-
-def _unknown_sex(ctx: ValidationContext) -> CheckResult:
-    """One Finding per row still unsexed after imputation, except those ``sex_role_ambiguity`` reports."""
-    imp = ctx.imputation
-    orphan_mask = (imp.imputed_sex == SEX_UNKNOWN) & ~imp.ambiguous_mask
-    if ctx.config.allow_missing_sex:
-        return CheckResult(
-            CheckStatus.SKIP, note=f"bypassed via --allow-missing-sex ({int(orphan_mask.sum())} tolerated)"
-        )
-    ids = ctx.ids
-    assert ids is not None
-    return _verdict(
-        [
-            Finding(
-                id=int(ids[i]),
-                row=int(i),
-                detail=f"id={ctx.label(ids[i])} has unknown sex and is not referenced as a parent; cannot be imputed",
-            )
-            for i in np.where(orphan_mask)[0]
-        ]
-    )
+    return _verdict(findings)
 
 
 def _acyclic(ctx: ValidationContext) -> CheckResult:
@@ -424,7 +580,7 @@ def _acyclic(ctx: ValidationContext) -> CheckResult:
         [
             Finding(
                 id=int(ids[i]),
-                row=int(i),
+                row=ctx.row(i),
                 detail=f"id={ctx.label(ids[i])} could not be topologically ordered (in a cycle)",
             )
             for i in np.where(ctx.depth < 0)[0]
@@ -461,7 +617,7 @@ def _birth_year_range(ctx: ValidationContext) -> CheckResult:
         [
             Finding(
                 id=int(ids[i]),
-                row=int(i),
+                row=ctx.row(i),
                 detail=(
                     f"id={ctx.label(ids[i])} birth_year={int(birth_year[i])} is outside the sanity range "
                     f"[{year_min}, {year_max}]"
@@ -473,10 +629,12 @@ def _birth_year_range(ctx: ValidationContext) -> CheckResult:
 
 
 def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
-    """One Finding per parent-child edge with ``child.birth_year < parent.birth_year``.
+    """One Finding per parent-child edge with ``child.birth_year - parent.birth_year < --min-parent-age``.
 
-    Edges where either endpoint's birth year is unknown (``-1``) are skipped.
+    The default age 0 flags a child born before a parent. Edges where either
+    endpoint's birth year is unknown (``-1``) are skipped.
     """
+    min_age = ctx.config.min_parent_age
     ids, mothers, fathers = ctx.require_id_parents()
     birth_year = ctx.birth_year
     assert birth_year is not None
@@ -489,21 +647,24 @@ def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
         child_rows = np.where(edges)[0]
         child_by = birth_year[child_rows]
         parent_by = birth_year[parent_rows[child_rows]]
-        bad = (child_by != -1) & (parent_by != -1) & (child_by < parent_by)
+        bad = (child_by != -1) & (parent_by != -1) & (child_by - parent_by < min_age)
         for i in np.where(bad)[0]:
             row_idx = int(child_rows[i])
-            findings.append(
-                Finding(
-                    id=int(ids[row_idx]),
-                    row=row_idx,
-                    detail=(
-                        f"id={ctx.label(ids[row_idx])} birth_year={int(child_by[i])} < "
-                        f"{role} (id={ctx.label(parents[row_idx])}) "
-                        f"birth_year={int(parent_by[i])}"
-                    ),
-                )
+            child, parent = int(child_by[i]), int(parent_by[i])
+            detail = (
+                f"id={ctx.label(ids[row_idx])} birth_year={child} < "
+                f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}"
             )
-    return _verdict(findings)
+            if child >= parent:
+                detail = (
+                    f"id={ctx.label(ids[row_idx])} birth_year={child} is {child - parent} year(s) after "
+                    f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}; "
+                    f"--min-parent-age is {min_age}"
+                )
+            findings.append(Finding(id=int(ids[row_idx]), row=ctx.row(row_idx), detail=detail))
+    if findings or not min_age:
+        return _verdict(findings)
+    return CheckResult(CheckStatus.PASS, note=f"--min-parent-age {min_age}")
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +688,9 @@ class FailPolicy(Enum):
     # Plain validate writes the pedigree with the contradiction kept;
     # --drop-offending removes the flagged ids.
     KEEP_OR_DROP = "keep_or_drop"
-    # Repaired by founder synthesis; never BLOCKs and is never dropped.
+    # Repaired in the Fixed Pedigree (a founder synthesized, a duplicate row
+    # collapsed, a cycle link cleared, a sex overridden from role); never
+    # BLOCKs and is never dropped.
     AUTOFIX = "autofix"
 
 
@@ -578,6 +741,21 @@ CHECKS: tuple[Check, ...] = (
         FailPolicy.BLOCK,
     ),
     Check(
+        "birth_year_dtype",
+        ("required_columns",),
+        _birth_year_dtype,
+        "birth_year column parses as numeric",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        # Before every Check that reads the parsed arrays: it removes the copies.
+        "duplicate_rows",
+        ("id_dtype", "sex_tokens"),
+        _duplicate_rows,
+        "no duplicate rows",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
         "negative_ids",
         ("id_dtype",),
         _negative_ids,
@@ -605,6 +783,25 @@ CHECKS: tuple[Check, ...] = (
         partial(_parent_token_range, role="father"),
         "father IDs in valid range",
         FailPolicy.BLOCK,
+    ),
+    Check(
+        "zero_parent_present",
+        _IDS,
+        _zero_parent_present,
+        "parent ID 0 has a row",
+        FailPolicy.BLOCK,
+        block_message=(
+            "parent ID 0 has no row; if the file writes a missing parent as 0, pass --missing-parent-token 0"
+        ),
+    ),
+    Check(
+        # Before every Check that reads the parent refs, depth or sex
+        # imputation: it clears parent links.
+        "cycle_breaks",
+        (*_IDS, "birth_year_dtype"),
+        _cycle_breaks,
+        "no cycle links to clear",
+        FailPolicy.AUTOFIX,
     ),
     Check(
         "parent_refs_present_mother",
@@ -655,19 +852,18 @@ CHECKS: tuple[Check, ...] = (
         block_message="rows with mother == father (cannot disambiguate)",
     ),
     Check(
+        "sex_role_override",
+        (*_IDS, "sex_tokens"),
+        _sex_role_override,
+        "no recorded sex overridden by role",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
         "sex_role_consistency",
         (*_IDS, "sex_tokens"),
         _sex_role_consistency,
         "sex consistent with parent role",
         FailPolicy.KEEP_OR_DROP,
-    ),
-    Check(
-        "unknown_sex",
-        (*_IDS, "sex_tokens"),
-        _unknown_sex,
-        "all individuals have resolved sex",
-        FailPolicy.BLOCK_OR_DROP,
-        block_message="rows with unresolved sex; pass --allow-missing-sex to tolerate",
     ),
     Check(
         "acyclic",
@@ -681,13 +877,6 @@ CHECKS: tuple[Check, ...] = (
         block_message="cycle detected",
     ),
     Check(
-        "birth_year_dtype",
-        ("required_columns",),
-        _birth_year_dtype,
-        "birth_year column parses as numeric",
-        FailPolicy.BLOCK,
-    ),
-    Check(
         "birth_year_range",
         ("id_dtype", "birth_year_dtype"),
         _birth_year_range,
@@ -698,7 +887,7 @@ CHECKS: tuple[Check, ...] = (
         "birth_year_topology",
         (*_IDS, "birth_year_dtype"),
         _birth_year_topology,
-        "child birth_year >= parent birth_year",
+        "parent age at birth >= min parent age",
         FailPolicy.KEEP_OR_DROP,
     ),
 )
@@ -743,12 +932,13 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "sex_tokens",
         ),
     ),
-    ("IDs", ("negative_ids", "duplicate_ids")),
+    ("IDs", ("negative_ids", "duplicate_rows", "duplicate_ids")),
     (
         "Parent references",
         (
             "parent_token_range_mother",
             "parent_token_range_father",
+            "zero_parent_present",
             "parent_refs_present_mother",
             "parent_refs_present_father",
             "parents_distinct",
@@ -759,9 +949,10 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Graph structure",
         (
+            "cycle_breaks",
             "self_loops",
+            "sex_role_override",
             "sex_role_consistency",
-            "unknown_sex",
             "acyclic",
         ),
     ),

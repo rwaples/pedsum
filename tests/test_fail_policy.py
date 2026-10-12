@@ -21,12 +21,15 @@ EXPECTED = {
     "parent_refs_sex_conflict": FailPolicy.BLOCK_OR_DROP,
     "sex_role_ambiguity": FailPolicy.BLOCK_OR_DROP,
     "parents_distinct": FailPolicy.BLOCK_OR_DROP,
-    "unknown_sex": FailPolicy.BLOCK_OR_DROP,
     "acyclic": FailPolicy.BLOCK_OR_DROP,
     "self_loops": FailPolicy.KEEP_OR_DROP,
     "sex_role_consistency": FailPolicy.KEEP_OR_DROP,
     "birth_year_range": FailPolicy.KEEP_OR_DROP,
     "birth_year_topology": FailPolicy.KEEP_OR_DROP,
+    "zero_parent_present": FailPolicy.BLOCK,
+    "duplicate_rows": FailPolicy.AUTOFIX,
+    "cycle_breaks": FailPolicy.AUTOFIX,
+    "sex_role_override": FailPolicy.AUTOFIX,
     "parent_refs_present_mother": FailPolicy.AUTOFIX,
     "parent_refs_present_father": FailPolicy.AUTOFIX,
 }
@@ -93,8 +96,9 @@ def test_validation_config_carries_every_option():
         [
             "validate", "--in", "p.tsv", "--out", "o",
             "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
-            "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000",
-            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check",
+            "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
+            "--min-parent-age", "2",
+            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
         ]
     )  # fmt: skip
     config = ValidationConfig.from_args(args)

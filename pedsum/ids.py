@@ -142,6 +142,14 @@ class IdLabels:
             self.strings(frame[c].cast(pl.Int64).to_numpy()).alias(c) for c in columns if c in frame.columns
         )
 
+    def code_of(self, token: str) -> int | None:
+        """The code of the ID written ``token``, or None when no ID is written so."""
+        if self.tokens is None:
+            values, plain = _plain_ints(pl.Series([token]))
+            return int(values[0]) if plain[0] else None
+        i = int(self.tokens.search_sorted(token))
+        return i if i < len(self.tokens) and self.tokens[i] == token else None
+
     def phantom_clashes(self) -> list[str]:
         """Input IDs that start with ``PHANTOM_PREFIX`` (at most three), which a phantom could take."""
         if self.tokens is None:
@@ -179,11 +187,13 @@ class _Column:
 _MISSING_MAX_LEN = max(len(t) for t in PARENT_MISSING_TOKENS)
 
 
-def _scan(series: pl.Series, *, ints: bool) -> _Column:
+def _scan(series: pl.Series, *, ints: bool, extra_missing: tuple[str, ...] = ()) -> _Column:
     """Strip a column and find its missing tokens, plus its integers when ``ints``.
 
     Only short tokens can be missing tokens, and with ``ints`` only the short
     ones that are not plain integers, so few tokens are upper-cased and looked up.
+    ``extra_missing`` (``--missing-parent-token``) are missing too, matched
+    exactly after stripping, plain integers such as ``0`` included.
     """
     tokens = series.cast(pl.String).str.strip_chars()
     lengths = tokens.str.len_bytes().fill_null(0).to_numpy()
@@ -198,6 +208,8 @@ def _scan(series: pl.Series, *, ints: bool) -> _Column:
     sub_missing = (sub.is_null() | sub.str.to_uppercase().is_in(sorted(PARENT_MISSING_TOKENS))).fill_null(False)
     missing = np.zeros(len(tokens), dtype=bool)
     missing[rows[sub_missing.to_numpy()]] = True
+    if extra_missing:
+        missing |= tokens.is_in(list(extra_missing)).fill_null(False).to_numpy()
     if nonplain is None:
         return _Column(tokens, missing)
     return _Column(tokens, missing, values, nonplain[~missing[nonplain]])
@@ -209,12 +221,15 @@ def parse_ids(
     father_series: pl.Series,
     *,
     labels: IdLabels | None = None,
+    missing_parent_tokens: tuple[str, ...] = (),
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, IdLabels]:
     """Parse the id and parent columns to int64 codes; missing parents are ``-1``.
 
     Raises ``PedigreeError`` when an id is missing or is a missing-parent
     token (``.``, ``?``, ...), which no parent column could name. Parent
     columns cannot fail: a missing token is ``-1``, and any other token is an ID.
+    ``missing_parent_tokens`` (``--missing-parent-token``) are missing in the
+    parent columns too; one that is also an id raises ``PedigreeError``.
 
     ``labels`` from an earlier parse of a superset of these rows (the
     ``--drop-offending`` rounds) keeps its mode and, in string mode, its codes.
@@ -228,11 +243,20 @@ def parse_ids(
         )
     assert ids.values is not None
     assert ids.strings is not None
+    if missing_parent_tokens:
+        clash = ids.tokens.is_in(list(missing_parent_tokens)).fill_null(False).to_numpy()
+        if clash.any():
+            rows = np.flatnonzero(clash)
+            tokens = sorted(set(ids.tokens.gather(rows).to_list()))
+            raise PedigreeError(
+                f"--missing-parent-token {', '.join(map(repr, tokens))} is also the id of row(s) "
+                f"{rows[:5].tolist()}; a missing-parent token cannot be an individual"
+            )
     fixed = labels.tokens if labels is not None else None
     # The parents' integers matter only while integer mode is still possible.
     ints = fixed is None and len(ids.strings) == 0
-    mothers = _scan(mother_series, ints=ints)
-    fathers = _scan(father_series, ints=ints)
+    mothers = _scan(mother_series, ints=ints, extra_missing=missing_parent_tokens)
+    fathers = _scan(father_series, ints=ints, extra_missing=missing_parent_tokens)
     columns = (ids, mothers, fathers)
 
     m_values, f_values = mothers.values, fathers.values

@@ -115,12 +115,12 @@ def test_validate_fixed_tsv_overridden_sex_rides_with_reorder(tmp_path):
         [
             {"id": 3, "sex": "F", "mother": 5, "father": 1},
             {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 5, "sex": "M", "mother": -1, "father": -1},  # asserted M as mother
+            {"id": 5, "sex": "M", "mother": -1, "father": -1},  # asserted M as mother (a repair: exit 1)
         ],
     )
     out_dir = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out_dir)])
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 1, r.stderr
     fixed = load_validate_tsv_gz(out_dir)
     by_id = {int(row["id"]): row for row in fixed.iter_rows(named=True)}
     assert by_id[5]["sex"] == "2"

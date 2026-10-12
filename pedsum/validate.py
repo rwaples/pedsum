@@ -10,11 +10,12 @@ validation config and context and sex imputation; `pedsum.reduce` decides what
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
+import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, SexSource, logger
 from pedsum.checks import CHECKS, CheckResult, CheckStatus, summarize_findings
@@ -31,8 +32,6 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
     from pathlib import Path
-
-    import polars as pl
 
     from pedsum.checks import Finding
     from pedsum.ids import IdLabels
@@ -73,16 +72,14 @@ def _impute_sex_from_roles(
          - id used as both        → leave -1, mark ambiguous (caller decides
                                     whether to raise / tolerate via
                                     ``--allow-missing-sex``)
-         - id used as neither     → leave -1, orphan (caller decides whether
-                                    to raise / tolerate via
-                                    ``--allow-missing-sex``)
+         - id used as neither     → leave -1; kept unsexed (ADR 0006)
 
       2. Asserted → role (0.9 default; opt out via
          ``override_asserted_sex=False``):
          - asserted M used only as mother → override to F
          - asserted F used only as father → override to M
-         - asserted used as both          → leave alone; ``_check_sex_role_
-                                            consistency`` still hard-blocks
+         - asserted used as both          → leave alone; ``sex_role_consistency``
+                                            flags it
          - asserted used as neither       → leave alone
 
     ``mother_ids`` / ``father_ids`` are the distinct ids referenced as mother
@@ -151,8 +148,16 @@ class ValidationConfig:
     birth_year_col: str | None = None
     birth_year_min: int = BIRTH_YEAR_DEFAULT_MIN
     birth_year_max: int | None = None
+    # --min-parent-age: birth_year_topology wants child - parent >= this.
+    min_parent_age: int = 0
+    # --missing-parent-token: more tokens that mean a missing parent in the
+    # mother and father columns (ADR 0006).
+    missing_parent_tokens: tuple[str, ...] = ()
     allow_missing_sex: bool = False
     override_asserted_sex: bool = True
+    # --break-cycles: clear self-links and, within a cycle, links to a parent
+    # born after the child (cycle_breaks, ADR 0006).
+    break_cycles: bool = False
     # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
     # not as a CLI post-filter, so the tolerance composes wherever run_checks
     # runs: validate, the drop-offending loop, and its self-verify.
@@ -169,9 +174,13 @@ class ValidationConfig:
             birth_year_col=args.birth_year_col,
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
+            min_parent_age=args.min_parent_age,
+            # Cells are matched after stripping, so the tokens are too.
+            missing_parent_tokens=tuple(t.strip() for t in args.missing_parent_token),
             allow_missing_sex=args.allow_missing_sex,
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),
+            break_cycles=getattr(args, "break_cycles", False),
         )
 
     @property
@@ -206,12 +215,75 @@ class ValidationContext:
     id_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
+    # The parent links cycle_breaks cleared, as (id, role, parent, reason)
+    # with IDs as the input wrote them: validate's cleared-links manifest.
+    cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
+    # Rows read from the input, before duplicate_rows collapsed any copies.
+    n_input_rows: int = field(init=False)
+    # Set when duplicate_rows collapsed copies: each remaining row's position
+    # in the input, so Findings name the rows the user can find in the file.
+    input_rows: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        """Count the input's rows before any Check changes ``df_raw``."""
+        self.n_input_rows = len(self.df_raw)
+
+    def row(self, i: int | np.integer) -> int:
+        """Row ``i`` of the parsed arrays as its row in the input."""
+        return int(i) if self.input_rows is None else int(self.input_rows[i])
+
+    def rows(self, idx: np.ndarray) -> np.ndarray:
+        """Rows ``idx`` of the parsed arrays as their rows in the input."""
+        return idx if self.input_rows is None else self.input_rows[idx]
+
+    def clear_parents(self, role: str, rows: np.ndarray) -> None:
+        """Make the ``role`` parent of ``rows`` missing, in the parsed arrays and the raw frame.
+
+        Like :meth:`keep_rows`, runs before the derived lookups are read.
+        """
+        column = self.config.mother_col if role == "mother" else self.config.father_col
+        _, mothers, fathers = self.require_id_parents()
+        parents = (mothers if role == "mother" else fathers).copy()
+        parents[rows] = -1
+        if role == "mother":
+            self.mothers = parents
+        else:
+            self.fathers = parents
+        cleared = np.zeros(len(parents), dtype=bool)
+        cleared[rows] = True
+        self.df_raw = self.df_raw.with_columns(
+            pl.when(pl.Series(cleared)).then(None).otherwise(pl.col(column)).alias(column)
+        )
+        for name in ("mother_refs", "father_refs", "depth", "imputation"):
+            self.__dict__.pop(name, None)
+
+    def keep_rows(self, keep: np.ndarray) -> None:
+        """Keep only the rows where ``keep`` is True, in the raw frame and every parsed array.
+
+        Runs before any Check reads the derived lookups (``id_index``, the parent
+        refs, ``depth``, ``imputation``); any already built is dropped.
+        """
+        self.df_raw = self.df_raw.filter(pl.Series(keep))
+        for name in ("ids", "mothers", "fathers", "sex", "birth_year"):
+            values = getattr(self, name)
+            if values is not None:
+                setattr(self, name, values[keep])
+        kept = np.flatnonzero(keep)
+        self.input_rows = kept if self.input_rows is None else self.input_rows[kept]
+        for name in ("sorted_ids", "id_index", "mother_refs", "father_refs", "depth", "imputation"):
+            self.__dict__.pop(name, None)
 
     @property
     def label(self) -> Callable[[int], str]:
         """Prints an id code as the input's ID; set by the id parse Check."""
         assert self.id_labels is not None
         return self.id_labels.label
+
+    @cached_property
+    def sorted_ids(self) -> np.ndarray:
+        """The parsed IDs sorted; one sort shared by the duplicate Checks."""
+        assert self.ids is not None
+        return np.sort(self.ids)
 
     @cached_property
     def id_index(self) -> IdIndex:
@@ -352,4 +424,4 @@ def validate_pedigree(
     maybe_warn_csv(df)
     ctx = ValidationContext(df, config, require_birth_year_col=require_birth_year_col)
     results, findings = run_checks(ctx)
-    return len(ctx.df_raw), list(results.values()), findings, ctx
+    return ctx.n_input_rows, list(results.values()), findings, ctx

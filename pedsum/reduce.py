@@ -15,6 +15,7 @@ import polars as pl
 from pedsum.base import PedigreeError, logger
 from pedsum.checks import DROPPABLE_CHECKS, CheckStatus, blocking_failures
 from pedsum.fixed_pedigree import fix_pedigree, next_free_id, render_fixed_pedigree
+from pedsum.pedigree_ops import cycle_components, rows_of_parents
 from pedsum.validate import ValidationContext, run_checks, validate_pedigree
 
 if TYPE_CHECKING:
@@ -51,26 +52,10 @@ def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
     cleared) and re-validate the next round. Self-loops are size-1 SCCs here and
     are handled by the `self_loops` check.
     """
-    import scipy.sparse as sp
-    from scipy.sparse.csgraph import connected_components
-
     ids, mothers, fathers = ctx.require_id_parents()
-    n = len(ids)
-    id_index = ctx.id_index
-    rows: list[int] = []
-    cols: list[int] = []
-    for parents in (mothers, fathers):
-        prow = id_index.get_indexer(parents)
-        mask = (parents != -1) & (prow != -1)
-        child_rows = np.where(mask)[0]
-        rows.extend(child_rows.tolist())
-        cols.extend(prow[mask].tolist())
-    if not rows:
-        return set()
-    adj = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
-    _, labels = connected_components(adj, directed=True, connection="strong")
-    member_mask = (np.bincount(labels) >= 2)[labels]
-    return {int(i) for i in ids[member_mask]}
+    m_row, _ = rows_of_parents(mothers, ctx.id_index)
+    f_row, _ = rows_of_parents(fathers, ctx.id_index)
+    return {int(i) for i in ids[cycle_components(m_row, f_row) >= 0]}
 
 
 def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]:
@@ -93,12 +78,14 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     rows and sets references to them to -1), and rebuilds the context from the
     reduced frame. The full `df_current` is carried so extra columns survive and
     the *original* declared sex tokens persist — a parent that loses its only
-    role correctly becomes `unknown_sex` the next round. See docs/adr/0003.
+    role and had no recorded sex is unsexed the next round, and is kept
+    (ADR 0006). See docs/adr/0003.
     """
     mother_col = ctx0.config.mother_col
     father_col = ctx0.config.father_col
     df_cur = ctx0.df_raw
-    n_input_rows = len(df_cur)
+    # The input's rows, so the drop fraction is of the file the user gave.
+    n_input_rows = ctx0.n_input_rows
     ctx = ctx0
     ctx0.fixed_labels = ctx0.id_labels
     dropped: list[tuple[str, str, int]] = []
@@ -234,7 +221,7 @@ def fix_validated(
         return ValidateOutcome(exit_code=2, blocked="--drop-offending removed every individual (empty pedigree)")
     write_manifest(reduction.dropped)
     # Number phantoms past the input's IDs so none reuses a dropped ID.
-    next_id = next_free_id(*ctx.require_id_parents())
+    next_id = next_free_id(*ctx.require_id_parents(), ctx.config.missing_parent_tokens)
     fp, path = _write_fixed(
         reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write_pedigree
     )
@@ -263,5 +250,6 @@ def _write_fixed(
         sex_col=ctx.config.sex_col,
         mother_col=ctx.config.mother_col,
         father_col=ctx.config.father_col,
+        missing_parent_tokens=ctx.config.missing_parent_tokens,
     )
     return fp, write(frame, fp)

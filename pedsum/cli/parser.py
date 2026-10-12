@@ -140,22 +140,21 @@ def _add_format_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--allow-missing-sex",
         action="store_true",
-        help="tolerate rows whose sex is missing after imputation — either "
-        "because the row is unsexed and not used as a parent (orphan), OR "
-        "because it is used as BOTH mother and father with unknown sex "
-        "(role-ambiguous). Such rows are auto-fixed to sex=-1 in the "
-        "validate-fixed output. Without this flag, either case hard-blocks. "
-        "effective-size refuses such rows (its sex-stratified estimators "
-        "need resolved sex).",
+        help="tolerate an individual with unknown sex used as BOTH mother and father "
+        "(sex_role_ambiguity), which otherwise blocks; validate writes its sex as 0. "
+        "An unsexed individual who is never a parent needs no flag: it is kept with "
+        "sex 0 and a WARNING. effective-size refuses its sex-dependent estimators "
+        "while any row is unsexed.",
     )
     p.add_argument(
         "--no-override-asserted-sex",
         action="store_true",
-        help="disable the 0.9 default of overriding asserted sex when topology "
-        "unambiguously implies the opposite (asserted M used only as mother "
-        "-> F; asserted F used only as father -> M). The existing "
-        "missing->F/M imputation is unaffected. Restores 0.8's hard-block on "
-        "sex/role contradictions via the sex_role_consistency check.",
+        help="keep a recorded sex that contradicts the only parent role an individual has, "
+        "instead of overriding it (asserted M used only as mother -> F; asserted F used only "
+        "as father -> M; each override is a sex_role_override finding). The contradiction is "
+        "then a sex_role_consistency finding: validate writes the pedigree with it and exits 1, "
+        "and --drop-offending removes the individual. Filling a missing sex from role is "
+        "unaffected.",
     )
 
 
@@ -204,6 +203,17 @@ def _add_input_args(
         metavar="NAME",
         help="column name for father ID; -1/NA/blank for unknown (default: %(default)s)",
     )
+    p.add_argument(
+        "--missing-parent-token",
+        action="append",
+        default=[],
+        metavar="TOKEN",
+        help="a token that means a missing parent in the mother and father columns, besides -1, "
+        "blank, NA, '.', '?' and the like; repeatable. Matched exactly after stripping whitespace. "
+        "pedsum reads 0 as an ID, so a file that writes a missing parent as 0 (PLINK .fam, most R "
+        "packages) needs --missing-parent-token 0. A token that is also the ID of a row is an "
+        "error. validate writes such parents blank, so its output needs no flag.",
+    )
     p.add_argument("--birth-year-col", default=None, metavar="NAME", help=birth_year_help)
     p.add_argument(
         "--birth-year-min",
@@ -220,6 +230,15 @@ def _add_input_args(
         metavar="YEAR",
         help="inclusive upper bound for birth_year sanity check "
         "(default: current calendar year + 1). No-op without --birth-year-col.",
+    )
+    p.add_argument(
+        "--min-parent-age",
+        type=_nonnegative_int,
+        default=0,
+        metavar="YEARS",
+        help="flag a parent fewer than YEARS years older than its child, comparing birth years "
+        "(birth_year_topology: child.birth_year - parent.birth_year >= YEARS). The default 0 "
+        "flags only a child born before a parent. No-op without --birth-year-col.",
     )
 
 
@@ -401,12 +420,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         out_help="output directory (created if needed); writes validate.log "
         "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
         "auto-fixes applied; not written if a block is detected). With "
-        "--drop-offending also writes validate.dropped.tsv (the removal manifest)",
+        "--drop-offending also writes validate.dropped.tsv (the removal manifest), and with "
+        "--break-cycles validate.cleared_links.tsv (the links it cleared)",
         birth_year_help="optional column name for birth year (integer or float calendar "
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
         "[--birth-year-min, --birth-year-max]), and birth_year_topology "
-        "(child birth_year >= parent birth_year).",
+        "(child birth_year - parent birth_year >= --min-parent-age, default 0).",
     )
     p_val.add_argument(
         "--no-sex-check",
@@ -422,6 +442,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "the pedigree passes under the invoked flags. Writes validate.dropped.tsv "
         "and exits 1 whenever anything was dropped. Column/parse-level failures "
         "still BLOCK. WARNING: changes relatedness/Ne/founder counts (default: off)",
+    )
+    p_val.add_argument(
+        "--break-cycles",
+        action="store_true",
+        help="clear the parent links the data show to be wrong instead of blocking on them: "
+        "every self-link, and within a descent cycle every link to a parent born after the "
+        "child. Needs --birth-year-col. Individuals stay; each cleared link is a cycle_breaks "
+        "finding and a row of validate.cleared_links.tsv (id, role, parent, reason). A cycle "
+        "with no such link still BLOCKs, or loses its members under --drop-offending "
+        "(default: off)",
     )
     p_val.add_argument(
         "--fill-half-founders",
@@ -650,6 +680,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
+    if args.subcommand == "validate" and args.break_cycles and args.birth_year_col is None:
+        p_val.error("--break-cycles needs --birth-year-col: it clears links to a parent born after the child")
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "assortative-mating":

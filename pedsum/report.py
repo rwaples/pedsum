@@ -174,7 +174,7 @@ def build_pedigree_data(
     return {
         **_meta(path, cmd, size["n_total"]),
         "max_degree_enumerated": max_degree,
-        "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
+        "size_structure": _size_structure(size),
         "sibship_size": sibships,
         "mating_pairs": mating_pairs,
         # Opt-in (`--sex-concordance`); None keeps the section out of every
@@ -192,6 +192,16 @@ def build_pedigree_data(
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
         "inbreeding": inbreeding,
     }
+
+
+def _size_structure(size: dict) -> dict:
+    """The ``size_structure`` section; ``sex_source`` follows ``n_female`` when the input carried the column."""
+    out = {}
+    for k in _SIZE_STRUCTURE_KEYS:
+        out[k] = size[k]
+        if k == "n_female" and size.get("sex_source") is not None:
+            out["sex_source"] = size["sex_source"]
+    return out
 
 
 def _serialise_pair_entry(value: PairEntry) -> object:
@@ -538,6 +548,20 @@ def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels
             "n_refs": [f.n_refs for f in findings],
         },
         schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String, "n_refs": pl.Int64},
+    )
+    with atomic_output(out_path) as tmp:
+        df.write_csv(tmp, separator="\t")
+
+
+def write_cleared_links(cleared: list[tuple[str, str, str, str]], out_path: Path) -> None:
+    """Tab-separated manifest of the parent links ``validate --break-cycles`` cleared.
+
+    One row per link: the child's id, the parent ``role``, the ``parent`` id
+    and the ``reason``. Written even when nothing was cleared (header only).
+    """
+    df = pl.DataFrame(
+        {name: [r[i] for r in cleared] for i, name in enumerate(("id", "role", "parent", "reason"))},
+        schema=dict.fromkeys(("id", "role", "parent", "reason"), pl.String),
     )
     with atomic_output(out_path) as tmp:
         df.write_csv(tmp, separator="\t")

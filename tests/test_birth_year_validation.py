@@ -25,7 +25,7 @@ def test_validate_without_birth_year_col_skips_all_three(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "birth_year column parses as numeric ... SKIP" in r.stderr
     assert "birth years within sanity range ....... SKIP" in r.stderr
-    assert "child birth_year >= parent birth_year . SKIP" in r.stderr
+    assert "parent age at birth >= min parent age . SKIP" in r.stderr
 
 
 def test_birth_year_dtype_check_fails_for_garbage(tmp_path):
@@ -111,7 +111,7 @@ def test_birth_year_topology_check_fails_for_inversion(tmp_path):
     )
     assert r.returncode == 1, r.stderr
     assert "Traceback" not in r.stderr
-    assert "child birth_year >= parent birth_year . FAIL" in r.stderr
+    assert "parent age at birth >= min parent age . FAIL" in r.stderr
     log = (tmp_path / "out" / "validate.log").read_text()
     assert "birth_year_topology" in log
     # Both mother and father edges should be flagged.

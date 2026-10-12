@@ -81,9 +81,8 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
     needs_sex = [name for name in requested if name in _SEX_DEPENDENT_ESTIMATORS]
     if needs_sex and (df["sex"].to_numpy() == SEX_UNKNOWN).any():
         logger.error(
-            "effective size needs resolved sex for every row to run %s; remove "
-            "--allow-missing-sex, supply sex for the offending rows, or select "
-            "only estimators that do not use sex",
+            "effective size needs resolved sex for every row to run %s; supply "
+            "sex for the unsexed rows, or select only estimators that do not use sex",
             ", ".join(needs_sex),
         )
         return 1

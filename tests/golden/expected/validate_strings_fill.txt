@@ -6,9 +6,9 @@ parent_refs_present_mother	Z99		id=Z99 referenced as mother 1 time(s) but no row
 
 === validate.tsv.gz ===
 id	sex	mother	father	birth_year	ref	sex_source
-Z99	2	-1	-1			
-_pedsum_phantom_1	1	-1	-1			
-_pedsum_phantom_2	2	-1	-1			
+Z99	2	-1	-1			imputed_from_missing
+_pedsum_phantom_1	1	-1	-1			imputed_from_missing
+_pedsum_phantom_2	2	-1	-1			imputed_from_missing
 A01	1			1950	0	input
 A02	2	.		1950	0	input
 B03	1	Z99	_pedsum_phantom_1	1976	1	input

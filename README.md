@@ -96,22 +96,35 @@ individuals, …) and writes:
 | `DIR/validate.log` | per-finding TSV (one row per issue): `check`, `id`, `row`, `detail`, and `n_refs`, the number of rows naming a missing parent (`parent_refs_present_*` findings only) |
 | `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
+| `DIR/validate.cleared_links.tsv` | with `--break-cycles`: the parent links it cleared (`id`, `role`, `parent`, `reason`) |
 
-`validate` first removes any `validate.tsv.gz` and `validate.dropped.tsv` an
-earlier run left in `DIR`, so the files there always belong to this run.
+`validate` first removes any `validate.tsv.gz`, `validate.dropped.tsv` and
+`validate.cleared_links.tsv` an earlier run left in `DIR`, so the files there
+always belong to this run.
 
 When `--birth-year-col NAME` is passed, validate also runs three
 optional checks: `birth_year_dtype` (numeric parsing),
 `birth_year_range` (each year within `[--birth-year-min,
 --birth-year-max]`; defaults to `[1800, current_year + 1]`), and
-`birth_year_topology` (`child.birth_year >= parent.birth_year` for
-every edge where both endpoints are known). Findings are written to
-`.validate.log` like any other check.
+`birth_year_topology` (`child.birth_year - parent.birth_year >=
+--min-parent-age`, default 0, for every edge where both endpoints are
+known). `--min-parent-age N` flags a parent fewer than `N` years older
+than its child; ages are whole years, since pedsum has birth years, not
+dates. Findings are written to `validate.log` like any other check.
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
+- Exact duplicate rows collapsed to the first (`duplicate_rows`): rows
+  compared as pedsum reads them, so `NA` and `.` are the same missing
+  parent, `M` and `1` the same sex and, with `--birth-year-col`, `1980` and
+  `1980.0` the same year; every other column is compared as text.
 - Sex imputed from parent role (F if used as a mother, M if used as
   a father) for any row whose original sex was missing.
+- A recorded sex that contradicts the only parent role an individual has
+  overridden from that role (`sex_role_override`; turn it off with
+  `--no-override-asserted-sex`).
+- An unsexed individual who is never a parent kept with sex `0`, with a
+  WARNING giving the count.
 - The sex column written in PLINK's coding, `1` = male, `2` = female,
   `0` = unknown, whatever tokens the input used. `sex_source` says
   where each row's sex came from: `input`, `imputed_from_missing`,
@@ -136,12 +149,20 @@ data first. Two kinds of failure hard-block:
 - column- and parse-level failures: a missing required column, a row
   without an id, an unrecognized sex token, a negative id, an
   out-of-range parent token, an unparsable birth year, an empty
-  pedigree;
+  pedigree, and a parent written `0` that has no row (see
+  `--missing-parent-token` under "Input format");
 - cycles (including a self-loop, an individual listed as its own
-  parent, which is a one-person cycle), duplicate IDs, a mother equal to
-  the father, sex conflicts on missing parents, unresolved sex without
-  `--allow-missing-sex`, and sex-role ambiguity. A cycle blocks even
-  when some parent IDs are missing from the file.
+  parent, which is a one-person cycle), an ID on rows that differ, a mother equal to
+  the father, sex conflicts on missing parents, and an unsexed
+  individual used as both mother and father (sex-role ambiguity,
+  tolerated by `--allow-missing-sex`). A cycle blocks even when some
+  parent IDs are missing from the file.
+
+Each auto-fix of a recorded fact (a synthesized founder, a collapsed
+duplicate row, a cleared cycle link, an overridden sex) is a finding in
+`validate.log`, so `validate` exits 1; filling a missing sex from role is
+recorded only in `sex_source`. `summarize` and the other commands stop on
+any finding, so run them on `validate.tsv.gz`, which has none.
 
 Sex-role contradictions and birth years out of range or out of order are
 written to `DIR/validate.tsv.gz` as they are, with exit 1;
@@ -160,6 +181,15 @@ and exits non-zero whenever anything was dropped. Column- and parse-level
 failures (a missing column, a row without an id, negative IDs) still hard-block — no
 removal can fix those.
 
+**`--break-cycles`** (needs `--birth-year-col`) clears the parent links the
+data show to be wrong instead of blocking on them: every self-link, and
+within a descent cycle every link to a parent born after the child. The
+individuals stay; their cleared slot is written blank. Each cleared link is a
+`cycle_breaks` finding in `validate.log` (so `validate` exits 1) and a row of
+`DIR/validate.cleared_links.tsv`. A cycle with no such link is left as it
+was: it BLOCKs, or under `--drop-offending` its members are removed. pedsum
+does not pick a link to cut without evidence.
+
 The Reduced Pedigree is individual-level data (IDs, parents, and the dropped
 IDs in the manifest), not aggregate statistics — `--safe-attempt` redaction
 applies only to `summarize` output, never to `validate`. Treat
@@ -173,35 +203,39 @@ because the two programs cleaned the pedigree differently, not because the
 statistic differs. The table compares `pedsum validate` with the cleaners of
 eight R packages: optiSel `prePed`, visPedigree `tidyped`, nadiv `prepPed`,
 kinship2 `pedigree`/`fixParents`, purgeR `ped_rename`/`ped_sort`, pedtools
-`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. Every
-cell comes from running the programs on the same fixtures; the fixtures,
+`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. The R
+cells come from running the programs on the same fixtures; the fixtures,
 outputs and versions are in
-[pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners).
-[ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)
-records changes planned for several rows
-([#25](https://github.com/rwaples/pedsum/issues/25)).
+[pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners),
+which ran pedsum 542ef12. The pedsum cells describe this version, which
+changed several rows after that run
+([ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md),
+[#25](https://github.com/rwaples/pedsum/issues/25)).
 
 | Problem | pedsum | The R cleaners |
 |---|---|---|
 | Parent ID with no row | Adds a founder row (exit 1). | Same, except purgeR (sets the parent to unknown, which changes founder, half-founder and sibship counts) and kinship2 `pedigree()` / pedtools `ped()` (refuse). |
-| Parent written `0` | Read as an ID: blocks when `0` is both mother and father, otherwise adds a founder named `0`. Recode `0` to `NA`. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
-| The same row twice | Blocks. | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
+| Parent written `0` | Read as an ID. A `0` with no row blocks, naming `--missing-parent-token 0`, which reads it as missing. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
+| The same row twice | Keeps the first copy (exit 1). | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
-| Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
-| Recorded sex contradicts the only parent role | Overrides it from the role (`sex_source = imputed_from_role`). | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
+| Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. `--break-cycles` first clears a self-link and, in a cycle, each link to a parent born after the child. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
+| Recorded sex contradicts the only parent role | Overrides it from the role: a `sex_role_override` finding (exit 1) and `sex_source = imputed_from_role`. | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
 | No sex, used as a parent | Filled from the role. | optiSel, visPedigree and kinship2 `fixParents` fill it; kinship2 `pedigree()` refuses; the rest leave it unknown. |
-| No sex, never a parent | Blocks unless `--allow-missing-sex`. | All accept it. |
+| No sex, never a parent | Kept with sex `0` and a WARNING. | All accept it. |
 | One parent known | Kept as a half-founder; `--fill-half-founders` adds a founder in the empty slot. | kinship2 `fixParents` and nprcgenekeepr add a parent by default; kinship2 `pedigree()` and pedtools refuse; the rest keep it. |
 | Mother = father (selfing) | Blocks ([#24](https://github.com/rwaples/pedsum/issues/24)). | nadiv allows it, visPedigree with `selfing = TRUE`, pedtools for sex 0; the rest refuse or do not check. |
-| Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
+| Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). `--min-parent-age N` also flags a parent fewer than `N` years older. | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
 | Row without an ID | Blocks. | visPedigree and nadiv drop the row with a warning; pedtools, pedigreemm and nprcgenekeepr keep an individual named `NA`; the rest refuse. |
 
 On optiSel's `PedigWithErrors` (10,863 rows), `prePed` keeps every row: it
 adds 2 founders, clears 4 parent links to break two cycles, reads a father
 written `0` as missing and changes 1 sex.
-`validate --drop-offending` removes 7 rows (cycle members, a self-loop and
-children born before a parent) and adds 3 founders, one of them for a father
-written `0`.
+Plain `validate` blocks on the father written `0` and on the cycles. With
+`--missing-parent-token 0 --drop-offending` it removes 7 rows (cycle
+members, a self-loop and children born before a parent) and adds 2
+founders. Adding `--break-cycles` instead clears 2 links, a mother born 28
+years after her child and a self-link, and removes only the 2 children
+born before a parent.
 
 ### Summarize a pedigree
 
@@ -267,22 +301,31 @@ Flags:
   per-individual `annotated.tsv.gz`, drop `min`/`max` from
   distributions, and null any count or stratum below cell-size 5.
   **Not a safe-harbor guarantee** — review before sharing.
-- `--allow-missing-sex` — tolerate rows whose sex is missing after
-  imputation, either because the row is unsexed and not used as a
-  parent (orphan), or because it is used as BOTH mother and father
-  with unknown sex (role-ambiguous). Such rows are auto-fixed to
-  `sex=0` (unknown) in the validate-fixed output. Without this flag, either
-  case hard-blocks. `summarize` runs normally on such rows, F included.
-  `effective-size` refuses them only when `ne_sex_ratio`,
+- `--allow-missing-sex` — tolerate an individual with unknown sex used
+  as BOTH mother and father (role-ambiguous), which otherwise
+  hard-blocks; it is written with `sex=0` (unknown). An unsexed
+  individual who is never a parent needs no flag: it is kept with
+  `sex=0` and a WARNING. `summarize` runs normally on unsexed rows, F
+  included. `effective-size` refuses them only when `ne_sex_ratio`,
   `ne_variance_family_size` or `ne_hill_overlapping` is selected, since
   those need every sex resolved; the other five estimators run.
 - `--no-override-asserted-sex` — disable the default behavior of
   overriding asserted sex when topology unambiguously implies the
   opposite (asserted M used only as mother → F; asserted F used only
-  as father → M). The missing→F/M imputation is unaffected. A
-  contradiction then fails `sex_role_consistency`: `validate` reports it
-  and writes the asserted sex as it is (exit 1), `--drop-offending`
-  removes the individual, and `summarize` refuses to run.
+  as father → M), each a `sex_role_override` finding. The missing→F/M
+  imputation is unaffected. A contradiction then fails
+  `sex_role_consistency`: `validate` reports it and writes the asserted
+  sex as it is (exit 1), `--drop-offending` removes the individual, and
+  `summarize` refuses to run.
+
+When its input has a `sex_source` column, as `validate.tsv.gz` does,
+every command keeps each row's value there unless it changes that row's
+sex itself, so `annotated.tsv.gz` and `--sex-concordance` see where each
+sex came from; `summarize` also counts the values under
+`size_structure.sex_source` in `summary.yaml`. Loading a Fixed Pedigree
+again finds every sex already resolved, so without the column a sex
+`validate` filled or overrode would pass for a recorded one. The
+founders `validate` adds have `sex_source = imputed_from_missing`.
 
 ### Offspring Sex Concordance (`--sex-concordance`)
 
@@ -1012,18 +1055,30 @@ id	sex	mother	father
 |---|---|---|
 | `id` | unique, non-missing | Integers or strings (`P001`, `FAM01-003`); see "String IDs" below. |
 | `sex` | `M`/`F`/`Male`/`Female` (any case) or PLINK's `1`/`2`/`0` | `1 = male, 2 = female, 0 = unknown` (see "Sex coding" below). Missing tokens (`""`, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U`, `Unknown`, any case) are recognised and are either imputed from parent role (F if used as a mother, M if used as a father) or surfaced as findings. |
-| `mother` | parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. If your file uses literal `0` for "missing parent" (PLINK fam convention), replace it with `-1` first. |
+| `mother` | parent ID or missing | `-1` for unknown/founder. Tokens `NA`, `NaN`, `N/A`, `.`, `?`, blank, `None`, `null` (any case) are also recognised as missing. `0` is an ID: if your file writes a missing parent as `0` (PLINK `.fam`, most R packages), pass `--missing-parent-token 0`. |
 | `father` | parent ID or missing | Same conventions as `mother`. |
 
 Required column names are overridable via `--id-col` / `--sex-col` /
 `--mother-col` / `--father-col`. Half-founders (one parent missing,
 the other a valid ID) are accepted.
 
+**`--missing-parent-token TOKEN`** (repeatable, every command) adds a
+token that means a missing parent in the mother and father columns,
+matched exactly after stripping whitespace. pedsum reads `0` as an ID,
+because in some pedigrees (simACE's among them) ID 0 is an individual,
+and reading it as missing would turn its offspring from half-sibs into
+unrelated half-founders. A parent written `0` that has no row blocks
+`validate`, `--drop-offending` included, and fails the other commands,
+with a message naming `--missing-parent-token 0`. A token that is also
+the ID of a row is an error. `validate` writes a parent read as missing
+through a token as blank, so `summarize` and `effective-size` read
+`validate.tsv.gz` without the flag.
+
 ### Optional columns
 
 | Column | Recognised when | Effect |
 |---|---|---|
-| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year >= parent.birth_year` on every known edge). |
+| `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year - parent.birth_year >= --min-parent-age`, default 0, on every known edge). |
 | *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
 
 ### Row order
@@ -1051,10 +1106,11 @@ in plant and other monoecious pedigrees) is refused
 ([#24](https://github.com/rwaples/pedsum/issues/24)).
 
 Missing-sex tokens, and `0`, decode to unknown. pedsum then imputes
-from parent role: F if used as mother, M if used as father. Two
-cases hard-block unless `--allow-missing-sex` is set — an individual
-used as BOTH mother and father (pedsum cannot pick a side), and an
-unsexed row not used as a parent at all.
+from parent role: F if used as mother, M if used as father. An
+individual used as BOTH mother and father hard-blocks unless
+`--allow-missing-sex` is set (pedsum cannot pick a side). An unsexed
+individual who is never a parent is kept with sex `0`: it changes no
+relationship and no F.
 
 ## Preparing your data
 
@@ -1065,16 +1121,15 @@ delimiter routing automatically.
 ### PLINK `.fam` files
 
 No header, `0` for missing parents, sex `1=male, 2=female`. Add a
-header and remap `0 → -1`:
+header and pass `--missing-parent-token 0`:
 
 ```bash
-{ printf 'FID IID PAT MAT SEX PHENO\n'; \
-  awk 'BEGIN{OFS=" "} {if($3==0)$3=-1; if($4==0)$4=-1; print}' cohort.fam; } \
-    > cohort.fam.headed
+{ printf 'FID IID PAT MAT SEX PHENO\n'; cat cohort.fam; } > cohort.fam.headed
 
 pedsum summarize \
     --in cohort.fam.headed --out cohort/ \
-    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX
+    --id-col IID --mother-col MAT --father-col PAT --sex-col SEX \
+    --missing-parent-token 0
 ```
 
 ### Non-TSV inputs (CSV, Excel)
@@ -1198,7 +1253,7 @@ Exit codes:
 | `column 'id' has N missing value(s)` | a row with a blank or `NA` id | give every row an id |
 | `sex column has N invalid value(s)` | a numeric coding other than PLINK's 1=male, 2=female, 0=unknown | recode the sex column to PLINK or `M`/`F` |
 | WARNING `sex column has '0' tokens and no '2'` | a `0` = female, `1` = male column, such as pedsum output before 0.15.0 | recode `0` → `2` |
-| `id=0 referenced as mother/father` | file uses `0` for missing | preprocess: replace `0` in mother/father columns with `-1` |
+| `parent ID 0 has no row` | file writes a missing parent as `0` | pass `--missing-parent-token 0` |
 | WARNING `IDs read as strings` | an ID token that is not a plain integer, e.g. `001`, `1.0`, or a non-standard missing token | expected for string IDs; otherwise fix the token, or replace a missing token with `-1`, `NA`, blank, or `.` |
 | `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |
 

@@ -9,10 +9,12 @@ from pedigree_graph import ResourceError
 
 from pedsum.base import (
     F_WALK_WARN_VISITS,
+    SexSource,
     logger,
 )
 from pedsum.cli.common import commit_thread_budget, load_or_fail
 from pedsum.pairs import augment_pair_counts, build_pedigree_graph
+from pedsum.parse import read_header
 from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
 from pedsum.redaction import SAFE_MIN_CELL
@@ -87,6 +89,10 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
 
     with timed("size+structure"):
         size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
+    # A Fixed Pedigree records where each sex came from; loading kept it (ADR 0006).
+    if "sex_source" in read_header(args.in_path, args.sep):
+        sex_source = df["sex_source"]
+        size["sex_source"] = {s.value: int((sex_source == s.value).sum()) for s in SexSource}
 
     with timed("mating pairs grouped"):
         mating = group_mating_pairs(df, mother_rows, father_rows)

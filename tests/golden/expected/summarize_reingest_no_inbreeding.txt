@@ -338,6 +338,11 @@ pedigree:
       nonfounder_frac: 0.6
       n_male: 7
       n_female: 7
+      sex_source:
+        input: 14
+        imputed_from_missing: 0
+        imputed_from_role: 0
+        unresolved: 1
       n_mother_links: 9
       n_father_links: 9
       n_parent_child_edges: 18

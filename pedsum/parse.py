@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import gzip
 import io
 from datetime import UTC, datetime
@@ -250,6 +251,16 @@ def _read_whitespace_table(path: Path, *, as_str: bool, columns: list[str] | Non
     if as_str:
         return pl.read_csv(buf, separator="\t", infer_schema=False, null_values=_NULL_TOKENS, columns=columns)
     return pl.read_csv(buf, separator="\t", null_values=_NULL_TOKENS, infer_schema_length=None, columns=columns)
+
+
+def read_header(path: Path, sep: str = "auto") -> list[str]:
+    """The column names of a pedigree table, read from its first non-empty line only."""
+    chosen = _sniff_delimiter(path) if sep == "auto" else _SEP_MAP.get(sep, sep)
+    with _open_text_for_sniff(path) as fh:
+        first = next((line for line in fh if line.strip()), "")
+    if chosen == r"\s+":
+        return first.split()
+    return next(csv.reader([first.rstrip("\r\n")], delimiter=chosen), [])
 
 
 def read_pedigree_table(

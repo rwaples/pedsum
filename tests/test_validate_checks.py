@@ -8,8 +8,9 @@ from conftest import ambig_pedigree, load_validate_tsv_gz, read_tsv_gz, run_peds
 from conftest import write_ped as _write_ped
 
 
-def test_validate_unknown_sex_is_hard_block(tmp_path):
-    """Orphan unsexed row without --allow-missing-sex hard-blocks validate."""
+@pytest.mark.parametrize("flag", [[], ["--allow-missing-sex"]])
+def test_validate_keeps_unsexed_non_parent(tmp_path, flag):
+    """An unsexed row that is never a parent is kept with sex 0 and a WARNING, flag or not (ADR 0006)."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -19,45 +20,12 @@ def test_validate_unknown_sex_is_hard_block(tmp_path):
         ],
     )
     base = tmp_path / "out"
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
-    assert r.returncode == 2, r.stderr
-    assert "BLOCKED" in r.stderr
-    assert "unresolved sex" in r.stderr.lower() or "unknown" in r.stderr.lower()
-    # .validate.tsv.gz must NOT be written when blocked
-    assert not (tmp_path / "out" / "validate.tsv.gz").exists()
-
-
-def test_validate_unknown_sex_skipped_with_flag(tmp_path):
-    """--allow-missing-sex turns the unknown_sex check into a SKIP."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},
-        ],
-    )
-    base = tmp_path / "out"
-    r = run_pedsum(
-        [
-            "validate",
-            "--in",
-            str(ped),
-            "--out",
-            str(base),
-            "--allow-missing-sex",
-        ]
-    )
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base), *flag])
     assert r.returncode == 0, r.stderr
-    # Summary shows SKIP for unknown_sex with the tolerated count.
-    assert "SKIP" in r.stderr
-    assert "tolerated" in r.stderr
-    # Output file IS written.
-    assert (tmp_path / "out" / "validate.tsv.gz").exists()
-    # validate.log does NOT contain rows for tolerated unknown_sex findings
-    # (matches existing precedent: _check_* is skipped entirely when flagged).
-    log = (tmp_path / "out" / "validate.log").read_text()
-    assert "unknown_sex" not in log
+    assert "WARNING" in r.stderr
+    assert "kept 1 individual(s) with unknown sex who are never parents (sex 0)" in r.stderr
+    assert load_validate_tsv_gz(base).filter(pl.col("id") == "3")["sex"].item() == "0"
+    assert (base / "validate.log").read_text().strip() == "check\tid\trow\tdetail\tn_refs"
 
 
 def test_validate_sex_role_ambiguity_is_hard_block_without_flag(tmp_path):

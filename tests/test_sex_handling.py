@@ -10,9 +10,10 @@ from conftest import ambig_pedigree, parent_rows, run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError
+from pedsum.fixed_pedigree import fix_pedigree
 from pedsum.parse import decode_sex
 from pedsum.sections import compute_size_structure
-from pedsum.validate import ValidationConfig, load_and_validate
+from pedsum.validate import ValidationConfig, load_and_validate, validate_pedigree
 
 # ---------------------------------------------------------------------------
 # Decoding: words and PLINK's 1=male, 2=female, 0=unknown
@@ -129,18 +130,19 @@ def test_missing_sex_imputed_from_father_role(tmp_path):
     assert int(row["sex"]) == SEX_MALE
 
 
-def test_missing_sex_unresolvable_without_flag_raises(tmp_path):
-    """Orphan unsexed row without --allow-missing-sex is an error."""
+def test_unsexed_non_parent_kept_without_flag(tmp_path, caplog):
+    """An unsexed row that is never a parent loads without --allow-missing-sex, with a WARNING (ADR 0006)."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
             {"id": 1, "sex": "M", "mother": -1, "father": -1},
             {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},  # orphan, no role
+            {"id": 3, "sex": "", "mother": 2, "father": 1},  # never a parent
         ],
     )
-    with pytest.raises(PedigreeError, match="unknown_sex"):
-        load_and_validate(ped, ValidationConfig())
+    df, _labels = load_and_validate(ped, ValidationConfig())
+    assert df.filter(pl.col("id") == 3)["sex"].item() == SEX_UNKNOWN
+    assert "kept 1 individual(s) with unknown sex who are never parents" in caplog.text
 
 
 def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
@@ -274,6 +276,12 @@ def test_summarize_no_validate_log_when_valid(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _fixed_frame(ped):
+    """The Fixed Pedigree validate writes for ``ped``, as load_and_validate's frame."""
+    _n, _results, _findings, ctx = validate_pedigree(ped, ValidationConfig())
+    return fix_pedigree(ctx).frame()
+
+
 def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
     """Row with sex=M used only as mother gets overridden to F under the default."""
     ped = _write_ped(
@@ -284,10 +292,13 @@ def test_impute_overrides_asserted_m_used_as_mother(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = load_and_validate(ped, ValidationConfig())
+    df = _fixed_frame(ped)
     row = df.filter(pl.col("id") == 2).row(0, named=True)
     assert int(row["sex"]) == SEX_FEMALE
     assert row["sex_source"] == "imputed_from_role"
+    # The override is an autofix FAIL, so summarize's fail-fast load refuses the raw input.
+    with pytest.raises(PedigreeError, match="sex_role_override"):
+        load_and_validate(ped, ValidationConfig())
 
 
 def test_impute_overrides_asserted_f_used_as_father(tmp_path):
@@ -300,7 +311,7 @@ def test_impute_overrides_asserted_f_used_as_father(tmp_path):
             {"id": 3, "sex": "F", "mother": 2, "father": 1},
         ],
     )
-    df, _labels = load_and_validate(ped, ValidationConfig())
+    df = _fixed_frame(ped)
     row = df.filter(pl.col("id") == 1).row(0, named=True)
     assert int(row["sex"]) == SEX_MALE
     assert row["sex_source"] == "imputed_from_role"

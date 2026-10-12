@@ -119,10 +119,13 @@ class TestCheckEdgeCases:
     """Validation check producers cover clean, offending, and formatting cases."""
 
     def test_duplicate_ids_clean_and_offending(self) -> None:
-        """Duplicate-ID checking returns no findings for unique IDs and one per duplicate value."""
+        """Duplicate-ID checking returns no findings for unique IDs and one per ID on rows that differ."""
         assert run_check("duplicate_ids", _founders([1, 2, 3])).findings == []
-        findings = run_check("duplicate_ids", _founders([2, 1, 2, 3, 1])).findings
+        rows = [{**row, "sex": "M" if i >= 3 else "F"} for i, row in enumerate(_founders([2, 1, 3, 2, 1]))]
+        findings = run_check("duplicate_ids", rows).findings
         assert [f.id for f in findings] == [1, 2]
+        # Exact copies are duplicate_rows', not duplicate_ids'.
+        assert run_check("duplicate_ids", _founders([2, 1, 2, 3, 1])).findings == []
 
     def test_parent_refs_present_absent_clean_missing_and_zero_hint(self) -> None:
         """Missing-parent detection distinguishes no refs, all-present refs, and the zero-token hint."""
@@ -138,7 +141,7 @@ class TestCheckEdgeCases:
         assert check([1, -1, 2], [-1, -1, -1], "mother") == []
         findings = check([-1, -1, -1], [0, 99, 99], "father")
         assert [f.id for f in findings] == [0, 99]
-        assert "convert to -1" in findings[0].detail
+        assert "pass --missing-parent-token 0" in findings[0].detail
 
     def test_empty_pedigree_check(self) -> None:
         """Empty-pedigree checking fires only for n == 0."""

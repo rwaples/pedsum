@@ -12,7 +12,9 @@ The auto-fixes:
 - a founder row for each missing parent ID (``parent_refs_present_*``);
 - with ``fill_half_founders``, a phantom parent in each half-founder's missing
   slot;
-- sex resolved from parent role, recorded per row in ``sex_source``;
+- sex resolved from parent role, recorded per row in ``sex_source`` (an
+  input that has the column, such as ``validate.tsv.gz``, keeps its values
+  where this run changed nothing);
 - rows in topological order (parents before children).
 """
 
@@ -24,12 +26,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, SexSource, logger
 from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
 from pedsum.pedigree_ops import unique_ints
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pedsum.ids import IdLabels
     from pedsum.pedigree_ops import IdIndex
     from pedsum.validate import ValidationContext
@@ -97,12 +101,14 @@ def fix_pedigree(
 
     n = len(ids)
     founders = (
-        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check) if synthesize_founders else []
+        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check, ctx.rows)
+        if synthesize_founders
+        else []
     )
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:
-            next_id = next_free_id(ids, mothers, fathers)
+            next_id = next_free_id(ids, mothers, fathers, ctx.config.missing_parent_tokens)
         labels = labels.with_phantoms(next_id)
         new_mothers, new_fathers, phantoms = _build_phantom_parents(mothers, fathers, next_id)
         filled_mother = new_mothers != mothers
@@ -129,7 +135,7 @@ def fix_pedigree(
         sex=take(imp.imputed_sex),
         mothers=take(mothers),
         fathers=take(fathers),
-        sex_source=take(imp.sex_source),
+        sex_source=take(_keep_recorded_sex_source(imp.sex_source, ctx.df_raw)),
         birth_year=None if ctx.birth_year is None else take(ctx.birth_year),
         ped_depth=take(depth),
         input_row=order,
@@ -149,21 +155,30 @@ def render_fixed_pedigree(
     sex_col: str,
     mother_col: str,
     father_col: str,
+    missing_parent_tokens: tuple[str, ...] = (),
 ) -> pl.DataFrame:
     """The string frame ``validate`` writes: the input's columns and tokens, with the fixes.
 
     ``raw`` is the input as read (all String columns). Each input row keeps
     its own tokens except the sex column, written in PLINK's coding
-    (1=male, 2=female, 0=unknown) whatever tokens the input used, and a
-    parent slot that now holds a phantom. A ``sex_source`` column records
-    which rows pedsum changed. Founder rows come first, with empty cells
-    outside the ID, sex and parent columns.
+    (1=male, 2=female, 0=unknown) whatever tokens the input used, a parent
+    written as one of ``missing_parent_tokens``, written blank so the file
+    reads the same without ``--missing-parent-token``, and a parent slot that
+    now holds a phantom. A ``sex_source`` column records which rows pedsum
+    changed. Founder rows come first, with empty cells outside the ID, sex
+    and parent columns.
     """
     out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
         pl.Series(sex_col, plink_sex(fp.sex)).cast(pl.String),
         # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
         pl.Series("sex_source", fp.sex_source, dtype=pl.String),
     )
+    if missing_parent_tokens:
+        tokens = list(missing_parent_tokens)
+        out = out.with_columns(
+            pl.when(pl.col(c).str.strip_chars().is_in(tokens)).then(None).otherwise(pl.col(c)).alias(c)
+            for c in (mother_col, father_col)
+        )
     if fp.filled_mother.any() or fp.filled_father.any():
         out = out.with_columns(
             pl.when(pl.Series(fp.filled_mother))
@@ -185,8 +200,36 @@ def render_fixed_pedigree(
     data[sex_col] = plink_sex(np.array([f["sex"] for f in fp.founders], dtype=np.int8)).astype(str).tolist()
     data[mother_col] = ["-1"] * n_new
     data[father_col] = ["-1"] * n_new
+    # A founder pedsum added has no recorded sex: it comes from the role it fills.
+    data["sex_source"] = [SexSource.IMPUTED_FROM_MISSING.value] * n_new
     new_rows = pl.DataFrame(data, schema=dict.fromkeys(out.columns, pl.String))
     return pl.concat([new_rows, out.cast(pl.String)])
+
+
+def _keep_recorded_sex_source(derived: np.ndarray, raw: pl.DataFrame) -> np.ndarray:
+    """``derived`` with the input's own ``sex_source`` where this run derived ``input``.
+
+    Loading a Fixed Pedigree again finds every sex resolved, so without its
+    column a sex ``validate`` filled or overrode would pass for a recorded one
+    (ADR 0006). A repair this run made wins over the column. A column with
+    values pedsum does not write is ignored with a WARNING.
+    """
+    if "sex_source" not in raw.columns:
+        return derived
+    tokens = raw["sex_source"].cast(pl.String).str.strip_chars()
+    known = [s.value for s in SexSource]
+    unknown = tokens.filter(tokens.is_not_null() & ~tokens.is_in(known)).unique().sort()
+    if len(unknown):
+        logger.warning(
+            "input column sex_source has values pedsum does not write (%s); ignored", unknown.head(3).to_list()
+        )
+        return derived
+    use = (derived == SexSource.INPUT.value) & tokens.is_not_null().to_numpy()
+    if not use.any():
+        return derived
+    out = derived.copy()
+    out[use] = tokens.to_numpy()[use]
+    return out
 
 
 def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
@@ -201,13 +244,17 @@ def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
             n_overridden,
             n_unresolved,
         )
-    if allow_missing_sex:
-        n_ambiguous = int(imp.ambiguous_mask.sum())
-        if n_ambiguous > 0:
-            logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
-        n_orphan = int(((sex == SEX_UNKNOWN) & ~imp.ambiguous_mask).sum())
-        if n_orphan > 0:
-            logger.info("kept %d row(s) with sex=%d (--allow-missing-sex)", n_orphan, SEX_UNKNOWN)
+    n_ambiguous = int(imp.ambiguous_mask.sum())
+    if allow_missing_sex and n_ambiguous > 0:
+        logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
+    # Never a parent, so no role to sex them from (ADR 0006): kept with sex 0.
+    n_unsexed = n_unresolved - n_ambiguous
+    if n_unsexed > 0:
+        logger.warning(
+            "kept %d individual(s) with unknown sex who are never parents (sex 0); "
+            "effective-size refuses its sex-dependent estimators while any row is unsexed",
+            n_unsexed,
+        )
 
 
 def _build_added_founders(
@@ -215,8 +262,9 @@ def _build_added_founders(
     fathers: np.ndarray,
     id_index: IdIndex,
     no_sex_check: bool,
+    input_rows: Callable[[np.ndarray], np.ndarray] = lambda rows: rows,
 ) -> list[dict]:
-    """Synthesize founder rows for missing parent IDs, sorted by ID."""
+    """Synthesize founder rows for missing parent IDs, sorted by ID; ``input_rows`` maps rows for the reasons."""
     moms_ref = unique_ints(mothers[mothers != -1])
     dads_ref = unique_ints(fathers[fathers != -1])
     moms_missing = set(moms_ref[id_index.get_indexer(moms_ref) == -1].tolist())
@@ -227,15 +275,15 @@ def _build_added_founders(
 
     out: list[dict] = []
     for mid in sorted(moms_only):
-        rows = np.where(mothers == mid)[0]
+        rows = input_rows(np.where(mothers == mid)[0])
         out.append({"id": int(mid), "sex": SEX_FEMALE, "reason": f"referenced as mother in {rows_phrase(rows)}"})
     for did in sorted(dads_only):
-        rows = np.where(fathers == did)[0]
+        rows = input_rows(np.where(fathers == did)[0])
         out.append({"id": int(did), "sex": SEX_MALE, "reason": f"referenced as father in {rows_phrase(rows)}"})
     if no_sex_check:
         for cid in sorted(conflicts):
-            rows_m = np.where(mothers == cid)[0]
-            rows_f = np.where(fathers == cid)[0]
+            rows_m = input_rows(np.where(mothers == cid)[0])
+            rows_f = input_rows(np.where(fathers == cid)[0])
             out.append(
                 {
                     "id": int(cid),
@@ -250,9 +298,14 @@ def _build_added_founders(
     return out
 
 
-def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
-    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
-    return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
+def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, tokens: tuple[str, ...] = ()) -> int:
+    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap.
+
+    Also past every integer ``--missing-parent-token``: a phantom with a token's
+    ID would read as a missing parent wherever the token is passed again.
+    """
+    token_ints = [int(t) for t in tokens if t.lstrip("+-").isdigit()]
+    return max(int(ids.max()), int(mothers.max()), int(fathers.max()), *token_ints) + 1
 
 
 def _build_phantom_parents(

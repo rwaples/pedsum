@@ -46,7 +46,7 @@ def test_missing_id_skips_id_dependent_checks(tmp_path):
         "self_loops",
         "parents_distinct",
         "sex_role_consistency",
-        "unknown_sex",
+        "sex_role_override",
         "acyclic",
     ):
         assert results[name].status == "SKIP", name
@@ -66,6 +66,7 @@ def test_string_ids_run_every_check(tmp_path):
     results = _results_by_name(ped)
     assert [n for n, r in results.items() if r.status != "PASS"] == [
         "birth_year_dtype",
+        "cycle_breaks",
         "birth_year_range",
         "birth_year_topology",
     ]
@@ -117,6 +118,6 @@ def test_bad_sex_token_skips_sex_role_checks(tmp_path):
     )
     results = _results_by_name(ped)
     assert results["sex_tokens"].status == "FAIL"
-    for name in ("sex_role_ambiguity", "sex_role_consistency", "unknown_sex"):
+    for name in ("sex_role_ambiguity", "sex_role_override", "sex_role_consistency"):
         assert results[name].status == "SKIP", name
         assert results[name].note == "sex_tokens failed", name

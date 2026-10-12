@@ -33,7 +33,8 @@ def test_missing_parents_become_founder_rows_written_first(tmp_path):
     assert out["id"].to_list() == ["1", "2", "3", "4"]
     assert out["mother"].to_list() == ["-1", "-1", "1", "1"]
     assert out["sex"].to_list() == ["2", "1", "1", "2"]  # PLINK coding throughout
-    assert out["sex_source"].to_list() == [None, None, "input", "input"]
+    # An added founder has no recorded sex; it comes from the role it fills.
+    assert out["sex_source"].to_list() == ["imputed_from_missing", "imputed_from_missing", "input", "input"]
 
 
 def test_rows_go_parents_first_and_keep_extra_columns(tmp_path):

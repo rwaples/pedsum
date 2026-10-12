@@ -2,6 +2,6 @@ exit: 2
 artifacts: ['validate.log']
 === validate.log ===
 check	id	row	detail	n_refs
-parent_token_range_mother		2	row 2: mother value -3 < -1; missing parent must be -1	
+parent_token_range_mother		2	row 2: mother value -3 < -1; a missing parent is -1, blank or NA (or pass --missing-parent-token -3)	
 parent_refs_present_mother	-3		id=-3 referenced as mother 1 time(s) but no row has this id	1
 

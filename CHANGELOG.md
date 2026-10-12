@@ -152,8 +152,88 @@ whole command.
   parent column, not one scan per missing id: on 1M rows with 100k
   missing fathers, the check took 0.15 s instead of 75 s.
 
+- **`--missing-parent-token TOKEN` on every command**
+  ([#25](https://github.com/rwaples/pedsum/issues/25),
+  [ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)):
+  more tokens that mean a missing parent in the mother and father
+  columns, matched exactly after stripping whitespace and repeatable.
+  `--missing-parent-token 0` reads a PLINK `.fam` or an R package's
+  pedigree without recoding. A token that is also the ID of a row is an
+  error. `validate` writes the parents it read as missing through a
+  token as blank, so `validate.tsv.gz` needs no flag downstream.
+
+- **`--min-parent-age N`** ([#25](https://github.com/rwaples/pedsum/issues/25))
+  on every command: `birth_year_topology` flags a parent fewer than `N`
+  years older than its child (`child.birth_year - parent.birth_year >=
+  N`). The default 0 keeps the old rule, a child born before a parent.
+- **`validate --break-cycles`**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)) clears the parent
+  links the data show to be wrong instead of blocking on them: every
+  self-link, and within a descent cycle every link to a parent born
+  after the child. It needs `--birth-year-col`. Each cleared link is a
+  Finding of a new `autofix` Check, `cycle_breaks`, and a row of
+  `validate.cleared_links.tsv` (`id`, `role`, `parent`, `reason`); the
+  individuals stay. A cycle with no such link still BLOCKs, or loses its
+  members under `--drop-offending`. On optiSel's `PedigWithErrors` it
+  clears one mother born 28 years after her child and one self-link,
+  and the pedigree is then acyclic.
+
 ### Changed
 
+- **A parent written `0` that has no row BLOCKs**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). A new Check,
+  `zero_parent_present` (Fail Policy `block`), names
+  `--missing-parent-token 0`. `0` stays an ID, since in some pedigrees
+  ID 0 is an individual. Before, founders written `0 0` blocked with
+  "sex conflict on missing parent(s)" and "rows with mother == father",
+  `--drop-offending` then removed every one of them, and a `0` in one
+  role became an added founder named `0`. The `parent_refs_present_*`
+  hint for ID 0 and the `parent_token_range_*` detail name the flag
+  instead of "convert to -1".
+- **Exact duplicate rows collapse to one** instead of blocking
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). A new Check,
+  `duplicate_rows` (Fail Policy `autofix`), removes each row that says
+  the same as an earlier one, with one Finding per copy, and plain
+  `validate` exits 1. Rows are compared as pedsum reads them (`NA` and `.`
+  are the same missing parent, `M` and `1` the same sex), other columns as
+  text. `duplicate_ids` now covers only an ID on rows that differ, and
+  still blocks. Before, `--drop-offending` removed both copies, so the
+  individual vanished and its offspring lost a parent. `summarize` refuses
+  a raw input with a duplicate row, as it does any FAIL; `validate.tsv.gz`
+  has none. Findings after a removed copy still name the input's rows.
+- **An overridden sex is a Finding**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)). pedsum still
+  overrides a recorded sex that contradicts the only parent role an
+  individual has, but each override is now a Finding of a new `autofix`
+  Check, `sex_role_override`, so it is in `validate.log` and plain
+  `validate` exits 1 (it exited 0, with only `PASS (1 overridden from
+  role)` in the summary). Under `--drop-offending` the individual stays
+  and a run with nothing else to fix exits 0. `summarize` refuses a raw
+  input with an override, as it does any FAIL; run it on
+  `validate.tsv.gz`.
+- **An unsexed individual who is never a parent is kept**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)) with sex `0` and a
+  WARNING giving the count, instead of blocking unless
+  `--allow-missing-sex`. The `unknown_sex` Check is gone; it flagged only
+  such individuals. `--allow-missing-sex` now covers only an unsexed
+  individual used as both mother and father. `--drop-offending` no longer
+  removes a parent left unsexed when its only offspring is dropped.
+  `effective-size` still refuses its sex-dependent estimators while any
+  row is unsexed. 20 of the 21 published pedigrees in pedsum-validate that
+  needed `--allow-missing-sex` needed it only for these individuals.
+- **Every command keeps the `sex_source` of its input** when the column
+  is there, as in `validate.tsv.gz`, for each row this run did not change
+  itself. A Fixed Pedigree's sexes all load as resolved, so before,
+  `annotated.tsv.gz` and the `--sex-concordance` headline took every sex
+  `validate` filled or overrode for a recorded one. `summarize` counts
+  the values under `size_structure.sex_source` in `summary.yaml`. The
+  founders `validate` adds, phantoms included, are written with
+  `sex_source = imputed_from_missing` instead of blank.
+- **`birth_year_topology`'s label is "parent age at birth >= min parent
+  age"**, which holds under `--min-parent-age`.
+- **`--allow-missing-sex` and `--no-override-asserted-sex` help.** The
+  latter said it restored a hard-block; `validate` writes the pedigree and
+  exits 1, and `--drop-offending` removes the individual.
 - **`validate` BLOCKs on every column- or parse-level failure**
   ([#21](https://github.com/rwaples/pedsum/issues/21)): a missing
   required column, a row without an id, an unrecognized sex token, a
