@@ -1,0 +1,6 @@
+exit: 2
+artifacts: ['validate.log']
+=== validate.log ===
+check	id	row	detail	n_refs
+required_columns			missing required columns: ['sex']; file has ['id', 'mother', 'father', 'birth_year']	
+

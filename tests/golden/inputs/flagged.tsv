@@ -1,0 +1,7 @@
+id	sex	mother	father	birth_year
+1	M	-1	-1	1950
+2	F	-1	-1	1950
+3	M	2	1	1940
+4	F	2	1	2500
+5	F	20	21	1990
+6	M	2	-1	1985

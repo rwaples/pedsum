@@ -1,0 +1,13 @@
+exit: 1
+artifacts: ['validate.log', 'validate.tsv.gz']
+=== validate.log ===
+check	id	row	detail	n_refs
+negative_ids	-4	3	id=-4 is negative; must be >= 0	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year
+1	M	-1	-1	1950
+2	F	-1	-1	1950
+3	M	2	1	1980
+-4	F	2	1	1982
+

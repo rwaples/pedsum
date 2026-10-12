@@ -1,0 +1,9 @@
+exit: 1
+artifacts: ['validate.log', 'validate.tsv.gz']
+=== validate.log ===
+check	id	row	detail	n_refs
+empty_pedigree			pedigree has 0 rows	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year	sex_source
+

@@ -1,0 +1,22 @@
+exit: 1
+artifacts: ['validate.log', 'validate.tsv.gz']
+=== validate.log ===
+check	id	row	detail	n_refs
+parent_refs_present_mother	20		id=20 referenced as mother 1 time(s) but no row has this id	1
+parent_refs_present_father	21		id=21 referenced as father 1 time(s) but no row has this id	1
+birth_year_range	4	3	id=4 birth_year=2500 is outside the sanity range [1800, 2030]	
+birth_year_topology	3	2	id=3 birth_year=1940 < mother (id=2) birth_year=1950	
+birth_year_topology	3	2	id=3 birth_year=1940 < father (id=1) birth_year=1950	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year	sex_source
+20	2	-1	-1		
+21	1	-1	-1		
+22	1	-1	-1		
+1	1	-1	-1	1950	input
+2	2	-1	-1	1950	input
+5	2	20	21	1990	input
+3	1	2	1	1940	input
+4	2	2	1	2500	input
+6	1	2	22	1985	input
+

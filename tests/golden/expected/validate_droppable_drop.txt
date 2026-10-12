@@ -1,0 +1,27 @@
+exit: 1
+artifacts: ['validate.dropped.tsv', 'validate.log', 'validate.tsv.gz']
+=== validate.dropped.tsv ===
+id	check	round
+3	duplicate_ids	1
+13	birth_year_range	1
+2	sex_role_consistency	2
+4	self_loops	2
+5	birth_year_topology	2
+8	unknown_sex	2
+9	parents_distinct	2
+6	acyclic	3
+7	acyclic	3
+
+=== validate.log ===
+check	id	row	detail	n_refs
+duplicate_ids	3		id=3 appears more than once	
+birth_year_range	13	10	id=13 birth_year=2500 is outside the sanity range [1800, 2030]	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year	sex_source
+17	1	-1	-1		
+1	1	-1	-1	1950	input
+14	2	-1	-1	1960	input
+15	2	14	1	1985	imputed_from_role
+16	2	15	17	2000	input
+

@@ -1,0 +1,13 @@
+exit: 1
+artifacts: ['validate.log', 'validate.tsv.gz']
+=== validate.log ===
+check	id	row	detail	n_refs
+birth_year_dtype			birth-year column 'birth_year' must be numeric (integer or float calendar year, with -1/NA/blank for unknown); failed to parse: unable to parse value(s) ['abc'] as numeric	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	birth_year	sex_source
+1	1	-1	-1	1950	input
+2	2	-1	-1	1950	input
+3	1	2	1	abc	input
+4	2	2	1	1982	input
+
