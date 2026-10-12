@@ -4,19 +4,23 @@ channels:
 dependencies:
   # <3.15: polars 1.x string methods return None on Python 3.15 (pyproject.toml).
   - python>=3.14,<3.15
-  - numpy
-  - scipy
+  # The ranges below match pyproject.toml's dependencies and its test and
+  # typecheck extras.
+  - numpy>=2.2,<3
+  - scipy>=1.16.3,<2
   - polars>=1.43.2,<2
-  - pyyaml
-  - tqdm
+  - pyyaml>=6,<7
+  - tqdm>=4.66,<5
   # The sex-concordance sampler is numba-compiled, so numba is a hard
   # dependency (pyproject.toml); listed here so conda-forge supplies it rather
   # than pip pulling a wheel in behind the install below.
   - numba>=0.68,<1
   # - pigz  # optional: ~3× faster .tsv.gz writes; pedsum falls back to gzip if missing
-  - pytest
-  - hypothesis
-  - ruff
+  - pytest>=9,<10
+  - pytest-xdist>=3.8,<4
+  - hypothesis>=6,<7
+  - ruff>=0.16,<0.17
+  - ty==0.0.84
   - pip
   - pip:
       # Match the ranges pyproject.toml declares; both are on PyPI.

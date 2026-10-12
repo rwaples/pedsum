@@ -16,7 +16,7 @@
 # Vocabulary:
 #   - Hard infra (require_cmd / clone / `conda env create`) is run bare: a
 #     failure aborts via `set -e` and surfaces as "ABORTED (rc=N)".
-#   - Functional checks (versions, pytest, snakemake, output asserts) are
+#   - Functional checks (versions, pytest, pipeline smoke, output asserts) are
 #     wrapped in if/else and routed through ok()/fail(): they are *counted*,
 #     not fatal, so the summary reports how many checks passed/failed.
 
@@ -151,7 +151,7 @@ unique_env() {
 }
 
 # clone <url> <ref> <dest> [auth_hint]
-# Full clone (no --depth) so setuptools-scm derives the CalVer version from
+# Full clone (no --depth) so setuptools-scm derives the family version from
 # tags; a shallow clone yields a bogus version and trips simace>= floors.
 # On failure prints the optional auth_hint (used to name SSH auth as the likely
 # cause for the first private repo) and returns non-zero → caller aborts.
