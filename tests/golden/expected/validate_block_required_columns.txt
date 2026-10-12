@@ -1,13 +1,6 @@
-exit: 1
-artifacts: ['validate.log', 'validate.tsv.gz']
+exit: 2
+artifacts: ['validate.log']
 === validate.log ===
 check	id	row	detail	n_refs
 required_columns			missing required columns: ['sex']; file has ['id', 'mother', 'father', 'birth_year']	
-
-=== validate.tsv.gz ===
-id	mother	father	birth_year
-1	-1	-1	1950
-2	-1	-1	1950
-3	2	1	1980
-4	2	1	1982
 

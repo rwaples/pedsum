@@ -1,15 +1,7 @@
-exit: 1
-artifacts: ['validate.log', 'validate.tsv.gz']
+exit: 2
+artifacts: ['validate.log']
 === validate.log ===
 check	id	row	detail	n_refs
 parent_token_range_father		2	row 2: father value -3 < -1; missing parent must be -1	
 parent_refs_present_father	-3		id=-3 referenced as father 1 time(s) but no row has this id	1
-
-=== validate.tsv.gz ===
-id	sex	mother	father	birth_year	sex_source
--3	1	-1	-1		
-1	1	-1	-1	1950	input
-2	2	-1	-1	1950	input
-3	1	2	-3	1980	input
-4	2	2	1	1982	input
 

@@ -56,6 +56,8 @@ CASES: dict[str, list[str]] = {
     "validate_flagged": ["validate", "flagged.tsv", *BY, "--fill-half-founders"],
     "validate_droppable": ["validate", "droppable.tsv", *BY],
     "validate_droppable_drop": ["validate", "droppable.tsv", *BY, "--drop-offending", "--fill-half-founders"],
+    "validate_cycle_absent_parent": ["validate", "cycle_absent_parent.tsv"],
+    "validate_cycle_absent_parent_drop": ["validate", "cycle_absent_parent.tsv", "--drop-offending"],
     "validate_droppable_drop_tolerant": [
         "validate", "droppable.tsv", *BY, "--drop-offending", "--allow-missing-sex", "--no-sex-check",
     ],

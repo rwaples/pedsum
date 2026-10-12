@@ -1,0 +1,23 @@
+exit: 1
+artifacts: ['validate.dropped.tsv', 'validate.log', 'validate.tsv.gz']
+=== validate.dropped.tsv ===
+id	check	round
+6	acyclic	1
+7	acyclic	1
+
+=== validate.log ===
+check	id	row	detail	n_refs
+parent_refs_present_mother	11		id=11 referenced as mother 1 time(s) but no row has this id	1
+parent_refs_present_father	12		id=12 referenced as father 1 time(s) but no row has this id	1
+acyclic	6	2	id=6 could not be topologically ordered (in a cycle)	
+acyclic	7	3	id=7 could not be topologically ordered (in a cycle)	
+
+=== validate.tsv.gz ===
+id	sex	mother	father	sex_source
+11	2	-1	-1	
+12	1	-1	-1	
+1	1	-1	-1	input
+2	2	-1	-1	input
+10	2	11	12	input
+8	1	2	1	input
+
