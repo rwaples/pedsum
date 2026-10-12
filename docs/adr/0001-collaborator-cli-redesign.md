@@ -55,3 +55,11 @@ The audit channel is a new per-row `sex_source` string column on `annotated.tsv.
 ## 2026-10-08 follow-up — PLINK sex coding is the only numeric one (0.15)
 
 [#12](https://github.com/rwaples/pedsum/issues/12) reverses the decision above to keep `--plink-sex` and `--sex-encoding`. The reason given for keeping `--plink-sex`, that PLINK is the dominant tool in the audience's ecosystem, argues for making PLINK's coding the only numeric one. pedsum 0.15 reads `1` = male, `2` = female, `0` = unknown, plus the `M`/`F` words, and writes `1`/`2`/`0` in `validate.tsv.gz` and `annotated.tsv.gz`. The `0` = female, `1` = male coding is gone. A `0` that meant female in pedsum's old outputs would mean unknown to a PLINK reader, and keeping it as an auto-detect branch would leave a file of `0`s and `1`s ambiguous. `--plink-sex` and `--sex-encoding` exit 2 with a message, the same hard break as 0.7. A column with `0` tokens and no `2` gets a WARNING, since that is what an old pedsum output looks like.
+
+## 2026-10-12 footnote — sex/role contradictions
+
+The 0.9 follow-up says an individual with a recorded sex used as both mother and father "stays a
+`sex_role_consistency` hard-block". [ADR 0005](0005-check-fail-policy.md) made that Check `keep_or_drop`:
+plain `validate` writes the pedigree with the contradiction and exits 1, and `summarize` refuses it.
+[ADR 0006](0006-validate-repairs-compared-with-r-cleaners.md) keeps the 0.9 override default and makes each
+override a logged Finding.

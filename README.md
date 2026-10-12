@@ -120,7 +120,7 @@ Auto-fixes folded into `DIR/validate.tsv.gz`:
   order), if the input was not already ordered.
 
 **`--fill-half-founders`** also gives every half-founder (an individual with
-exactly one known parent) its own new founder in the missing slot: female (`0`) for
+exactly one known parent) its own new founder in the missing slot: female (`2`) for
 a missing mother, male (`1`) for a missing father. The new founders take IDs above every
 ID in the input and are prepended with the other synthesized founders.
 `ne_long_term_contributions` needs this, because it refuses any pedigree with
@@ -165,6 +165,42 @@ IDs in the manifest), not aggregate statistics — `--safe-attempt` redaction
 applies only to `summarize` output, never to `validate`. Treat
 `validate.tsv.gz` / `validate.dropped.tsv` as the cleaned source pedigree, not
 as a shareable artifact.
+
+#### How pedsum's validation compares to other tools
+
+A published statistic computed by another program may differ from pedsum's
+because the two programs cleaned the pedigree differently, not because the
+statistic differs. The table compares `pedsum validate` with the cleaners of
+eight R packages: optiSel `prePed`, visPedigree `tidyped`, nadiv `prepPed`,
+kinship2 `pedigree`/`fixParents`, purgeR `ped_rename`/`ped_sort`, pedtools
+`ped`/`as.ped`, pedigreemm `editPed` and nprcgenekeepr `qcStudbook`. Every
+cell comes from running the programs on the same fixtures; the fixtures,
+outputs and versions are in
+[pedsum-validate `cleaners/`](https://github.com/rwaples/pedsum-validate/tree/main/cleaners).
+[ADR 0006](docs/adr/0006-validate-repairs-compared-with-r-cleaners.md)
+records changes planned for several rows
+([#25](https://github.com/rwaples/pedsum/issues/25)).
+
+| Problem | pedsum | The R cleaners |
+|---|---|---|
+| Parent ID with no row | Adds a founder row (exit 1). | Same, except purgeR (sets the parent to unknown, which changes founder, half-founder and sibship counts) and kinship2 `pedigree()` / pedtools `ped()` (refuse). |
+| Parent written `0` | Read as an ID: blocks when `0` is both mother and father, otherwise adds a founder named `0`. Recode `0` to `NA`. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
+| The same row twice | Blocks. | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
+| One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
+| Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) and nprcgenekeepr pass the cycle through. The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
+| Recorded sex contradicts the only parent role | Overrides it from the role (`sex_source = imputed_from_role`). | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
+| No sex, used as a parent | Filled from the role. | optiSel, visPedigree and kinship2 `fixParents` fill it; kinship2 `pedigree()` refuses; the rest leave it unknown. |
+| No sex, never a parent | Blocks unless `--allow-missing-sex`. | All accept it. |
+| One parent known | Kept as a half-founder; `--fill-half-founders` adds a founder in the empty slot. | kinship2 `fixParents` and nprcgenekeepr add a parent by default; kinship2 `pedigree()` and pedtools refuse; the rest keep it. |
+| Mother = father (selfing) | Blocks ([#24](https://github.com/rwaples/pedsum/issues/24)). | nadiv allows it, visPedigree with `selfing = TRUE`, pedtools for sex 0; the rest refuse or do not check. |
+| Parent born after the child | With `--birth-year-col`: a Finding, pedigree written (exit 1). | Only nprcgenekeepr checks; it also refuses a parent under 2 years old. |
+| Row without an ID | Blocks. | visPedigree and nadiv drop the row with a warning; pedtools, pedigreemm and nprcgenekeepr keep an individual named `NA`; the rest refuse. |
+
+On optiSel's `PedigWithErrors` (10,863 rows), `prePed` keeps every row: it
+adds 2 founders, clears 4 parent links to break two cycles and changes 1 sex.
+`validate --drop-offending` removes 7 rows (cycle members, a self-loop and
+children born before a parent) and adds 3 founders, one of them for a father
+written `0`.
 
 ### Summarize a pedigree
 
