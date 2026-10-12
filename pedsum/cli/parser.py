@@ -310,8 +310,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: on; pass --no-inbreeding to skip). F is the most expensive "
         "single computation in pedsum: its time grows with rows and steeply with "
         "depth, and pedsum logs a WARNING first when the pedigree is large or "
-        "deep enough for that to take a while. When off, F and n_ancestors in "
-        "the per-individual table are zero-filled.",
+        "deep enough for that to take a while. When off, annotated.tsv.gz has no "
+        "F or n_distinct_ancestors column.",
     )
     p_sum.add_argument(
         "--effective-size",

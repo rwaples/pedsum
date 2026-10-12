@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 import polars as pl
 from pedigree_graph import ResourceError
 
@@ -145,8 +144,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
         inb_summary = None
-        F_vec = np.zeros(n_indiv, dtype=np.float64)
-        n_anc = np.zeros(n_indiv, dtype=np.int32)
+        F_vec = n_anc = None
 
     out_dir = args.out_dir
 
@@ -170,11 +168,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         )
 
     with timed("aggregate pedigree sections"):
-        aggregates = compute_aggregate_sections(
-            idf,
-            founder_summary=founder_summary,
-            include_inbreeding=args.inbreeding,
-        )
+        aggregates = compute_aggregate_sections(idf, founder_summary=founder_summary)
 
     tsv_payload = _build_pedigree_data(
         args.in_path,
@@ -190,12 +184,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         max_degree=args.max_degree,
     )
 
-    ind_data = _build_individual_data(
-        idf,
-        args.in_path,
-        cmd,
-        include_inbreeding=args.inbreeding,
-    )
+    ind_data = _build_individual_data(idf, args.in_path, cmd)
 
     if args.safe_attempt:
         _apply_safe_attempt(tsv_payload, ind_data)

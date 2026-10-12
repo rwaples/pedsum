@@ -115,11 +115,11 @@ def test_sibship_size_distribution_is_a_pmf(df: pl.DataFrame) -> None:
     fathers = df["father"].to_numpy()
     both_present = (mothers != -1) & (fathers != -1)
     if not both_present.any():
-        assert summary == {"empty": True}
+        assert summary is None
         return
 
     pair_keys = np.column_stack([mothers[both_present], fathers[both_present]])
     n_pairs = len(np.unique(pair_keys, axis=0))
-    assert summary["empty"] is False
+    assert summary is not None
     assert summary["n_sibships"] == n_pairs
     assert sum(summary["size_dist"].values()) == pytest.approx(1.0)

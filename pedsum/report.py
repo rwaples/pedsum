@@ -21,7 +21,7 @@ from pedsum.checks import _CHECK_GROUPS, _CHECK_LABELS
 from pedsum.parse import _read_pedigree_table, plink_sex
 from pedsum.pedigree_ops import IdIndex
 from pedsum.schema import _categorise_pedigree, _split_individual_distributions, _split_summary
-from pedsum.sections import _numeric_distribution
+from pedsum.sections import INBREEDING_COLUMNS, _numeric_distribution
 
 if TYPE_CHECKING:
     import argparse
@@ -113,6 +113,17 @@ _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
 )
 
 
+def _meta(path: Path, cmd: str, n_total: int | None) -> dict:
+    """The block every report starts with, in this key order: what ran on which input, and how many rows."""
+    return {
+        "input": str(path),
+        "command": cmd,
+        "version": VERSION,
+        "generated_at": _now_iso(),
+        "n_total": n_total,
+    }
+
+
 def _build_effective_size_data(
     path: Path,
     cmd: str,
@@ -123,11 +134,7 @@ def _build_effective_size_data(
 ) -> dict:
     """The ``effective_size.yaml`` payload: the summary's meta block, then the run status and every estimator."""
     return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n_total,
+        **_meta(path, cmd, n_total),
         "status": status,
         "estimators_requested": requested,
         "effective_size": effective_size,
@@ -141,82 +148,49 @@ ASSORTATIVE_MATING_FIGURES = 4
 
 def _build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
     """The ``assortative_mating.yaml`` payload: the summary's meta block, then the Mate Correlation section."""
-    return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n_total,
-        "assortative_mating": assortative_mating,
-    }
+    return {**_meta(path, cmd, n_total), "assortative_mating": assortative_mating}
 
 
 def _build_pedigree_data(
     path: Path,
     cmd: str,
     size: dict,
-    sibships: dict,
+    sibships: dict | None,
     pairs: dict,
     inbreeding: dict | None,
     mating_pairs: dict | None,
     relationship_summary: dict | None,
-    aggregates: dict | None = None,
-    sex_concordance: dict | None = None,
+    aggregates: dict,
+    sex_concordance: dict | None,
     *,
     max_degree: int = 5,
 ) -> dict:
     """Build the flat pedigree-level payload.
 
     ``_write_long_tsv`` flattens it into ``summary.pedigree.tsv``, and
-    ``_build_summary_data`` categorises it into the two summary YAMLs.
+    ``_build_summary_data`` categorises it into the two summary YAMLs. Each
+    section arrives as YAML-ready native types; a None section is absent.
     """
-    sibship_section: dict | None
-    if sibships.get("empty"):
-        sibship_section = None
-    else:
-        sibship_section = {
-            "n_sibships": int(sibships["n_sibships"]),
-            "mean": float(sibships["mean"]),
-            "median": float(sibships["median"]),
-            "q1": float(sibships["q1"]),
-            "q3": float(sibships["q3"]),
-            "size_dist": {str(k): float(v) for k, v in sibships["size_dist"].items()},
-        }
-    inb_section: dict | None
-    if inbreeding is None:
-        inb_section = None
-    else:
-        inb_section = {
-            "n_inbred": int(inbreeding["n_inbred"]),
-            "frac_inbred": float(inbreeding["frac_inbred"]),
-            "mean_F": float(inbreeding["mean_F"]),
-            "max_F": float(inbreeding["max_F"]),
-            "hist": {str(k): float(v) for k, v in inbreeding["hist"].items()},
-        }
     return {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": int(size["n_total"]),
+        **_meta(path, cmd, size["n_total"]),
         "max_degree_enumerated": max_degree,
         "size_structure": {k: size[k] for k in _SIZE_STRUCTURE_KEYS},
-        "sibship_size": sibship_section,
+        "sibship_size": sibships,
         "mating_pairs": mating_pairs,
         # Opt-in (`--sex-concordance`); None keeps the section out of every
         # output entirely, which is what holds the slim YAML line budget.
         "offspring_sex_concordance": sex_concordance,
         "relationship_summary": relationship_summary,
-        "reproduction": (aggregates or {}).get("reproduction", {}),
-        "genealogy": (aggregates or {}).get("genealogy", {}),
-        "founder_contribution": (aggregates or {}).get("founder_contribution", {}),
-        "founder_summary": (aggregates or {}).get("founder_summary", {}),
-        "components": (aggregates or {}).get("components", {}),
-        "sex_summary": (aggregates or {}).get("sex_summary", {}),
-        "depth_summary": (aggregates or {}).get("depth_summary", []),
+        "reproduction": aggregates["reproduction"],
+        "genealogy": aggregates["genealogy"],
+        "founder_contribution": aggregates["founder_contribution"],
+        "founder_summary": aggregates["founder_summary"],
+        "components": aggregates["components"],
+        "sex_summary": aggregates["sex_summary"],
+        "depth_summary": aggregates["depth_summary"],
         "pairs_engine": str(pairs.get("_engine", "unknown")),
         "relationship_pairs": {k: _serialise_pair_entry(v) for k, v in pairs.items() if not k.startswith("_")},
-        "inbreeding": inb_section,
+        "inbreeding": inbreeding,
     }
 
 
@@ -239,27 +213,10 @@ def _build_individual_data(
     idf: pl.DataFrame,
     path: Path,
     cmd: str,
-    include_inbreeding: bool,
 ) -> dict:
     """Canonical nested dict for the per-individual distribution report."""
-    n = len(idf)
-    distributions: dict[str, dict] = {}
-    for col in _NUMERIC_COLS:
-        if col in {"F", "n_distinct_ancestors"} and not include_inbreeding:
-            continue
-        if col not in idf.columns:
-            continue
-        distributions[col] = _numeric_distribution(idf[col])
-
-    out: dict = {
-        "input": str(path),
-        "command": cmd,
-        "version": VERSION,
-        "generated_at": _now_iso(),
-        "n_total": n,
-        "distributions": distributions,
-    }
-    return out
+    distributions = {col: _numeric_distribution(idf[col]) for col in _NUMERIC_COLS if col in idf.columns}
+    return {**_meta(path, cmd, len(idf)), "distributions": distributions}
 
 
 _SUMMARY_META_KEYS = ("input", "command", "version", "generated_at", "n_total")
@@ -698,7 +655,9 @@ def _write_annotated_tsv(
     canonical = ("id", "sex", "mother", "father")
     extras = raw.drop([c for c in canonical if c in raw.columns])
 
-    derived_cols = set(idf.columns) - set(canonical)
+    # The inbreeding columns stay reserved under --no-inbreeding, so an input
+    # column of that name keeps its _input suffix instead of passing as computed.
+    derived_cols = (set(idf.columns) | set(INBREEDING_COLUMNS)) - set(canonical)
     collisions = [c for c in extras.columns if c in derived_cols]
 
     # A re-ingested pedsum output carries its own provenance columns (e.g.

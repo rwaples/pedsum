@@ -290,6 +290,11 @@ whole command.
   with two encodings in one column and broke type inference in other
   readers. Synthesized founders now get `2`/`1` instead of `F`/`M`.
   `sex_source` still records which rows pedsum changed.
+- **`summarize --no-inbreeding` leaves `F` and `n_distinct_ancestors` out
+  of `annotated.tsv.gz`**. They were written as zeros, which read as
+  computed values: no individual inbred, no ancestors. An input column
+  with either name still gets the `_input` suffix, so it cannot pass as
+  computed.
 
 ### Fixed
 

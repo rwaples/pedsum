@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import _build_children_csr, unique_ints
 
+#: The individual-table columns only the inbreeding computation fills; ``--no-inbreeding`` omits them.
+INBREEDING_COLUMNS: tuple[str, ...] = ("F", "n_distinct_ancestors")
+
 
 def compute_size_structure(
     df: pl.DataFrame,
@@ -272,7 +275,6 @@ def compute_founder_summary(
 def compute_aggregate_sections(
     idf: pl.DataFrame,
     founder_summary: dict,
-    include_inbreeding: bool,
 ) -> dict:
     """Pedigree-level aggregate sections derived from the individual table.
 
@@ -347,7 +349,7 @@ def compute_aggregate_sections(
     genealogy = {
         "descendant_paths": _numeric_distribution(descendant_paths_arr),
     }
-    if include_inbreeding:
+    if "n_distinct_ancestors" in idf.columns:
         genealogy["distinct_ancestors"] = _numeric_distribution(idf["n_distinct_ancestors"])
     else:
         genealogy["distinct_ancestors"] = None
@@ -400,7 +402,7 @@ def compute_aggregate_sections(
             "mate_count": _numeric_distribution(n_mates_arr[mask]),
             "depth": _numeric_distribution(depth_col[mask]),
         }
-        if include_inbreeding and F_arr is not None:
+        if F_arr is not None:
             row["F"] = _numeric_distribution(F_arr[mask])
             row["n_inbred"] = int((F_arr[mask] > INBRED_TOL).sum())
         sex_summary[label] = row
@@ -428,7 +430,7 @@ def compute_aggregate_sections(
             "mean_distinct_ancestors": None,
             "mean_descendant_paths": float(descendant_paths_arr[mask].mean()),
         }
-        if include_inbreeding and F_arr is not None and n_distinct_anc_arr is not None:
+        if F_arr is not None and n_distinct_anc_arr is not None:
             row["mean_distinct_ancestors"] = float(n_distinct_anc_arr[mask].mean())
             row["mean_F"] = float(F_arr[mask].mean())
             row["max_F"] = float(F_arr[mask].max())
@@ -446,24 +448,23 @@ def compute_aggregate_sections(
     }
 
 
-def compute_sibship_sizes(sibship_sizes: np.ndarray) -> dict:
+def compute_sibship_sizes(sibship_sizes: np.ndarray) -> dict | None:
     """Per-**Sibship** size statistics.
 
     A **Sibship** is the offspring set of one **Mating Pair**, so
     ``sibship_sizes`` is :attr:`MatingPairs.sizes`. This function only emits
     per-Sibship aggregates; per-individual offspring counts (binned and
     sex-stratified) live in :func:`compute_aggregate_sections` under
-    ``reproduction:``.
+    ``reproduction:``. None when there is no Sibship.
     """
     n_sib = len(sibship_sizes)
     if n_sib == 0:
-        return {"empty": True}
+        return None
 
     size_dist = {str(k): float((sibship_sizes == k).sum()) / n_sib for k in (1, 2, 3)}
     size_dist["4+"] = float((sibship_sizes >= 4).sum()) / n_sib
 
     return {
-        "empty": False,
         "n_sibships": int(n_sib),
         "mean": float(sibship_sizes.mean()),
         "median": float(np.median(sibship_sizes)),
@@ -688,8 +689,8 @@ def build_individual_df(
     mother_rows: np.ndarray,
     father_rows: np.ndarray,
     mating: MatingPairs,
-    F: np.ndarray,
-    n_distinct_ancestors: np.ndarray,
+    F: np.ndarray | None,
+    n_distinct_ancestors: np.ndarray | None,
     n_descendant_paths: np.ndarray,
     component_labels: np.ndarray,
     sex_source: np.ndarray,
@@ -704,7 +705,9 @@ def build_individual_df(
     ``n_descendant_paths`` is stored as ``Int64``: a path count over a deep
     or inbred pedigree grows multiplicatively and does not fit ``Int32``.
     ``n_distinct_ancestors`` is a distinct-individual count bounded by the
-    row count, so it stays at the ``Int32`` pedigree-graph returns.
+    row count, so it stays at the ``Int32`` pedigree-graph returns. Under
+    ``--no-inbreeding`` both it and ``F`` are None, and the table has neither
+    column (``INBREEDING_COLUMNS``).
     """
     n = len(df)
     ids_arr = df["id"].to_numpy()
@@ -766,27 +769,26 @@ def build_individual_df(
     n_fc[rows_m] += ua_offspring_sum[mother_rows[rows_m]]
     n_fc[rows_f] += ua_offspring_sum[father_rows[rows_f]]
 
-    return pl.DataFrame(
-        {
-            "id": ids_arr,
-            "sex": sex.astype(np.int8),
-            "sex_source": sex_source.astype(str),
-            "mother": mothers,
-            "father": fathers,
-            "ped_depth": gen.astype(np.int32),
-            "is_founder": is_founder,
-            "F": F.astype(np.float64),
-            "n_full_sibs": fs_count,
-            "n_mat_half_sibs": n_mhs,
-            "n_pat_half_sibs": n_phs,
-            "n_offspring": n_off,
-            "n_mates": n_mates,
-            "component_id": component_labels.astype(np.int32),
-            "n_grandparents": n_gp,
-            "n_grandchildren": n_gc,
-            "n_uncles_aunts": n_ua,
-            "n_first_cousins": n_fc,
-            "n_distinct_ancestors": n_distinct_ancestors,
-            "n_descendant_paths": n_descendant_paths.astype(np.int64),
-        }
-    )
+    columns = {
+        "id": ids_arr,
+        "sex": sex.astype(np.int8),
+        "sex_source": sex_source.astype(str),
+        "mother": mothers,
+        "father": fathers,
+        "ped_depth": gen.astype(np.int32),
+        "is_founder": is_founder,
+        "F": None if F is None else F.astype(np.float64),
+        "n_full_sibs": fs_count,
+        "n_mat_half_sibs": n_mhs,
+        "n_pat_half_sibs": n_phs,
+        "n_offspring": n_off,
+        "n_mates": n_mates,
+        "component_id": component_labels.astype(np.int32),
+        "n_grandparents": n_gp,
+        "n_grandchildren": n_gc,
+        "n_uncles_aunts": n_ua,
+        "n_first_cousins": n_fc,
+        "n_distinct_ancestors": n_distinct_ancestors,
+        "n_descendant_paths": n_descendant_paths.astype(np.int64),
+    }
+    return pl.DataFrame({name: values for name, values in columns.items() if values is not None})

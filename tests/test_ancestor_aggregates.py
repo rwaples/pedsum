@@ -15,7 +15,7 @@ from conftest import parent_rows
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.report import _build_individual_data
-from pedsum.sections import compute_aggregate_sections, compute_founder_summary
+from pedsum.sections import INBREEDING_COLUMNS, compute_aggregate_sections, compute_founder_summary
 
 
 def _individual_df() -> pl.DataFrame:
@@ -46,14 +46,13 @@ def _individual_df() -> pl.DataFrame:
 
 
 def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
-    """Default mode emits None for genealogy/depth-summary ancestor stats."""
-    idf = _individual_df()
+    """Without the inbreeding columns, genealogy and depth-summary ancestor stats are None."""
+    idf = _individual_df().drop(INBREEDING_COLUMNS)
 
     founder_summary, _ = compute_founder_summary(idf, *parent_rows(idf))
     aggregates = compute_aggregate_sections(
         idf,
         founder_summary=founder_summary,
-        include_inbreeding=False,
     )
 
     assert aggregates["genealogy"]["distinct_ancestors"] is None
@@ -61,14 +60,13 @@ def test_default_aggregate_sections_mark_ancestor_stats_unavailable() -> None:
 
 
 def test_default_individual_data_omits_ancestor_distribution() -> None:
-    """Default mode omits ``F`` and ``n_distinct_ancestors`` from the distribution block."""
-    idf = _individual_df()
+    """Without the inbreeding columns, the distribution block omits ``F`` and ``n_distinct_ancestors``."""
+    idf = _individual_df().drop(INBREEDING_COLUMNS)
 
     out = _build_individual_data(
         idf,
         Path("ped.tsv"),
         "pedigree_summary.py summarize --in ped.tsv --out out",
-        include_inbreeding=False,
     )
 
     assert "F" not in out["distributions"]
@@ -83,13 +81,11 @@ def test_inbreeding_mode_reports_ancestor_stats() -> None:
     aggregates = compute_aggregate_sections(
         idf,
         founder_summary=founder_summary,
-        include_inbreeding=True,
     )
     out = _build_individual_data(
         idf,
         Path("ped.tsv"),
         "pedigree_summary.py summarize --in ped.tsv --out out --inbreeding",
-        include_inbreeding=True,
     )
 
     assert aggregates["genealogy"]["distinct_ancestors"]["max"] == 2

@@ -322,17 +322,19 @@ class TestReportEdgeCases:
             tmp_path / "p.tsv",
             "cmd",
             size,
-            {"empty": True},
+            None,
             {"FS": 0, "by_degree": {1: 0}, "_engine": "matrix"},
             None,
             None,
+            None,
+            compute_aggregate_sections(pl.DataFrame(), {"computed": True}),
             None,
         )
         assert ped["sibship_size"] is None
         assert ped["inbreeding"] is None
 
         idf = pl.DataFrame({"id": [1], "n_offspring": [0]})
-        ind = _build_individual_data(idf, tmp_path / "p.tsv", "cmd", include_inbreeding=False)
+        ind = _build_individual_data(idf, tmp_path / "p.tsv", "cmd")
         assert "F" not in ind["distributions"]
         assert "n_offspring" in ind["distributions"]
 
@@ -449,7 +451,7 @@ class TestSectionEdgeCases:
         df = pl.DataFrame({"id": [1, 2], "mother": [-1, -1], "father": [-1, -1]})
         sizes = _group_mating_pairs(df, *parent_rows(df)).sizes
         assert compute_mating_pair_summary(sizes) is None
-        assert compute_sibship_sizes(sizes) == {"empty": True}
+        assert compute_sibship_sizes(sizes) is None
 
         with_children = pl.DataFrame({"id": [1, 2, 3, 4], "mother": [-1, -1, 1, 1], "father": [-1, -1, 2, 2]})
         sizes = _group_mating_pairs(with_children, *parent_rows(with_children)).sizes
@@ -497,7 +499,7 @@ class TestSectionEdgeCases:
     def test_aggregate_sections_empty_and_no_inbreeding(self) -> None:
         """Aggregate sections cover empty inputs and the no-inbreeding branch."""
         empty = pl.DataFrame()
-        assert compute_aggregate_sections(empty, {"computed": True}, include_inbreeding=False)["depth_summary"] == []
+        assert compute_aggregate_sections(empty, {"computed": True})["depth_summary"] == []
 
         idf = pl.DataFrame(
             {
@@ -507,16 +509,14 @@ class TestSectionEdgeCases:
                 "father": [-1, -1],
                 "ped_depth": [0, 0],
                 "is_founder": [True, True],
-                "F": [0.0, 0.0],
                 "n_offspring": [0, 0],
                 "n_mates": [0, 0],
                 "n_descendant_paths": [0, 0],
-                "n_distinct_ancestors": [0, 0],
                 "component_id": [0, 0],
                 "n_full_sibs": [0, 0],
             }
         )
-        sections = compute_aggregate_sections(idf, {"computed": True}, include_inbreeding=False)
+        sections = compute_aggregate_sections(idf, {"computed": True})
         assert sections["reproduction"]["mate_count_female"] is None
         assert sections["genealogy"]["distinct_ancestors"] is None
         assert "F" not in sections["sex_summary"]["male"]

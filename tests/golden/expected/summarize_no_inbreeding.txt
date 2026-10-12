@@ -1,22 +1,22 @@
 exit: 0
 artifacts: ['annotated.tsv.gz', 'summary.extra.yaml', 'summary.individual.tsv', 'summary.pedigree.tsv', 'summary.yaml']
 === annotated.tsv.gz ===
-id	sex	sex_source	mother	father	ped_depth	is_founder	F	n_full_sibs	n_mat_half_sibs	n_pat_half_sibs	n_offspring	n_mates	component_id	n_grandparents	n_grandchildren	n_uncles_aunts	n_first_cousins	n_distinct_ancestors	n_descendant_paths	n_founder_ancestors	ecg	birth_year	liability
-1	1	input	-1	-1	0	True	0.0	0	0	0	3	1	0	0	4	0	0	0	12	1	0.0	1950	0.1
-2	2	input	-1	-1	0	True	0.0	0	0	0	3	1	0	0	4	0	0	0	12	1	0.0	1950	0.4
-3	1	input	-1	-1	0	True	0.0	0	0	0	1	1	0	0	2	0	0	0	4	1	0.0	1951	-0.2
-4	2	input	-1	-1	0	True	0.0	0	0	0	1	1	0	0	2	0	0	0	4	1	0.0	1952	0.9
-14	2	input	-1	-1	0	True	0.0	0	0	0	0	0	1	0	0	0	0	0	0	1	0.0	1960	-0.9
-15	0	unresolved	-1	-1	0	True	0.0	0	0	0	0	0	2	0	0	0	0	0	0	1	0.0	1961	0.6
-5	2	input	2	1	1	False	0.0	2	0	0	2	1	0	0	1	0	0	0	3	2	1.0	1975	1.1
-6	1	input	2	1	1	False	0.0	2	0	0	2	1	0	0	1	0	0	0	3	2	1.0	1976	-0.7
-7	1	input	2	1	1	False	0.0	2	0	0	2	1	0	0	1	0	0	0	3	2	1.0	1977	0.3
-8	2	input	4	3	1	False	0.0	0	0	0	2	1	0	0	1	0	0	0	3	2	1.0	1978	-1.2
-9	1	input	5	6	2	False	0.0	1	0	0	0	0	0	4	0	4	8	0	0	2	2.0	2000	0.5
-10	2	input	5	6	2	False	0.0	1	0	0	1	1	0	4	0	4	8	0	1	2	2.0	2001	0.0
-11	1	input	8	7	2	False	0.0	1	0	0	1	1	0	4	0	2	4	0	1	4	2.0	2002	-0.4
-12	2	input	8	7	2	False	0.0	1	0	0	0	0	0	4	0	2	4	0	0	4	2.0	2003	0.8
-13	1	input	10	11	3	False	0.0	0	0	0	0	0	0	4	0	2	0	0	0	4	3.0	2025	0.2
+id	sex	sex_source	mother	father	ped_depth	is_founder	n_full_sibs	n_mat_half_sibs	n_pat_half_sibs	n_offspring	n_mates	component_id	n_grandparents	n_grandchildren	n_uncles_aunts	n_first_cousins	n_descendant_paths	n_founder_ancestors	ecg	birth_year	liability
+1	1	input	-1	-1	0	True	0	0	0	3	1	0	0	4	0	0	12	1	0.0	1950	0.1
+2	2	input	-1	-1	0	True	0	0	0	3	1	0	0	4	0	0	12	1	0.0	1950	0.4
+3	1	input	-1	-1	0	True	0	0	0	1	1	0	0	2	0	0	4	1	0.0	1951	-0.2
+4	2	input	-1	-1	0	True	0	0	0	1	1	0	0	2	0	0	4	1	0.0	1952	0.9
+14	2	input	-1	-1	0	True	0	0	0	0	0	1	0	0	0	0	0	1	0.0	1960	-0.9
+15	0	unresolved	-1	-1	0	True	0	0	0	0	0	2	0	0	0	0	0	1	0.0	1961	0.6
+5	2	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1975	1.1
+6	1	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1976	-0.7
+7	1	input	2	1	1	False	2	0	0	2	1	0	0	1	0	0	3	2	1.0	1977	0.3
+8	2	input	4	3	1	False	0	0	0	2	1	0	0	1	0	0	3	2	1.0	1978	-1.2
+9	1	input	5	6	2	False	1	0	0	0	0	0	4	0	4	8	0	2	2.0	2000	0.5
+10	2	input	5	6	2	False	1	0	0	1	1	0	4	0	4	8	1	2	2.0	2001	0.0
+11	1	input	8	7	2	False	1	0	0	1	1	0	4	0	2	4	1	4	2.0	2002	-0.4
+12	2	input	8	7	2	False	1	0	0	0	0	0	4	0	2	4	0	4	2.0	2003	0.8
+13	1	input	10	11	3	False	0	0	0	0	0	0	4	0	2	0	0	4	3.0	2025	0.2
 
 === summary.extra.yaml ===
 input: <input>
