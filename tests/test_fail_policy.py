@@ -29,6 +29,7 @@ EXPECTED = {
     "birth_year_topology": FailPolicy.KEEP_OR_DROP,
     "zero_parent_present": FailPolicy.BLOCK,
     "duplicate_rows": FailPolicy.AUTOFIX,
+    "cycle_breaks": FailPolicy.AUTOFIX,
     "parent_refs_present_mother": FailPolicy.AUTOFIX,
     "parent_refs_present_father": FailPolicy.AUTOFIX,
 }
@@ -96,7 +97,7 @@ def test_validation_config_carries_every_option():
             "validate", "--in", "p.tsv", "--out", "o",
             "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
             "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
-            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check",
+            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
         ]
     )  # fmt: skip
     config = ValidationConfig.from_args(args)

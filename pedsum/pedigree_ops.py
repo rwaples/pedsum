@@ -139,6 +139,24 @@ def build_children_csr(mother_rows: np.ndarray, father_rows: np.ndarray) -> sp.c
     )
 
 
+def cycle_components(mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
+    """Each row's descent cycle: its strongly connected component when that has 2+ rows, else -1.
+
+    Parent rows are ``-1`` when unknown. A self-link alone is a one-row
+    component, so it is not a cycle here.
+    """
+    from scipy.sparse.csgraph import connected_components
+
+    out = np.full(len(mother_rows), -1, dtype=np.int64)
+    csr = build_children_csr(mother_rows, father_rows)
+    if csr is None:
+        return out
+    _, labels = connected_components(csr, directed=True, connection="strong")
+    in_cycle = (np.bincount(labels) >= 2)[labels]
+    out[in_cycle] = labels[in_cycle]
+    return out
+
+
 def _concat_ranges(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
     """``np.concatenate([np.arange(a, b) for a, b in zip(starts, stops)])`` without the loop."""
     lengths = stops - starts

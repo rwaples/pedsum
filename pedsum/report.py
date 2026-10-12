@@ -543,6 +543,20 @@ def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels
         df.write_csv(tmp, separator="\t")
 
 
+def write_cleared_links(cleared: list[tuple[str, str, str, str]], out_path: Path) -> None:
+    """Tab-separated manifest of the parent links ``validate --break-cycles`` cleared.
+
+    One row per link: the child's id, the parent ``role``, the ``parent`` id
+    and the ``reason``. Written even when nothing was cleared (header only).
+    """
+    df = pl.DataFrame(
+        {name: [r[i] for r in cleared] for i, name in enumerate(("id", "role", "parent", "reason"))},
+        schema=dict.fromkeys(("id", "role", "parent", "reason"), pl.String),
+    )
+    with atomic_output(out_path) as tmp:
+        df.write_csv(tmp, separator="\t")
+
+
 def write_dropped_manifest(dropped: list[tuple[str, str, int]], out_path: Path) -> None:
     """Tab-separated manifest of `validate --drop-offending` removals.
 

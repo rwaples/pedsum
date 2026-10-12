@@ -162,6 +162,18 @@ whole command.
   error. `validate` writes the parents it read as missing through a
   token as blank, so `validate.tsv.gz` needs no flag downstream.
 
+- **`validate --break-cycles`**
+  ([#25](https://github.com/rwaples/pedsum/issues/25)) clears the parent
+  links the data show to be wrong instead of blocking on them: every
+  self-link, and within a descent cycle every link to a parent born
+  after the child. It needs `--birth-year-col`. Each cleared link is a
+  Finding of a new `autofix` Check, `cycle_breaks`, and a row of
+  `validate.cleared_links.tsv` (`id`, `role`, `parent`, `reason`); the
+  individuals stay. A cycle with no such link still BLOCKs, or loses its
+  members under `--drop-offending`. On optiSel's `PedigWithErrors` it
+  clears one mother born 28 years after her child and one self-link,
+  and the pedigree is then acyclic.
+
 ### Changed
 
 - **A parent written `0` that has no row BLOCKs**

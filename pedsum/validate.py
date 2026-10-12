@@ -10,7 +10,7 @@ validation config and context and sex imputation; `pedsum.reduce` decides what
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -155,6 +155,9 @@ class ValidationConfig:
     missing_parent_tokens: tuple[str, ...] = ()
     allow_missing_sex: bool = False
     override_asserted_sex: bool = True
+    # --break-cycles: clear self-links and, within a cycle, links to a parent
+    # born after the child (cycle_breaks, ADR 0006).
+    break_cycles: bool = False
     # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
     # not as a CLI post-filter, so the tolerance composes wherever run_checks
     # runs: validate, the drop-offending loop, and its self-verify.
@@ -175,6 +178,7 @@ class ValidationConfig:
             allow_missing_sex=args.allow_missing_sex,
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),
+            break_cycles=getattr(args, "break_cycles", False),
         )
 
     @property
@@ -209,6 +213,9 @@ class ValidationContext:
     id_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
+    # The parent links cycle_breaks cleared, as (id, role, parent, reason)
+    # with IDs as the input wrote them: validate's cleared-links manifest.
+    cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
     # Set when duplicate_rows collapsed copies: each remaining row's position
     # in the input, so Findings name the rows the user can find in the file.
     input_rows: np.ndarray | None = None
@@ -220,6 +227,27 @@ class ValidationContext:
     def rows(self, idx: np.ndarray) -> np.ndarray:
         """Rows ``idx`` of the parsed arrays as their rows in the input."""
         return idx if self.input_rows is None else self.input_rows[idx]
+
+    def clear_parents(self, role: str, rows: np.ndarray) -> None:
+        """Make the ``role`` parent of ``rows`` missing, in the parsed arrays and the raw frame.
+
+        Like :meth:`keep_rows`, runs before the derived lookups are read.
+        """
+        column = self.config.mother_col if role == "mother" else self.config.father_col
+        _, mothers, fathers = self.require_id_parents()
+        parents = (mothers if role == "mother" else fathers).copy()
+        parents[rows] = -1
+        if role == "mother":
+            self.mothers = parents
+        else:
+            self.fathers = parents
+        cleared = np.zeros(len(parents), dtype=bool)
+        cleared[rows] = True
+        self.df_raw = self.df_raw.with_columns(
+            pl.when(pl.Series(cleared)).then(None).otherwise(pl.col(column)).alias(column)
+        )
+        for name in ("mother_refs", "father_refs", "depth", "imputation"):
+            self.__dict__.pop(name, None)
 
     def keep_rows(self, keep: np.ndarray) -> None:
         """Keep only the rows where ``keep`` is True, in the raw frame and every parsed array.

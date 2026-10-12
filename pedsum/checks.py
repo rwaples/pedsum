@@ -20,6 +20,7 @@ import polars as pl
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
+from pedsum.pedigree_ops import cycle_components, rows_of_parents
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -329,6 +330,52 @@ def _zero_parent_present(ctx: ValidationContext) -> CheckResult:
     )
 
 
+def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
+    """One Finding per parent link ``--break-cycles`` clears; the links are cleared in ``ctx``.
+
+    It clears every self-link, and within each descent cycle every link whose
+    parent is born after the child (ADR 0006). A cycle with no such link is
+    left for ``acyclic``. Clearing a link inside a cycle cannot put another
+    such link into a new cycle, so one pass suffices.
+    """
+    if not ctx.config.break_cycles:
+        return CheckResult(CheckStatus.SKIP, note="no --break-cycles")
+    ids, mothers, fathers = ctx.require_id_parents()
+    birth_year = ctx.birth_year
+    assert birth_year is not None
+    m_row, _ = rows_of_parents(mothers, ctx.id_index)
+    f_row, _ = rows_of_parents(fathers, ctx.id_index)
+    component = cycle_components(m_row, f_row)
+    findings: list[Finding] = []
+    for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
+        own = parents == ids
+        known = parent_rows >= 0
+        prow = np.where(known, parent_rows, 0)
+        child_by, parent_by = birth_year, birth_year[prow]
+        late = (
+            known
+            & ~own
+            & (component >= 0)
+            & (component == component[prow])
+            & (child_by != -1)
+            & (parent_by != -1)
+            & (parent_by > child_by)
+        )
+        for i in np.flatnonzero(own | late):
+            child, parent = ctx.label(ids[i]), ctx.label(parents[i])
+            if own[i]:
+                reason = f"listed as own {role}"
+            else:
+                reason = f"in a cycle, {role} born {int(parent_by[i])} after the child (born {int(child_by[i])})"
+            findings.append(
+                Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={child}: cleared {role} id={parent}, {reason}")
+            )
+            ctx.cleared_links.append((child, role, parent, reason))
+        if (own | late).any():
+            ctx.clear_parents(role, np.flatnonzero(own | late))
+    return _verdict(findings)
+
+
 def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
     """One Finding per missing parent ID referenced as both mother and father."""
     if ctx.config.no_sex_check:
@@ -615,7 +662,7 @@ class FailPolicy(Enum):
     # --drop-offending removes the flagged ids.
     KEEP_OR_DROP = "keep_or_drop"
     # Repaired in the Fixed Pedigree (a founder synthesized, a duplicate row
-    # collapsed); never BLOCKs and is never dropped.
+    # collapsed, a cycle link cleared); never BLOCKs and is never dropped.
     AUTOFIX = "autofix"
 
 
@@ -718,6 +765,15 @@ CHECKS: tuple[Check, ...] = (
         block_message=(
             "parent ID 0 has no row; if the file writes a missing parent as 0, pass --missing-parent-token 0"
         ),
+    ),
+    Check(
+        # Before every Check that reads the parent refs, depth or sex
+        # imputation: it clears parent links.
+        "cycle_breaks",
+        (*_IDS, "birth_year_dtype"),
+        _cycle_breaks,
+        "no cycle links to clear",
+        FailPolicy.AUTOFIX,
     ),
     Check(
         "parent_refs_present_mother",
@@ -866,6 +922,7 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Graph structure",
         (
+            "cycle_breaks",
             "self_loops",
             "sex_role_consistency",
             "unknown_sex",

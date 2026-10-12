@@ -15,6 +15,7 @@ import polars as pl
 from pedsum.base import PedigreeError, logger
 from pedsum.checks import DROPPABLE_CHECKS, CheckStatus, blocking_failures
 from pedsum.fixed_pedigree import fix_pedigree, next_free_id, render_fixed_pedigree
+from pedsum.pedigree_ops import cycle_components, rows_of_parents
 from pedsum.validate import ValidationContext, run_checks, validate_pedigree
 
 if TYPE_CHECKING:
@@ -51,26 +52,10 @@ def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
     cleared) and re-validate the next round. Self-loops are size-1 SCCs here and
     are handled by the `self_loops` check.
     """
-    import scipy.sparse as sp
-    from scipy.sparse.csgraph import connected_components
-
     ids, mothers, fathers = ctx.require_id_parents()
-    n = len(ids)
-    id_index = ctx.id_index
-    rows: list[int] = []
-    cols: list[int] = []
-    for parents in (mothers, fathers):
-        prow = id_index.get_indexer(parents)
-        mask = (parents != -1) & (prow != -1)
-        child_rows = np.where(mask)[0]
-        rows.extend(child_rows.tolist())
-        cols.extend(prow[mask].tolist())
-    if not rows:
-        return set()
-    adj = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
-    _, labels = connected_components(adj, directed=True, connection="strong")
-    member_mask = (np.bincount(labels) >= 2)[labels]
-    return {int(i) for i in ids[member_mask]}
+    m_row, _ = rows_of_parents(mothers, ctx.id_index)
+    f_row, _ = rows_of_parents(fathers, ctx.id_index)
+    return {int(i) for i in ids[cycle_components(m_row, f_row) >= 0]}
 
 
 def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]:

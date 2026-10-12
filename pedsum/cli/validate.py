@@ -16,6 +16,7 @@ from pedsum.report import (
     format_check_summary,
     prepare_out_dir,
     to_csv_gz,
+    write_cleared_links,
     write_dropped_manifest,
     write_validate_log,
 )
@@ -46,7 +47,7 @@ def _report_reduction(result: ReductionResult) -> None:
         )
 
 
-_OUTPUTS = ("validate.log", "validate.tsv.gz", "validate.dropped.tsv")
+_OUTPUTS = ("validate.log", "validate.tsv.gz", "validate.dropped.tsv", "validate.cleared_links.tsv")
 
 
 def _input_is_an_output(in_path: Path, out_dir: Path) -> bool:
@@ -57,12 +58,12 @@ def _input_is_an_output(in_path: Path, out_dir: Path) -> bool:
 
 
 def _remove_stale_validate_outputs(out_dir: Path) -> None:
-    """Delete a previous run's ``validate.tsv.gz`` / ``validate.dropped.tsv`` from ``out_dir``.
+    """Delete a previous run's ``validate.tsv.gz`` and manifests from ``out_dir``.
 
     This run writes whichever of them applies; a BLOCKED run writes neither,
     so a leftover file would otherwise pass for this input's result.
     """
-    for name in ("validate.tsv.gz", "validate.dropped.tsv"):
+    for name in _OUTPUTS[1:]:
         path = out_dir / name
         if path.is_file():
             path.unlink()
@@ -81,8 +82,9 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 1
     _remove_stale_validate_outputs(args.out_dir)
     try:
+        # --break-cycles needs the birth years, so a missing column BLOCKs.
         n_total, results, findings, ctx = validate_pedigree(
-            args.in_path, ValidationConfig.from_args(args), sep=args.sep
+            args.in_path, ValidationConfig.from_args(args), sep=args.sep, require_birth_year_col=args.break_cycles
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)
@@ -128,6 +130,10 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
         write_pedigree=write_pedigree,
         write_manifest=write_manifest,
     )
+    if args.break_cycles and outcome.fixed is not None:
+        cleared_path = out_dir / "validate.cleared_links.tsv"
+        write_cleared_links(ctx.cleared_links, cleared_path)
+        sys.stderr.write(f"wrote {cleared_path} ({len(ctx.cleared_links)} link(s) cleared)\n")
     if outcome.blocked is not None:
         sys.stderr.write(f"\nBLOCKED — {outcome.blocked}\n")
         for line in outcome.block_lines:

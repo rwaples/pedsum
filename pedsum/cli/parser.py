@@ -412,7 +412,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         out_help="output directory (created if needed); writes validate.log "
         "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
         "auto-fixes applied; not written if a block is detected). With "
-        "--drop-offending also writes validate.dropped.tsv (the removal manifest)",
+        "--drop-offending also writes validate.dropped.tsv (the removal manifest), and with "
+        "--break-cycles validate.cleared_links.tsv (the links it cleared)",
         birth_year_help="optional column name for birth year (integer or float calendar "
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
@@ -433,6 +434,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "the pedigree passes under the invoked flags. Writes validate.dropped.tsv "
         "and exits 1 whenever anything was dropped. Column/parse-level failures "
         "still BLOCK. WARNING: changes relatedness/Ne/founder counts (default: off)",
+    )
+    p_val.add_argument(
+        "--break-cycles",
+        action="store_true",
+        help="clear the parent links the data show to be wrong instead of blocking on them: "
+        "every self-link, and within a descent cycle every link to a parent born after the "
+        "child. Needs --birth-year-col. Individuals stay; each cleared link is a cycle_breaks "
+        "finding and a row of validate.cleared_links.tsv (id, role, parent, reason). A cycle "
+        "with no such link still BLOCKs, or loses its members under --drop-offending "
+        "(default: off)",
     )
     p_val.add_argument(
         "--fill-half-founders",
@@ -661,6 +672,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
+    if args.subcommand == "validate" and args.break_cycles and args.birth_year_col is None:
+        p_val.error("--break-cycles needs --birth-year-col: it clears links to a parent born after the child")
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "assortative-mating":
