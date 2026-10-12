@@ -182,6 +182,14 @@ _Avoid_: cleaned pedigree, corrected pedigree, validated output
 The pedigree `validate --drop-offending` emits after removing every individual named in a droppable **Finding** — and clearing references to each removed individual — so that the result passes every applicable **Check** under the flags it was produced with. A Reduced Pedigree is a *different* pedigree from the input: it has fewer individuals, individuals that lost a parent become **Half-Founders**, and relationships routed through removed individuals are gone — so relatedness, **F (Inbreeding Coefficient)**, **Effective Population Size (Ne)**, and **Founder** counts computed on it differ from the input. Column/file-level Checks (a missing column, a row without an id) are never resolvable by removal and still `BLOCK`.
 _Avoid_: "cleaned pedigree", "filtered pedigree", "Fixed Pedigree" alone (that names the auto-fixed output, reduced or not)
 
+**Missing-Parent Token**:
+A value in a mother or father column that means "this parent is not known", as opposed to the ID of an individual. `-1`, `NA`, a blank, `.` and a few similar spellings are Missing-Parent Tokens by default; `0` is not, because `0` is a valid ID, and becomes one only when the user says so (ADR 0006).
+_Avoid_: "null parent", "missing code" without naming the column
+
+**Duplicate Row** / **Duplicate ID**:
+A Duplicate Row says the same thing as another row: the same ID, parents, sex and other values, as pedsum reads them (`NA` and `.` are the same missing parent); it adds nothing and collapses to one row. A Duplicate ID is an ID on two or more rows that differ in some column; pedsum cannot tell which row is right.
+_Avoid_: bare "duplicate" when it matters which one is meant
+
 ## Relationships
 
 - **Depth** is a property of an individual, derivable from the pedigree.
