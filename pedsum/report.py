@@ -12,14 +12,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Union
 
-import numpy as np
 import polars as pl
 import yaml
 
 from pedsum.base import VERSION, PedigreeError, logger
 from pedsum.checks import CHECK_GROUPS, CHECK_LABELS
-from pedsum.parse import plink_sex, read_pedigree_table
-from pedsum.pedigree_ops import IdIndex
+from pedsum.parse import plink_sex, read_aligned_columns
 from pedsum.schema import categorise_pedigree, split_individual_distributions, split_summary
 from pedsum.sections import INBREEDING_COLUMNS, numeric_distribution
 
@@ -629,7 +627,13 @@ def write_annotated_tsv(
     PLINK's coding (1=male, 2=female, 0=unknown). All derived per-individual columns are
     appended. Row order matches input. Gzipped tab-separated.
     """
-    raw = read_pedigree_table(in_path, sep=sep, dtype=str if labels.is_string else None)
+    raw = read_aligned_columns(
+        in_path, sep, config.id_col, idf["id"].to_numpy(), labels, infer_types=not labels.is_string
+    )
+    if raw[config.id_col].null_count():
+        # An idf row the input lacks: rows were added or dropped between the
+        # input and idf, not a benign reorder.
+        raise PedigreeError("internal: row order mismatch between input and individual table")
     rename_map = {
         config.id_col: "id",
         config.sex_col: "sex",
@@ -639,19 +643,6 @@ def write_annotated_tsv(
     rename_map = {k: v for k, v in rename_map.items() if k != v}
     if rename_map:
         raw = raw.rename(rename_map)
-
-    raw_ids = labels.codes(raw["id"])
-    idf_ids = idf["id"].to_numpy()
-    if not np.array_equal(raw_ids, idf_ids):
-        # ``load_and_validate`` may have reordered rows into topological
-        # order when the input was not already sorted parents-before-
-        # children.  Realign the raw read to ``idf`` order by ID.
-        perm = IdIndex(raw_ids).get_indexer(idf_ids)
-        if (perm == -1).any() or len(perm) != len(idf_ids):
-            # Truly mismatched (rows added or dropped between input and
-            # idf) — not a benign reorder.
-            raise PedigreeError("internal: row order mismatch between input and individual table")
-        raw = raw[perm]
 
     canonical = ("id", "sex", "mother", "father")
     extras = raw.drop([c for c in canonical if c in raw.columns])

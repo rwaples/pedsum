@@ -321,19 +321,48 @@ _REFERENCE_TRUE = frozenset({"1", "true", "t", "yes", "y"})
 _REFERENCE_FALSE = frozenset({"0", "false", "f", "no", "n"})
 
 
+def read_aligned_columns(
+    path: Path,
+    sep: str,
+    id_col: str,
+    ids: np.ndarray,
+    labels: IdLabels,
+    *,
+    columns: list[str] | None = None,
+    infer_types: bool = False,
+) -> pl.DataFrame:
+    """Columns of the input with one row per ID code in ``ids``, in that order.
+
+    Rows are matched by id, because loading may reorder them. An id the file
+    lacks (a founder ``validate`` added) gets a row of nulls, so each caller
+    picks its own policy for it. ``columns`` reads ``id_col`` and those columns
+    only (an absent one raises polars' ``ColumnNotFoundError``); None reads
+    every column. Columns are text unless ``infer_types``.
+    """
+    projection = None if columns is None else list(dict.fromkeys([id_col, *columns]))
+    raw = read_pedigree_table(path, sep=sep, dtype=None if infer_types else str, columns=projection)
+    raw_ids = labels.codes(raw[id_col])
+    if np.array_equal(raw_ids, ids):
+        return raw
+    # A null gather index (an id absent from the file) yields a null row.
+    rows = pl.Series(IdIndex(raw_ids).get_indexer(ids)).replace(-1, None)
+    return raw.select(pl.all().gather(rows))
+
+
 def read_reference_mask(
     path: Path, sep: str, id_col: str, column: str, ids: np.ndarray, labels: IdLabels
 ) -> np.ndarray:
     """Boolean reference-subpopulation mask from ``column`` of the input, aligned to the ID codes ``ids``.
 
     True tokens are ``1/true/t/yes/y`` and false tokens ``0/false/f/no/n``
-    (any case); missing tokens are false. Rows are matched by id, because
-    loading may reorder them, and ids absent from the file (founders that
-    ``validate`` added) are false.
+    (any case); missing tokens are false, and so are ids absent from the file
+    (founders that ``validate`` added).
     """
-    raw = read_pedigree_table(path, sep=sep, dtype=str)
-    if column not in raw.columns:
-        raise PedigreeError(f"reference column {column!r} not in input; file has {list(raw.columns)}")
+    try:
+        raw = read_aligned_columns(path, sep, id_col, ids, labels, columns=[column])
+    except pl.exceptions.ColumnNotFoundError:
+        header = read_pedigree_table(path, sep=sep, dtype=str).columns
+        raise PedigreeError(f"reference column {column!r} not in input; file has {header}") from None
     tokens = raw[column].str.strip_chars().str.to_lowercase()
     missing = tokens.is_null() | tokens.is_in([t.lower() for t in _READER_NULL_TOKENS])
     is_true = tokens.is_in(sorted(_REFERENCE_TRUE)) & ~missing
@@ -341,7 +370,7 @@ def read_reference_mask(
     if bad.any():
         samples = raw[column].filter(bad).head(3).to_list()
         raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
-    return np.isin(ids, labels.codes(raw[id_col].filter(is_true)))
+    return is_true.to_numpy()
 
 
 def read_trait_columns(
@@ -356,19 +385,17 @@ def read_trait_columns(
     """Raw trait tokens from ``columns`` of the input, aligned to the ID codes ``ids``, ``None`` where missing.
 
     Missing is a reader null token (exact), a parent missing token after strip
-    in any case, or one of ``missing`` after strip. Rows are matched by id,
-    because loading may reorder them, and ids absent from the file (founders
-    that ``validate`` added) are missing.
+    in any case, or one of ``missing`` after strip. Ids absent from the file
+    (founders that ``validate`` added) are missing.
     """
     try:
-        raw = read_pedigree_table(path, sep=sep, dtype=str, columns=list(dict.fromkeys([id_col, *columns])))
+        raw = read_aligned_columns(path, sep, id_col, ids, labels, columns=columns)
     except pl.exceptions.ColumnNotFoundError:
         header = read_pedigree_table(path, sep=sep, dtype=str).columns
         absent = [column for column in columns if column not in header]
         if not absent:
             raise
         raise PedigreeError(f"trait column(s) {absent} not in input; file has {header}") from None
-    raw_ids = labels.codes(raw[id_col])
     extra = sorted({token.strip() for token in missing})
     upper_missing = sorted(PARENT_MISSING_TOKENS)
 
@@ -378,8 +405,4 @@ def read_trait_columns(
         return pl.when(is_missing).then(None).otherwise(tokens).alias(column)
 
     frame = raw.select(masked(column) for column in dict.fromkeys(columns))
-    if not np.array_equal(raw_ids, ids):
-        # A null gather index (an id absent from the file) yields a null token.
-        rows = pl.Series(IdIndex(raw_ids).get_indexer(ids)).replace(-1, None)
-        frame = frame.select(pl.all().gather(rows))
     return {column: frame[column].to_numpy() for column in columns}
