@@ -11,7 +11,9 @@
 # Writes benchmarks/results/simace/<scenario>.<cell>.{time,log} and a one-line TSV row
 # to benchmarks/results/simace/results.tsv (scenario, cell, rows, export_s, wall_s, user_s,
 # sys_s, max_rss_mib, args). The TSV is exported once per scenario, and again when the
-# parquet is newer, and reused by later cells; export_s is that one export's time.
+# parquet is newer or the .export_s timing file is missing, and reused by later cells;
+# export_s is that one export's time. The export lands under its final name only after
+# it and its timing are complete, so an interrupted export is redone.
 # simACE codes sex 0=female, 1=male; the export recodes it to PLINK's 2/1 and writes
 # pedigree.pedsum.tsv, so the 0/1-coded pedigree.tsv of earlier versions is never read.
 # A results.tsv with another header (earlier versions logged wall as [h:]mm:ss) is
@@ -30,17 +32,19 @@ if [ -f "$bench/results.tsv" ] && [ "$(head -n 1 "$bench/results.tsv")" != "$hea
   exit 1
 fi
 
-if [ ! -f "$tsv" ] || [ "$parquet" -nt "$tsv" ]; then
+if [ ! -f "$tsv" ] || [ ! -f "$tsv.export_s" ] || [ "$parquet" -nt "$tsv" ]; then
+  rm -f "$tsv" "$tsv.export_s"
   t0=$(date +%s.%N)
   (cd "$root" && pixi run python -c "
 import polars as pl
 (
     pl.scan_parquet('$parquet')
     .select('id', pl.col('sex').replace_strict({0: 2, 1: 1}), 'mother', 'father', 'generation')
-    .sink_csv('$tsv', separator='\t')
+    .sink_csv('$tsv.tmp', separator='\t')
 )
 ")
   echo "$(echo "$(date +%s.%N) - $t0" | bc)" > "$tsv.export_s"
+  mv "$tsv.tmp" "$tsv"
 fi
 rows=$(( $(wc -l < "$tsv") - 1 ))
 export_s=$(cat "$tsv.export_s")
