@@ -115,11 +115,11 @@ def summarize_findings(findings: list[Finding], label: Label) -> str:
 
 
 def _required_columns(ctx: ValidationContext) -> CheckResult:
-    # summarize (fail_fast) treats a named --birth-year-col as required;
-    # validate omits it and lets birth_year_dtype SKIP instead.
+    # summarize treats a named --birth-year-col as required; validate omits it
+    # and lets birth_year_dtype SKIP instead.
     config = ctx.config
     needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
-    if ctx.fail_fast and config.birth_year_col is not None:
+    if ctx.require_birth_year_col and config.birth_year_col is not None:
         needed.add(config.birth_year_col)
     miss = needed - set(ctx.df_raw.columns)
     if miss:

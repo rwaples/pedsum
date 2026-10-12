@@ -235,6 +235,23 @@ def test_summarize_writes_validate_log_on_sex_ambiguity(tmp_path):
     assert "sex_role_ambiguity" in log.read_text()
 
 
+def test_summarize_writes_validate_log_on_missing_birth_year_col(tmp_path):
+    """A --birth-year-col absent from the file is named in the log, not left header-only."""
+    ped = _write_ped(
+        tmp_path / "p.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": -1, "father": -1},
+            {"id": 2, "sex": "F", "mother": -1, "father": -1},
+        ],
+    )
+    out = tmp_path / "s"
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(out), "--birth-year-col", "nope"])
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}\nstderr:\n{r.stderr}"
+    log = pl.read_csv(out / "validate.log", separator="\t", infer_schema=False)
+    assert log["check"].to_list() == ["required_columns"]
+    assert "nope" in log["detail"][0]
+
+
 def test_summarize_no_validate_log_when_valid(tmp_path):
     """A clean pedigree must NOT leave a stray validate.log in the summarize out-dir."""
     ped = _write_ped(

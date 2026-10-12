@@ -71,7 +71,7 @@ def write_validation_failure_log(args: argparse.Namespace, config: ValidationCon
     """
     log_path = args.out_dir / "validate.log"
     try:
-        _, _, findings, ctx = validate_pedigree(args.in_path, config, sep=args.sep)
+        _, _, findings, ctx = validate_pedigree(args.in_path, config, sep=args.sep, require_birth_year_col=True)
         write_validate_log(findings, log_path, ctx.id_labels)
     except (PedigreeError, FileNotFoundError, OSError) as e:
         logger.error("could not write %s: %s", log_path, e)

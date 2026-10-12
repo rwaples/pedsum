@@ -191,10 +191,11 @@ class ValidationContext:
 
     df_raw: pl.DataFrame
     config: ValidationConfig
-    # summarize's run: raise on the first FAIL, and require a named
-    # --birth-year-col to exist. Otherwise every FAIL is recorded and a missing
-    # birth-year column is an inapplicable SKIP.
+    # summarize's run raises on the first FAIL; otherwise every FAIL is recorded.
     fail_fast: bool = False
+    # summarize and its validate.log rerun require a named --birth-year-col to
+    # exist; validate treats a missing one as an inapplicable SKIP.
+    require_birth_year_col: bool = False
     # The --drop-offending rounds parse with the input's labels, so the ID
     # mode and string-mode codes stay fixed while rows are dropped.
     fixed_labels: IdLabels | None = None
@@ -330,7 +331,7 @@ def load_and_validate(path: Path, config: ValidationConfig, *, sep: str = "auto"
     df = read_pedigree_table(path, sep=sep, dtype=str)
     logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
     maybe_warn_csv(df)
-    ctx = ValidationContext(df, config, fail_fast=True)
+    ctx = ValidationContext(df, config, fail_fast=True, require_birth_year_col=True)
     run_checks(ctx)
     # Every Check passed, so no parent is missing and there is no founder to
     # synthesize: the frame is the input rows of the pedigree validate would write.
@@ -340,17 +341,19 @@ def load_and_validate(path: Path, config: ValidationConfig, *, sep: str = "auto"
 
 
 def validate_pedigree(
-    path: Path, config: ValidationConfig, *, sep: str = "auto"
+    path: Path, config: ValidationConfig, *, sep: str = "auto", require_birth_year_col: bool = False
 ) -> tuple[int, list[CheckResult], list[Finding], ValidationContext]:
     """Run every Check accumulating.
 
-    Returns ``(n_rows, results, findings, ctx)`` where ``results`` covers all
-    checks in ``_CHECK_ORDER`` (each PASS / FAIL / SKIP), ``findings`` lists
+    Returns ``(n_rows, results, findings, ctx)`` where ``results`` covers every
+    Check in ``CHECKS`` order (each PASS / FAIL / SKIP), ``findings`` lists
     every per-individual finding, and ``ctx`` carries the coerced arrays and raw
-    DataFrame for ``_run_validate``'s auto-fix.
+    DataFrame for :func:`pedsum.reduce.fix_validated`. ``require_birth_year_col``
+    makes a missing ``birth_year_col`` a ``required_columns`` FAIL, as in
+    :func:`load_and_validate`.
     """
     df = read_pedigree_table(path, sep=sep, dtype=str)
     maybe_warn_csv(df)
-    ctx = ValidationContext(df, config)
+    ctx = ValidationContext(df, config, require_birth_year_col=require_birth_year_col)
     results, findings = run_checks(ctx)
     return len(ctx.df_raw), list(results.values()), findings, ctx

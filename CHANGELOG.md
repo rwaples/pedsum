@@ -305,6 +305,12 @@ whole command.
   to drop" under `--drop-offending`, and the written file then failed its
   own re-validation. `acyclic` now runs on every pedigree whose IDs parse:
   plain `validate` BLOCKs, and `--drop-offending` drops the cycle members.
+- **A missing `--birth-year-col` is named in `validate.log`.** When
+  `summarize`, `effective-size`, `assortative-mating` or `epimight-input`
+  stopped because the named birth-year column was not in the file, the
+  `validate.log` it wrote had a header and no rows, while the console said
+  to fix the reported issues. The log now carries the `required_columns`
+  finding naming the column.
 - **`validate --help` describes `--sex-col` as the other commands do**:
   M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
   offered the 0=female, 1=male coding that 0.15 removed.
