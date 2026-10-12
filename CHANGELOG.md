@@ -221,13 +221,16 @@ whole command.
   `effective-size` still refuses its sex-dependent estimators while any
   row is unsexed. 20 of the 21 published pedigrees in pedsum-validate that
   needed `--allow-missing-sex` needed it only for these individuals.
-- **`summarize` reads `sex_source` from its input** when the column is
-  there, as in `validate.tsv.gz`, and counts it under
-  `size_structure.sex_source` in `summary.yaml`. A Fixed Pedigree's sexes
-  all load as resolved, so before, `annotated.tsv.gz` and the
-  `--sex-concordance` headline took every sex `validate` filled or
-  overrode for a recorded one. Rows the column leaves blank (founders
-  `validate` added) keep the provenance loading derives.
+- **Every command keeps the `sex_source` of its input** when the column
+  is there, as in `validate.tsv.gz`, for each row this run did not change
+  itself. A Fixed Pedigree's sexes all load as resolved, so before,
+  `annotated.tsv.gz` and the `--sex-concordance` headline took every sex
+  `validate` filled or overrode for a recorded one. `summarize` counts
+  the values under `size_structure.sex_source` in `summary.yaml`. The
+  founders `validate` adds, phantoms included, are written with
+  `sex_source = imputed_from_missing` instead of blank.
+- **`birth_year_topology`'s label is "parent age at birth >= min parent
+  age"**, which holds under `--min-parent-age`.
 - **`--allow-missing-sex` and `--no-override-asserted-sex` help.** The
   latter said it restored a hard-block; `validate` writes the pedigree and
   exits 1, and `--drop-offending` removes the individual.

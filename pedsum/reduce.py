@@ -84,7 +84,8 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
     mother_col = ctx0.config.mother_col
     father_col = ctx0.config.father_col
     df_cur = ctx0.df_raw
-    n_input_rows = len(df_cur)
+    # The input's rows, so the drop fraction is of the file the user gave.
+    n_input_rows = ctx0.n_input_rows
     ctx = ctx0
     ctx0.fixed_labels = ctx0.id_labels
     dropped: list[tuple[str, str, int]] = []
@@ -220,7 +221,7 @@ def fix_validated(
         return ValidateOutcome(exit_code=2, blocked="--drop-offending removed every individual (empty pedigree)")
     write_manifest(reduction.dropped)
     # Number phantoms past the input's IDs so none reuses a dropped ID.
-    next_id = next_free_id(*ctx.require_id_parents())
+    next_id = next_free_id(*ctx.require_id_parents(), ctx.config.missing_parent_tokens)
     fp, path = _write_fixed(
         reduction.ctx_final, fill_half_founders=fill_half_founders, next_id=next_id, write=write_pedigree
     )

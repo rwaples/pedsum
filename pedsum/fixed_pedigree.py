@@ -12,7 +12,9 @@ The auto-fixes:
 - a founder row for each missing parent ID (``parent_refs_present_*``);
 - with ``fill_half_founders``, a phantom parent in each half-founder's missing
   slot;
-- sex resolved from parent role, recorded per row in ``sex_source``;
+- sex resolved from parent role, recorded per row in ``sex_source`` (an
+  input that has the column, such as ``validate.tsv.gz``, keeps its values
+  where this run changed nothing);
 - rows in topological order (parents before children).
 """
 
@@ -24,7 +26,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, SexSource, logger
 from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
 from pedsum.pedigree_ops import unique_ints
@@ -106,7 +108,7 @@ def fix_pedigree(
     filled_mother = filled_father = np.zeros(n, dtype=bool)
     if fill_half_founders:
         if next_id is None:
-            next_id = next_free_id(ids, mothers, fathers)
+            next_id = next_free_id(ids, mothers, fathers, ctx.config.missing_parent_tokens)
         labels = labels.with_phantoms(next_id)
         new_mothers, new_fathers, phantoms = _build_phantom_parents(mothers, fathers, next_id)
         filled_mother = new_mothers != mothers
@@ -133,7 +135,7 @@ def fix_pedigree(
         sex=take(imp.imputed_sex),
         mothers=take(mothers),
         fathers=take(fathers),
-        sex_source=take(imp.sex_source),
+        sex_source=take(_keep_recorded_sex_source(imp.sex_source, ctx.df_raw)),
         birth_year=None if ctx.birth_year is None else take(ctx.birth_year),
         ped_depth=take(depth),
         input_row=order,
@@ -198,8 +200,36 @@ def render_fixed_pedigree(
     data[sex_col] = plink_sex(np.array([f["sex"] for f in fp.founders], dtype=np.int8)).astype(str).tolist()
     data[mother_col] = ["-1"] * n_new
     data[father_col] = ["-1"] * n_new
+    # A founder pedsum added has no recorded sex: it comes from the role it fills.
+    data["sex_source"] = [SexSource.IMPUTED_FROM_MISSING.value] * n_new
     new_rows = pl.DataFrame(data, schema=dict.fromkeys(out.columns, pl.String))
     return pl.concat([new_rows, out.cast(pl.String)])
+
+
+def _keep_recorded_sex_source(derived: np.ndarray, raw: pl.DataFrame) -> np.ndarray:
+    """``derived`` with the input's own ``sex_source`` where this run derived ``input``.
+
+    Loading a Fixed Pedigree again finds every sex resolved, so without its
+    column a sex ``validate`` filled or overrode would pass for a recorded one
+    (ADR 0006). A repair this run made wins over the column. A column with
+    values pedsum does not write is ignored with a WARNING.
+    """
+    if "sex_source" not in raw.columns:
+        return derived
+    tokens = raw["sex_source"].cast(pl.String).str.strip_chars()
+    known = [s.value for s in SexSource]
+    unknown = tokens.filter(tokens.is_not_null() & ~tokens.is_in(known)).unique().sort()
+    if len(unknown):
+        logger.warning(
+            "input column sex_source has values pedsum does not write (%s); ignored", unknown.head(3).to_list()
+        )
+        return derived
+    use = (derived == SexSource.INPUT.value) & tokens.is_not_null().to_numpy()
+    if not use.any():
+        return derived
+    out = derived.copy()
+    out[use] = tokens.to_numpy()[use]
+    return out
 
 
 def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
@@ -268,9 +298,14 @@ def _build_added_founders(
     return out
 
 
-def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray) -> int:
-    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap."""
-    return max(int(ids.max()), int(mothers.max()), int(fathers.max())) + 1
+def next_free_id(ids: np.ndarray, mothers: np.ndarray, fathers: np.ndarray, tokens: tuple[str, ...] = ()) -> int:
+    """One past the largest ID used anywhere in the pedigree, as a Python int so it cannot wrap.
+
+    Also past every integer ``--missing-parent-token``: a phantom with a token's
+    ID would read as a missing parent wherever the token is passed again.
+    """
+    token_ints = [int(t) for t in tokens if t.lstrip("+-").isdigit()]
+    return max(int(ids.max()), int(mothers.max()), int(fathers.max()), *token_ints) + 1
 
 
 def _build_phantom_parents(

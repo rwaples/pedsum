@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 from conftest import load_validate_tsv_gz, run_check, run_pedsum
 
 from pedsum.validate import ValidationConfig, ValidationContext, run_checks
@@ -110,3 +111,19 @@ def test_summarize_refuses_a_raw_duplicate(tmp_path):
     run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "v")])
     r = run_pedsum(["summarize", "--in", str(tmp_path / "v" / "validate.tsv.gz"), "--out", str(tmp_path / "s2")])
     assert r.returncode == 0, r.stderr
+
+
+def test_n_counts_the_input_rows(tmp_path):
+    """The summary's N and the drop fraction count the file's rows, copies included."""
+    r, _ = _validate(tmp_path, PED + "9\tM\t9\t-1\n", "--drop-offending")
+    assert "(N=5)" in r.stderr
+    assert "1 row(s) of 5 (20.0%)" in r.stderr
+
+
+@pytest.mark.parametrize("name", ["__row", "__id", "__col0"])
+def test_input_column_named_like_a_key(tmp_path, name):
+    """An extra input column named like an internal key column does not crash the comparison."""
+    text = f"id\tsex\tmother\tfather\t{name}\n1\tM\t-1\t-1\tx\n1\tM\t-1\t-1\tx\n"
+    r, out = _validate(tmp_path, text)
+    assert r.returncode == 1, r.stderr
+    assert _log(out)["check"].to_list() == ["duplicate_rows"]

@@ -168,3 +168,30 @@ def test_parent_refs_present_hint_names_the_flag():
     detail = run_check("parent_refs_present_father", rows).findings[0].detail
     assert "pass --missing-parent-token 0" in detail
     assert "convert to -1" not in detail
+
+
+def test_token_is_stripped():
+    """A token passed with surrounding whitespace matches the stripped cells."""
+    from pedsum.cli.parser import parse_args
+
+    args = parse_args(["validate", "--in", "p.tsv", "--out", "o", "--missing-parent-token", " 0 "])
+    config = ValidationConfig.from_args(args)
+    assert config.missing_parent_tokens == ("0",)
+    assert run_check("zero_parent_present", ZERO_FOUNDERS, config).status == "PASS"
+
+
+def test_phantom_never_takes_a_token_id(tmp_path):
+    """--fill-half-founders numbers phantoms past an integer token, so the output reads back with the flag."""
+    rows = [
+        {"id": 1, "sex": "M", "mother": 4, "father": 4},
+        {"id": 2, "sex": "F", "mother": 4, "father": 4},
+        {"id": 3, "sex": "F", "mother": 2, "father": 4},
+    ]
+    r, out = _validate(tmp_path, rows, "--missing-parent-token", "4", "--fill-half-founders")
+    assert r.returncode in (0, 1), r.stderr
+    written = load_validate_tsv_gz(out)
+    assert "4" not in written["id"].to_list()
+    s = run_pedsum(
+        ["summarize", "--in", str(out / "validate.tsv.gz"), "--out", str(tmp_path / "s"), "--missing-parent-token", "4"]
+    )
+    assert s.returncode == 0, s.stderr

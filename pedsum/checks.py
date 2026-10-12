@@ -222,7 +222,10 @@ def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
     if ctx.birth_year is not None and config.birth_year_col is not None:
         parsed.add(config.birth_year_col)
         keys["__birth_year"] = ctx.birth_year[rows]
-    other = ctx.df_raw[rows].select(c for c in ctx.df_raw.columns if c not in parsed)
+    # Positional names, so no input column can collide with the key columns.
+    other = ctx.df_raw[rows].select(
+        pl.col(c).alias(f"__col{i}") for i, c in enumerate(ctx.df_raw.columns) if c not in parsed
+    )
     frame = pl.DataFrame(keys).hstack(other).with_columns(__row=pl.Series(rows))
     key_cols = [c for c in frame.columns if c != "__row"]
     first = frame.select(pl.col("__row").min().over(key_cols)).to_series().to_numpy()
@@ -240,6 +243,8 @@ def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
     keep = np.ones(len(ids), dtype=bool)
     keep[rows[copies]] = False
     ctx.keep_rows(keep)
+    # The kept ids, still sorted: duplicate_ids reads them without sorting again.
+    ctx.__dict__["sorted_ids"] = ids[order][keep[order]]
     return _verdict(findings)
 
 
@@ -515,21 +520,33 @@ def _sex_role_override(ctx: ValidationContext) -> CheckResult:
     ids, mothers, fathers = ctx.require_id_parents()
     assert ctx.sex is not None
     findings = []
-    for i in np.flatnonzero(imp.overridden_mask):
-        was_male = ctx.sex[i] == SEX_MALE
-        role, parents = ("mother", mothers) if was_male else ("father", fathers)
-        findings.append(
-            Finding(
-                id=int(ids[i]),
-                row=ctx.row(i),
-                detail=(
-                    f"id={ctx.label(ids[i])} recorded {'M' if was_male else 'F'} but used only as {role} in "
-                    f"{rows_phrase(ctx.rows(np.flatnonzero(parents == ids[i])))}; "
-                    f"sex set to {'F' if was_male else 'M'}"
-                ),
+    overridden = np.flatnonzero(imp.overridden_mask)
+    for role, parents, recorded, now in (("mother", mothers, "M", "F"), ("father", fathers, "F", "M")):
+        own = overridden[ctx.sex[overridden] == (SEX_MALE if role == "mother" else SEX_FEMALE)]
+        for i, naming in zip(own, _rows_naming(parents, ids[own]), strict=True):
+            findings.append(
+                Finding(
+                    id=int(ids[i]),
+                    row=ctx.row(i),
+                    detail=(
+                        f"id={ctx.label(ids[i])} recorded {recorded} but used only as {role} in "
+                        f"{rows_phrase(ctx.rows(naming))}; sex set to {now}"
+                    ),
+                )
             )
-        )
+    findings.sort(key=lambda f: f.row or 0)
     return _verdict(findings)
+
+
+def _rows_naming(parents: np.ndarray, pids: np.ndarray) -> list[np.ndarray]:
+    """For each id in ``pids``, the rows whose parent column names it, ascending; one sort in all."""
+    if len(pids) == 0:
+        return []
+    order = np.argsort(parents, kind="stable")
+    ordered = parents[order]
+    lo = np.searchsorted(ordered, pids, side="left")
+    hi = np.searchsorted(ordered, pids, side="right")
+    return [order[a:b] for a, b in zip(lo, hi, strict=True)]
 
 
 def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
@@ -870,7 +887,7 @@ CHECKS: tuple[Check, ...] = (
         "birth_year_topology",
         (*_IDS, "birth_year_dtype"),
         _birth_year_topology,
-        "child birth_year >= parent birth_year",
+        "parent age at birth >= min parent age",
         FailPolicy.KEEP_OR_DROP,
     ),
 )

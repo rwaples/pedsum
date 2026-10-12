@@ -216,3 +216,57 @@ def test_safe_attempt_nulls_small_sex_source_counts():
     }
     redact_size_structure(sizes, 5, 100)
     assert sizes["sex_source"] == {"input": 90, "imputed_from_missing": 0, "imputed_from_role": None, "unresolved": 7}
+
+
+def test_reloaded_fixed_pedigree_keeps_provenance(tmp_path):
+    """Loading validate.tsv.gz keeps its sex_source, founders validate added included, in every command."""
+    from pedsum.validate import ValidationConfig, load_and_validate
+
+    ped = _write_ped(
+        tmp_path / "ped.tsv",
+        [
+            {"id": 1, "sex": "M", "mother": 10, "father": 11},
+            {"id": 2, "sex": "F", "mother": 10, "father": 11},
+            {"id": 3, "sex": "M", "mother": -1, "father": -1},  # recorded M, used as a mother
+            {"id": 4, "sex": "F", "mother": 3, "father": 1},
+        ],
+    )
+    run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "v")])
+    df, _labels = load_and_validate(tmp_path / "v" / "validate.tsv.gz", ValidationConfig())
+    by_id = dict(zip(df["id"].to_list(), df["sex_source"].to_list(), strict=True))
+    assert by_id == {10: "imputed_from_missing", 11: "imputed_from_missing", 1: "input", 2: "input",
+                     3: "imputed_from_role", 4: "input"}  # fmt: skip
+    r = run_pedsum(["summarize", "--in", str(tmp_path / "v" / "validate.tsv.gz"), "--out", str(tmp_path / "s")])
+    assert r.returncode == 0, r.stderr
+    size = load_summary_yaml(tmp_path / "s")["pedigree"]["structure"]["size_structure"]
+    assert size["sex_source"] == {"input": 3, "imputed_from_missing": 2, "imputed_from_role": 1, "unresolved": 0}
+
+
+def test_raw_input_has_no_sex_source_counts(tmp_path):
+    """summary.yaml reports the counts only when the input carries the column."""
+    ped = _write_ped(tmp_path / "ped.tsv", [{"id": 1, "sex": "M", "mother": -1, "father": -1}])
+    r = run_pedsum(["summarize", "--in", str(ped), "--out", str(tmp_path / "s")])
+    assert r.returncode == 0, r.stderr
+    assert "sex_source" not in load_summary_yaml(tmp_path / "s")["pedigree"]["structure"]["size_structure"]
+
+
+def test_override_findings_name_every_referencing_row():
+    """Several overrides in each role each list their own referencing rows, in row order."""
+    from conftest import run_check
+
+    rows = [
+        {"id": "1", "sex": "M", "mother": "-1", "father": "-1"},  # used as mother
+        {"id": "2", "sex": "F", "mother": "-1", "father": "-1"},  # used as father
+        {"id": "3", "sex": "M", "mother": "-1", "father": "-1"},  # used as mother
+        {"id": "4", "sex": "F", "mother": "-1", "father": "-1"},  # used as father
+        {"id": "5", "sex": "M", "mother": "1", "father": "2"},
+        {"id": "6", "sex": "M", "mother": "3", "father": "4"},
+        {"id": "7", "sex": "M", "mother": "1", "father": "4"},
+    ]
+    findings = run_check("sex_role_override", rows).findings
+    assert [(f.row, f.detail) for f in findings] == [
+        (0, "id=1 recorded M but used only as mother in row(s) [4, 6]; sex set to F"),
+        (1, "id=2 recorded F but used only as father in row(s) [4]; sex set to M"),
+        (2, "id=3 recorded M but used only as mother in row(s) [5]; sex set to F"),
+        (3, "id=4 recorded F but used only as father in row(s) [5, 6]; sex set to M"),
+    ]

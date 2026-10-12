@@ -175,7 +175,8 @@ class ValidationConfig:
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
             min_parent_age=args.min_parent_age,
-            missing_parent_tokens=tuple(args.missing_parent_token),
+            # Cells are matched after stripping, so the tokens are too.
+            missing_parent_tokens=tuple(t.strip() for t in args.missing_parent_token),
             allow_missing_sex=args.allow_missing_sex,
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),
@@ -217,9 +218,15 @@ class ValidationContext:
     # The parent links cycle_breaks cleared, as (id, role, parent, reason)
     # with IDs as the input wrote them: validate's cleared-links manifest.
     cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
+    # Rows read from the input, before duplicate_rows collapsed any copies.
+    n_input_rows: int = field(init=False)
     # Set when duplicate_rows collapsed copies: each remaining row's position
     # in the input, so Findings name the rows the user can find in the file.
     input_rows: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        """Count the input's rows before any Check changes ``df_raw``."""
+        self.n_input_rows = len(self.df_raw)
 
     def row(self, i: int | np.integer) -> int:
         """Row ``i`` of the parsed arrays as its row in the input."""
@@ -417,4 +424,4 @@ def validate_pedigree(
     maybe_warn_csv(df)
     ctx = ValidationContext(df, config, require_birth_year_col=require_birth_year_col)
     results, findings = run_checks(ctx)
-    return len(ctx.df_raw), list(results.values()), findings, ctx
+    return ctx.n_input_rows, list(results.values()), findings, ctx

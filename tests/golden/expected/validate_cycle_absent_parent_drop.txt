@@ -14,8 +14,8 @@ acyclic	7	3	id=7 could not be topologically ordered (in a cycle)
 
 === validate.tsv.gz ===
 id	sex	mother	father	sex_source
-11	2	-1	-1	
-12	1	-1	-1	
+11	2	-1	-1	imputed_from_missing
+12	1	-1	-1	imputed_from_missing
 1	1	-1	-1	input
 2	2	-1	-1	input
 10	2	11	12	input

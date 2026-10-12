@@ -2,7 +2,7 @@
 
 Status: accepted; implemented ([pedsum#25](https://github.com/rwaples/pedsum/issues/25)). Two points went
 past the decisions below in implementation, both recorded under Consequences: each link `--break-cycles`
-clears is a Finding of a Check, and `summarize` reads the `sex_source` column of its input.
+clears is a Finding of a Check, and loading keeps the `sex_source` column of its input.
 
 ## Context
 
@@ -164,9 +164,11 @@ difference.
 - `cycle_breaks` was added in implementation: each link `--break-cycles` clears is one of its Findings, so a
   run that clears links exits 1 like any other repair and `validate.log` lists them, beside the manifest
   `validate.cleared_links.tsv`. It SKIPs without the flag.
-- `summarize` reads its input's `sex_source` column, when there is one, as the provenance of each sex, for
-  `annotated.tsv.gz` and `--sex-concordance` as well as the counts. Loading `validate.tsv.gz` again finds
-  every sex resolved, so without the column a sex `validate` filled or overrode passed for a recorded one.
+- The Fixed Pedigree keeps an input `sex_source` column, when there is one, as the provenance of each sex
+  this run did not change itself, so every command (`summarize`'s `annotated.tsv.gz`, `--sex-concordance`
+  and counts among them) sees it. Loading `validate.tsv.gz` again finds every sex resolved, so without the
+  column a sex `validate` filled or overrode passed for a recorded one. Founders `validate` adds are
+  written with `sex_source = imputed_from_missing`.
 - Findings after a collapsed duplicate row name the input's row numbers: the context keeps each remaining
   row's input position.
 - Plain `validate` exits 1, not 0, when it overrides a recorded sex or collapses duplicate rows. Under

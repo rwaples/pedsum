@@ -319,11 +319,13 @@ Flags:
   `summarize` refuses to run.
 
 When its input has a `sex_source` column, as `validate.tsv.gz` does,
-`summarize` takes each row's sex provenance from it, for
-`annotated.tsv.gz` and `--sex-concordance`, and counts its values under
+every command keeps each row's value there unless it changes that row's
+sex itself, so `annotated.tsv.gz` and `--sex-concordance` see where each
+sex came from; `summarize` also counts the values under
 `size_structure.sex_source` in `summary.yaml`. Loading a Fixed Pedigree
 again finds every sex already resolved, so without the column a sex
-`validate` filled or overrode would pass for a recorded one.
+`validate` filled or overrode would pass for a recorded one. The
+founders `validate` adds have `sex_source = imputed_from_missing`.
 
 ### Offspring Sex Concordance (`--sex-concordance`)
 
