@@ -311,6 +311,11 @@ whole command.
   `validate.log` it wrote had a header and no rows, while the console said
   to fix the reported issues. The log now carries the `required_columns`
   finding naming the column.
+- **`validate` no longer deletes its own input.** With `--in
+  OUT/validate.tsv.gz --out OUT`, the cleanup of a previous run's outputs
+  removed the input before reading it, and the run exited 2 with "input
+  file not found". The cleanup now keeps the input, which the run reads
+  and then replaces.
 - **`validate --help` describes `--sex-col` as the other commands do**:
   M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
   offered the 0=female, 1=male coding that 0.15 removed.

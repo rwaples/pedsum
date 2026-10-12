@@ -46,15 +46,16 @@ def _report_reduction(result: ReductionResult) -> None:
         )
 
 
-def _remove_stale_validate_outputs(out_dir: Path) -> None:
+def _remove_stale_validate_outputs(out_dir: Path, in_path: Path) -> None:
     """Delete a previous run's ``validate.tsv.gz`` / ``validate.dropped.tsv`` from ``out_dir``.
 
     This run writes whichever of them applies; a BLOCKED run writes neither,
-    so a leftover file would otherwise pass for this input's result.
+    so a leftover file would otherwise pass for this input's result. A file
+    that is ``in_path`` is this run's input, not a leftover, and is kept.
     """
     for name in ("validate.tsv.gz", "validate.dropped.tsv"):
         path = out_dir / name
-        if path.is_file():
+        if path.is_file() and not (in_path.is_file() and path.samefile(in_path)):
             path.unlink()
             logger.info("removed %s from a previous run", path)
 
@@ -64,7 +65,7 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
     commit_thread_budget(args)
     if prepare_out_dir(args.out_dir) != 0:
         return 1
-    _remove_stale_validate_outputs(args.out_dir)
+    _remove_stale_validate_outputs(args.out_dir, args.in_path)
     try:
         n_total, results, findings, ctx = validate_pedigree(
             args.in_path, ValidationConfig.from_args(args), sep=args.sep
