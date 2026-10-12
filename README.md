@@ -187,7 +187,7 @@ records changes planned for several rows
 | Parent written `0` | Read as an ID: blocks when `0` is both mother and father, otherwise adds a founder named `0`. Recode `0` to `NA`. | optiSel, visPedigree, nadiv, pedtools and purgeR read `0` as missing; kinship2 (character IDs), pedigreemm and nprcgenekeepr do not. |
 | The same row twice | Blocks. | visPedigree, optiSel and nprcgenekeepr keep one copy; the rest refuse. |
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
-| Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) and nprcgenekeepr pass the cycle through. The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
+| Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
 | Recorded sex contradicts the only parent role | Overrides it from the role (`sex_source = imputed_from_role`). | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
 | No sex, used as a parent | Filled from the role. | optiSel, visPedigree and kinship2 `fixParents` fill it; kinship2 `pedigree()` refuses; the rest leave it unknown. |
 | No sex, never a parent | Blocks unless `--allow-missing-sex`. | All accept it. |
@@ -197,7 +197,8 @@ records changes planned for several rows
 | Row without an ID | Blocks. | visPedigree and nadiv drop the row with a warning; pedtools, pedigreemm and nprcgenekeepr keep an individual named `NA`; the rest refuse. |
 
 On optiSel's `PedigWithErrors` (10,863 rows), `prePed` keeps every row: it
-adds 2 founders, clears 4 parent links to break two cycles and changes 1 sex.
+adds 2 founders, clears 4 parent links to break two cycles, reads a father
+written `0` as missing and changes 1 sex.
 `validate --drop-offending` removes 7 rows (cycle members, a self-loop and
 children born before a parent) and adds 3 founders, one of them for a father
 written `0`.
@@ -1043,6 +1044,11 @@ any case. `validate.tsv.gz` and `annotated.tsv.gz` write `1`/`2`/`0`.
 Any other number is an error. A column with `0` tokens and no `2`
 gets a WARNING: it is likely coded `0` = female, `1` = male, the
 coding pedsum wrote before 0.15.0, and must be recoded first.
+
+pedsum models two-sex pedigrees: every parent is a mother or a father,
+and a row whose mother and father are the same individual (selfing, as
+in plant and other monoecious pedigrees) is refused
+([#24](https://github.com/rwaples/pedsum/issues/24)).
 
 Missing-sex tokens, and `0`, decode to unknown. pedsum then imputes
 from parent role: F if used as mother, M if used as father. Two

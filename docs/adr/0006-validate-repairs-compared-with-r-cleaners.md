@@ -20,14 +20,17 @@ Most of the R cleaners and PLINK `.fam` write a missing parent as `0`; optiSel, 
 pedtools and purgeR read it so. pedsum reads `0` as an ID. An absent parent `0` used in both roles (the
 usual `0 0` founder) blocked with two misleading lines ("sex conflict on missing parent(s)", "rows with
 mother == father"), and `--drop-offending` then deleted every founder written that way. An absent `0` in
-one role was synthesized as a founder: optiSel's `PedigWithErrors` has one father written `0`, so pedsum
-counted one founder more than `prePed`.
+one role was synthesized as a founder: optiSel's `PedigWithErrors` has one father written `0`, which
+`prePed` reads as missing and pedsum turned into an added founder named `0`.
 
 - `0` stays an ordinary ID by default. In simACE's pedigrees ID 0 is a real individual, and in a subset
   that lost its row, reading `0` as missing would turn its offspring from half-sibs into unrelated
   **Half-Founders**.
 - A new option, `--missing-parent-token TOKEN` (repeatable), adds tokens to the missing-parent set of
   every command that reads a pedigree.
+- `validate` writes a parent read as missing through such a token as missing (blank) in
+  `validate.tsv.gz`. The **Fixed Pedigree** then needs no option downstream: `summarize` and
+  `effective-size` read the same pedigree `validate` wrote (ADR 0005) without repeating the flag.
 - A new Check, Fail Policy `block`, FAILs when a parent ID `0` has no row of its own, in any role. Its
   BLOCKED line names the option. Being `block`, it also stops `--drop-offending`, which no longer removes
   founders over it.
@@ -38,10 +41,12 @@ An ID on two identical rows blocked like an ID on two conflicting rows, and `--d
 both, so the individual vanished and its offspring lost a parent. visPedigree, optiSel and nprcgenekeepr
 remove an exact copy; the other five refuse it. All but optiSel refuse a conflicting duplicate.
 
-- A new Check, `duplicate_rows`, Fail Policy `autofix`: rows identical in every input column collapse to
-  the first, with one Finding per removed copy, and `validate` exits 1, as for a synthesized founder.
-- `duplicate_ids` then covers only an ID whose rows differ in some column, a trait column included, and
-  stays `block_or_drop`. pedsum never chooses between differing rows; under `--drop-offending` the
+- A new Check, `duplicate_rows`, Fail Policy `autofix`: rows that say the same thing collapse to the
+  first, with one Finding per removed copy, counted as a repair like a synthesized founder. Rows are
+  compared as pedsum reads them: ID, parents, sex and birth year after parsing (so `NA` and `.` are the
+  same missing parent, `M` and `1` the same sex), and every other column as text.
+- `duplicate_ids` then covers only an ID whose rows differ by that comparison, a trait column included,
+  and stays `block_or_drop`. pedsum never chooses between differing rows; under `--drop-offending` the
   individual is still removed.
 
 ### Cycles
@@ -63,12 +68,13 @@ cycle.
 
 pedsum overrides a recorded sex that contradicts the only parent role an individual has (ADR 0001, 0.9),
 as optiSel, nprcgenekeepr and kinship2 `fixParents` do; visPedigree, pedtools and kinship2 `pedigree()`
-refuse. The override was reported only on stdout, in one INFO line and in the `sex_source` column, and
+refuse. The override was reported in the Check summary (`PASS (1 overridden from role)`), in one INFO
+line on stderr that `-q` hides, and in the `sex_source` column; `validate.log` had no row for it and
 `validate` exited 0. `summarize`, reading `validate.tsv.gz`, never saw it.
 
 - The override stays the default, and `--no-override-asserted-sex` still turns it off.
 - Each override is a Finding of a new Check with Fail Policy `autofix`, so it is in `validate.log` and
-  `validate` exits 1, as for a synthesized founder. It is not a `sex_role_consistency` Finding: that Check
+  counts as a repair like a synthesized founder: plain `validate` exits 1. It is not a `sex_role_consistency` Finding: that Check
   is `keep_or_drop`, and `--drop-offending` would remove every overridden individual.
 - `summarize` counts `sex_source` values in `summary.yaml` when its input carries the column, so a summary
   of a Fixed Pedigree shows how many sexes came from parent roles.
@@ -76,14 +82,16 @@ refuse. The override was reported only on stdout, in one INFO line and in the `s
 ### Unsexed individuals who are never parents
 
 All eight R cleaners accept an individual with no recorded sex and no offspring. pedsum blocked it unless
-`--allow-missing-sex` was given, and four of the nine curated published pedigrees in pedsum-validate need
-that flag: purgeR `dama` (1 such row of 1,316), `arrui` (1 of 380), `dorcas` (7 of 1,279) and visPedigree
-`deep_ped` (521 of 4,396). Such an individual cannot be sexed from roles, but it changes no relationship and
-no F.
+`--allow-missing-sex` was given. Without the flag, 21 of the 25 published pedigrees in pedsum-validate
+block, 20 of them only for such individuals: from 1 row in purgeR `dama` (of 1,316) to 4,691 in Soay sheep
+Pedigree 2, mostly in files with no sex column. Such an individual cannot be sexed from roles, but it changes
+no relationship and no F.
 
-- `unknown_sex` no longer FAILs for an individual who is never a parent. `validate` keeps it with sex `0`
-  and logs a WARNING with the count; `summarize` accepts it. `--drop-offending` no longer removes it, so a
-  parent that loses its only offspring in a reduction stays as well (ADR 0003 dropped it in the next round).
+- The `unknown_sex` Check is retired. The only individuals it flagged were unsexed and never a parent:
+  one used in one role gets its sex from that role, and one used in both is `sex_role_ambiguity`'s. Such an
+  individual is kept with sex `0`, `validate` logs a WARNING with the count, and `summarize` accepts it.
+  `--drop-offending` no longer removes it, so a parent that loses its only offspring in a reduction stays
+  as well (ADR 0003 dropped it in the next round).
 - `effective-size` still refuses its sex-dependent estimators (`ne_sex_ratio`, `ne_variance_family_size`,
   `ne_hill_overlapping`) while any row is unsexed.
 - An unsexed individual used as both mother and father (`sex_role_ambiguity`) is unchanged: it blocks
@@ -124,8 +132,8 @@ difference.
   is `keep_or_drop` (ADR 0005), and `validate` writes the pedigree and exits 1. The help is corrected.
 - Filling a missing sex from parent role stays a silent repair recorded in `sex_source`; only overriding a
   recorded sex is a Finding.
-- `--allow-missing-sex` keeps its name, although it now covers only `sex_role_ambiguity`; renaming it
-  would break invocations for little gain.
+- `--allow-missing-sex` keeps its name, although with `unknown_sex` retired it covers only
+  `sex_role_ambiguity`; renaming it would break invocations for little gain.
 
 ## Considered alternatives
 
@@ -150,12 +158,19 @@ difference.
 ## Consequences
 
 - Two new Checks with Fail Policy `autofix` (`duplicate_rows`, and one for sex overridden from role) and one
-  with `block` (absent parent `0`). `tests/test_fail_policy.py` pins them.
-- `validate` exits 1, not 0, when it overrides a recorded sex or collapses duplicate rows.
+  with `block` (absent parent `0`); `unknown_sex` is removed. `tests/test_fail_policy.py` pins them.
+- Plain `validate` exits 1, not 0, when it overrides a recorded sex or collapses duplicate rows. Under
+  `--drop-offending`, a run whose only FAILs are `autofix` Checks exits 0, as it already does for a
+  synthesized founder.
+- `summarize` stops on any FAIL, `autofix` ones included, as it does today for a parent with no row. Run
+  on a raw input with a sex contradicted by role or a duplicate row, it now refuses where it used to
+  succeed; run on `validate.tsv.gz`, which has neither, it is unchanged.
 - Inputs that ran before now BLOCK when a parent written `0` has no row; `--missing-parent-token 0` is the
-  fix. On PedigWithErrors pedsum then counts the same founders as `prePed`.
+  fix. On PedigWithErrors it reads the father written `0` as missing, as `prePed` does, instead of adding
+  a founder named `0`.
 - Inputs that blocked before now run: exact duplicate rows, and unsexed individuals who are never parents.
-  The published pedigrees `dama`, `arrui`, `dorcas` and `deep_ped` no longer need `--allow-missing-sex`.
+  20 of the 21 published pedigrees that pass `--allow-missing-sex` in pedsum-validate no longer need it;
+  the black robin pedigree still does, for two individuals used as both mother and father.
 - `summary.yaml` gains the `sex_source` counts.
 - ADR 0001's 0.9 sentence that a contradicted, used-as-both sex "stays a `sex_role_consistency`
   hard-block" was superseded by ADR 0005 and is marked so.

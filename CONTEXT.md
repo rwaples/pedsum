@@ -187,7 +187,7 @@ A value in a mother or father column that means "this parent is not known", as o
 _Avoid_: "null parent", "missing code" without naming the column
 
 **Duplicate Row** / **Duplicate ID**:
-A Duplicate Row repeats another row exactly, in every column; it says nothing new and collapses to one row. A Duplicate ID is an ID on two or more rows that differ in some column; pedsum cannot tell which row is right.
+A Duplicate Row says the same thing as another row: the same ID, parents, sex and other values, as pedsum reads them (`NA` and `.` are the same missing parent); it adds nothing and collapses to one row. A Duplicate ID is an ID on two or more rows that differ in some column; pedsum cannot tell which row is right.
 _Avoid_: bare "duplicate" when it matters which one is meant
 
 ## Relationships
