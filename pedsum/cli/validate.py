@@ -46,16 +46,25 @@ def _report_reduction(result: ReductionResult) -> None:
         )
 
 
-def _remove_stale_validate_outputs(out_dir: Path, in_path: Path) -> None:
+_OUTPUTS = ("validate.log", "validate.tsv.gz", "validate.dropped.tsv")
+
+
+def _input_is_an_output(in_path: Path, out_dir: Path) -> bool:
+    """Whether ``in_path`` is a file this run would write, replace or remove in ``out_dir``."""
+    return in_path.is_file() and any(
+        (out_dir / name).is_file() and (out_dir / name).samefile(in_path) for name in _OUTPUTS
+    )
+
+
+def _remove_stale_validate_outputs(out_dir: Path) -> None:
     """Delete a previous run's ``validate.tsv.gz`` / ``validate.dropped.tsv`` from ``out_dir``.
 
     This run writes whichever of them applies; a BLOCKED run writes neither,
-    so a leftover file would otherwise pass for this input's result. A file
-    that is ``in_path`` is this run's input, not a leftover, and is kept.
+    so a leftover file would otherwise pass for this input's result.
     """
     for name in ("validate.tsv.gz", "validate.dropped.tsv"):
         path = out_dir / name
-        if path.is_file() and not (in_path.is_file() and path.samefile(in_path)):
+        if path.is_file():
             path.unlink()
             logger.info("removed %s from a previous run", path)
 
@@ -63,9 +72,14 @@ def _remove_stale_validate_outputs(out_dir: Path, in_path: Path) -> None:
 def run_validate(args: argparse.Namespace, cmd: str) -> int:
     """``validate``: run every Check, write ``validate.log``, then BLOCK or write ``validate.tsv.gz``."""
     commit_thread_budget(args)
+    if _input_is_an_output(args.in_path, args.out_dir):
+        # Cleanup would delete the input, and a BLOCKED run would leave it
+        # passing for this run's output.
+        logger.error("--in %s is one of validate's outputs in --out %s; pass another --out", args.in_path, args.out_dir)
+        return 2
     if prepare_out_dir(args.out_dir) != 0:
         return 1
-    _remove_stale_validate_outputs(args.out_dir, args.in_path)
+    _remove_stale_validate_outputs(args.out_dir)
     try:
         n_total, results, findings, ctx = validate_pedigree(
             args.in_path, ValidationConfig.from_args(args), sep=args.sep

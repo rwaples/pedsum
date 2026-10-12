@@ -314,8 +314,8 @@ whole command.
 - **`validate` no longer deletes its own input.** With `--in
   OUT/validate.tsv.gz --out OUT`, the cleanup of a previous run's outputs
   removed the input before reading it, and the run exited 2 with "input
-  file not found". The cleanup now keeps the input, which the run reads
-  and then replaces.
+  file not found". `validate` now exits 2 before touching `OUT` when
+  `--in` is one of its outputs there, and asks for another `--out`.
 - **`validate --help` describes `--sex-col` as the other commands do**:
   M/F, Male/Female, or PLINK's 1=male, 2=female, 0=unknown. It still
   offered the 0=female, 1=male coding that 0.15 removed.

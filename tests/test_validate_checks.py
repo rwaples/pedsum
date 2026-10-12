@@ -342,14 +342,17 @@ def test_blocked_run_removes_a_previous_runs_outputs(tmp_path):
     assert (out / "validate.log").exists()
 
 
-def test_revalidating_an_output_in_place_keeps_the_input(tmp_path):
-    """--in OUT/validate.tsv.gz --out OUT reads the file before replacing it; the stale-output cleanup skips it."""
+def test_validating_an_output_in_place_is_refused(tmp_path):
+    """--in OUT/validate.tsv.gz --out OUT exits 2 and leaves the previous run's outputs as they were."""
     out = tmp_path / "out"
-    good = tmp_path / "good.tsv"
-    good.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t2\t1\tF\n")
-    r = run_pedsum(["validate", "--in", str(good), "--out", str(out)])
+    raw = tmp_path / "raw.tsv"
+    raw.write_text("id\tmother\tfather\tsex\n1\t-1\t-1\tM\n2\t-1\t-1\tF\n3\t2\t1\tF\n")
+    r = run_pedsum(["validate", "--in", str(raw), "--out", str(out), "--drop-offending"])
     assert r.returncode == 0, r.stderr
-    first = load_validate_tsv_gz(out)
-    r = run_pedsum(["validate", "--in", str(out / "validate.tsv.gz"), "--out", str(out)])
-    assert r.returncode == 0, r.stderr
-    assert load_validate_tsv_gz(out).equals(first)
+    before = {p.name: p.read_bytes() for p in out.iterdir()}
+    assert set(before) == {"validate.log", "validate.tsv.gz", "validate.dropped.tsv"}
+    for name in before:
+        r = run_pedsum(["validate", "--in", str(out / name), "--out", str(out)])
+        assert r.returncode == 2, r.stderr
+        assert "pass another --out" in r.stderr
+        assert {p.name: p.read_bytes() for p in out.iterdir()} == before
