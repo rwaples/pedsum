@@ -1,5 +1,5 @@
 target-version = "py314"
-required-version = ">=0.16,<0.17"
+required-version = ">=0.17,<0.18"
 line-length = 120
 
 [lint]
