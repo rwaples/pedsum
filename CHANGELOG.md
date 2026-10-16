@@ -578,7 +578,7 @@ changes below alter output a user reads.
 
 ### Docs
 
-- `CONTEXT.md` gains **Offspring Group**, **Maternal Offspring Group**, **Paternal Offspring Group**, **Offspring Sex Concordance**, and **Pair Concordance**, plus a Flagged-ambiguities entry recording why the feature is *not* called "clustering" ("cluster" is already reserved against **Component**, and the README uses it loosely for pair-dense half-sib structure).
+- `GLOSSARY.md` gains **Offspring Group**, **Maternal Offspring Group**, **Paternal Offspring Group**, **Offspring Sex Concordance**, and **Pair Concordance**, plus a Flagged-ambiguities entry recording why the feature is *not* called "clustering" ("cluster" is already reserved against **Component**, and the README uses it loosely for pair-dense half-sib structure).
 - README documents the method, formulas, eligibility rules, inference caveats, CLI examples, output fields, and the literature — Wang et al.'s beta-binomial overdispersion, Zietsch et al.'s zero heritability of offspring sex ratio, Long & Zhang's stopping-rule alternative, and the Lindsey & Altham / James overdispersion framework.
 
 ### Internal
@@ -645,9 +645,9 @@ changes below alter output a user reads.
 
 - **`summarize` now writes `validate.log` when validation hard-fails.** Previously a fail-fast validation error — e.g. an individual used as a mother in one row and a father in another — printed a single truncated console line and left the output directory empty, leaving the user no record to act on. summarize now re-runs the accumulating validator on the failure path and writes the same `validate.log` the `validate` subcommand produces, capturing every finding across all failing checks (not just the first). Clean pedigrees are unaffected (no log is written on success).
 
-## 0.10.0 — 2026-06-12 — output schema renamed to match CONTEXT.md glossary
+## 0.10.0 — 2026-06-12 — output schema renamed to match the GLOSSARY.md glossary
 
-**Breaking** — `summary.yaml`, `summary.extra.yaml`, `summary.pedigree.tsv` and `annotated.tsv.gz` all rename sections, keys, and per-individual columns to match the canonical terminology fixed in [CONTEXT.md](CONTEXT.md). The flat dict that feeds both YAML and long-form TSV is rewritten, so TSV column headers change too.
+**Breaking** — `summary.yaml`, `summary.extra.yaml`, `summary.pedigree.tsv` and `annotated.tsv.gz` all rename sections, keys, and per-individual columns to match the canonical terminology fixed in [GLOSSARY.md](GLOSSARY.md). The flat dict that feeds both YAML and long-form TSV is rewritten, so TSV column headers change too.
 
 ### Behavior change (separate from rename)
 

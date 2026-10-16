@@ -8,7 +8,7 @@ counts (up to degree 5), mating-pair structure, founder contributions,
 per-individual reproduction and genealogy aggregates, depth- and
 sex-stratified summaries, and per-individual statistics, and estimates
 effective population size eight ways. Output terminology follows
-[CONTEXT.md](CONTEXT.md).
+[GLOSSARY.md](GLOSSARY.md).
 
 Uses the [`pedigree-graph`](https://github.com/rwaples/pedigree-graph) package for relationship-pair detection.
 
@@ -506,7 +506,7 @@ the `estimators_requested`, and one record per estimator under
 `effective_size:` with its scalar `ne` and its per-depth arrays.
 
 pedsum offers eight pedigree-based estimators. They measure different
-things and are not interchangeable; [CONTEXT.md](CONTEXT.md) explains why
+things and are not interchangeable; [GLOSSARY.md](GLOSSARY.md) explains why
 every name carries its estimator. All eight run by default.
 
 | Estimator | Short name |
@@ -610,7 +610,7 @@ writes.
 
 The command reports the **Mate Correlation**, the correlation between the
 mother's and the father's values of a trait, one observation per
-**Mating Pair** ([CONTEXT.md](CONTEXT.md) defines both terms). One trait
+**Mating Pair** ([GLOSSARY.md](GLOSSARY.md) defines both terms). One trait
 gives one cell. Two traits give four cells, `R_mf[i][j] = corr(mother
 trait i, father trait j)`, so rows are the mother's trait and columns the
 father's. The two off-diagonal cells are estimated separately and need
@@ -1304,7 +1304,7 @@ id	sex	mother	father
 
 ## Output highlights
 
-`summary.yaml` is organised under the categories defined by `SUMMARY_SCHEMA`. Every key follows the glossary in [CONTEXT.md](CONTEXT.md) — see that document for term definitions and the naming convention (`n_<noun>` for per-individual columns, `<noun>_count` for summary-stats distributions, `<noun>_count_hist` for binned PMFs).
+`summary.yaml` is organised under the categories defined by `SUMMARY_SCHEMA`. Every key follows the glossary in [GLOSSARY.md](GLOSSARY.md) — see that document for term definitions and the naming convention (`n_<noun>` for per-individual columns, `<noun>_count` for summary-stats distributions, `<noun>_count_hist` for binned PMFs).
 
 | Category → Section | Contents |
 |---|---|
