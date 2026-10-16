@@ -21,7 +21,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from pedsum.base import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
     from pedigree_graph import RelationshipProgress
 
@@ -42,7 +42,7 @@ _PHASES = {
 @contextmanager
 def relationship_progress(
     label: str, stream: TextIO | None = None
-) -> Iterator[Callable[[RelationshipProgress], None] | None]:
+) -> Generator[Callable[[RelationshipProgress], None] | None]:
     """Yield the ``progress=`` value for one pedigree-graph relationship call.
 
     The bar is drawn only when *stream* is a terminal and the
@@ -120,7 +120,7 @@ def current_profile_phase() -> str | None:
 
 
 @contextmanager
-def timed(label: str) -> Iterator[None]:
+def timed(label: str) -> Generator[None]:
     """Log ``"<label> in <elapsed>s"`` at INFO around the wrapped block.
 
     Also pushes ``label`` onto a module-level phase stack for the block's

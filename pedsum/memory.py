@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from pedsum.base import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
 EXIT_MEMORY_LIMIT = 3
 
@@ -201,7 +201,7 @@ class MemoryWatchdog:
         self._callbacks.append(fn)
 
     @contextmanager
-    def disarm(self) -> Iterator[bool]:
+    def disarm(self) -> Generator[bool]:
         """Hold the publication lock for the block and yield whether the caller still owns the output.
 
         After this, a breach only warns. The yield is False when a breach

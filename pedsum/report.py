@@ -24,7 +24,7 @@ from pedsum.schema import SECTION_SPECS, categorise_pedigree, split_individual_d
 from pedsum.sections import INBREEDING_COLUMNS, Distribution, numeric_distribution
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
@@ -60,7 +60,7 @@ _RESERVED_PROVENANCE_COLS = frozenset({"sex_source"})
 
 
 @contextmanager
-def atomic_output(path: Path) -> Iterator[Path]:
+def atomic_output(path: Path) -> Generator[Path]:
     """Yield a temporary path beside ``path`` and move it onto ``path`` when the block succeeds.
 
     The temporary is ``.<name>.partial-<pid>`` in the same directory, so the

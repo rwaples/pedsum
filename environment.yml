@@ -19,8 +19,8 @@ dependencies:
   - pytest>=9,<10
   - pytest-xdist>=3.8,<4
   - hypothesis>=6,<7
-  - ruff>=0.16,<0.17
-  - ty==0.0.84
+  - ruff>=0.17,<0.18
+  - ty==0.0.89
   - pip
   - pip:
       # Match the ranges pyproject.toml declares; both are on PyPI.
