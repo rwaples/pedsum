@@ -180,6 +180,9 @@ whole command.
 
 ### Changed
 
+- **The glossary is `GLOSSARY.md`**, renamed from `CONTEXT.md`
+  (simACE #35). It still fixes the `summary.yaml` section and key names;
+  update any link to the old file.
 - **A parent written `0` that has no row BLOCKs**
   ([#25](https://github.com/rwaples/pedsum/issues/25)). A new Check,
   `zero_parent_present` (Fail Policy `block`), names
@@ -645,7 +648,7 @@ changes below alter output a user reads.
 
 - **`summarize` now writes `validate.log` when validation hard-fails.** Previously a fail-fast validation error — e.g. an individual used as a mother in one row and a father in another — printed a single truncated console line and left the output directory empty, leaving the user no record to act on. summarize now re-runs the accumulating validator on the failure path and writes the same `validate.log` the `validate` subcommand produces, capturing every finding across all failing checks (not just the first). Clean pedigrees are unaffected (no log is written on success).
 
-## 0.10.0 — 2026-06-12 — output schema renamed to match the GLOSSARY.md glossary
+## 0.10.0 — 2026-06-12 — output schema renamed to match the glossary
 
 **Breaking** — `summary.yaml`, `summary.extra.yaml`, `summary.pedigree.tsv` and `annotated.tsv.gz` all rename sections, keys, and per-individual columns to match the canonical terminology fixed in [GLOSSARY.md](GLOSSARY.md). The flat dict that feeds both YAML and long-form TSV is rewritten, so TSV column headers change too.
 
