@@ -358,7 +358,7 @@ def compute_aggregate_sections(
 
     # Per-Individual reproductive output: offspring counts, mate counts,
     # reproductive/terminal classification. Distributions follow the
-    # CONTEXT.md naming convention: <noun>_count for summary stats;
+    # GLOSSARY.md naming convention: <noun>_count for summary stats;
     # <noun>_count_hist for binned PMF; _male / _female stratify either.
     reproduction = {
         "n_reproductive": n_reproductive,
@@ -379,7 +379,7 @@ def compute_aggregate_sections(
     }
 
     # Per-individual ancestry. Asymmetric semantics today (paths for
-    # descendants, distinct for ancestors) — see CONTEXT.md.
+    # descendants, distinct for ancestors) — see GLOSSARY.md.
     genealogy = {
         "descendant_paths": numeric_distribution(descendant_paths_arr),
     }
@@ -594,7 +594,7 @@ def compute_individual_delta_f_for_reference(pg: PedigreeGraph, reference_rows: 
 
 #: Upstream label / counter fields renamed on the way out. pedigree-graph
 #: indexes its Ne records by *observed* label and calls that label a
-#: generation; pedsum's CONTEXT.md reserves "generation" for a temporal
+#: generation; pedsum's GLOSSARY.md reserves "generation" for a temporal
 #: birth cohort and calls the topological label a **Depth**, which is what
 #: ``PedigreeGraph.depth`` actually supplies here. ``transition_from`` /
 #: ``transition_to`` keep their upstream names — they are pairs of the same
@@ -671,7 +671,7 @@ def build_inbreeding_summary(F: np.ndarray) -> dict:
     # (INBRED_TOL, 0.0625] — exactly complementary to the "0" bucket
     # (F <= INBRED_TOL). Starting at 0.0 double-counts F in (0, INBRED_TOL]
     # (in both the "0" bucket and the first range bucket), inflating the
-    # histogram past 1.0. CONTEXT.md: values 0 <= F <= 1e-9 are the zero bucket.
+    # histogram past 1.0. GLOSSARY.md: values 0 <= F <= 1e-9 are the zero bucket.
     edges = [INBRED_TOL, 0.0625, 0.125, 0.25, 1.0]
     hist: dict[str, float] = {}
     hist["0"] = float((F <= INBRED_TOL).sum()) / n if n else 0.0

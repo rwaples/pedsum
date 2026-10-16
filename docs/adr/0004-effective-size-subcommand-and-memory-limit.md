@@ -14,7 +14,7 @@ On the 783,029-row horse pedigree, `summarize` ran for 30 minutes and was then O
    - The new command writes one `effective_size.yaml` holding scalars and arrays together.
    - `--estimators NAME[,NAME...]` or `--estimators all` picks the estimators. The default is all eight: on pedigree-graph 0.12.1 they take 1.11 s on the horse pedigree, and the whole command peaks at 394 MiB.
    - All eight keys are always emitted. An unselected estimator reports `reason: not_requested`.
-   - The command is named for the glossary term. A bare `ne` is forbidden by CONTEXT.md.
+   - The command is named for the glossary term. A bare `ne` is forbidden by GLOSSARY.md.
 2. **The removed `summarize` flags fail loudly.** `--effective-size`, `--no-effective-size` and `--ne-coancestry` exit 2 with a message naming `pedsum effective-size`. There is no deprecation release, per ADR 0001.
 3. **Every subcommand runs under a best-effort memory limit.**
    - A watchdog thread compares the process RSS with a limit about once a second.

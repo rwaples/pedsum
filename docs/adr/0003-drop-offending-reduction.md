@@ -24,7 +24,7 @@ add-founders step would *resurrect* the dropped parent as a synthesized
 ## Decision
 
 Add an opt-in `--drop-offending` flag to `validate` that produces a **Reduced
-Pedigree** (see CONTEXT.md):
+Pedigree** (see GLOSSARY.md):
 
 - **Drop the flagged id.** The unit removed is exactly the `id` named in each
   *droppable* **Finding** — no per-Check bespoke target, no guessing. Removing
