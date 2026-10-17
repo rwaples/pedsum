@@ -12,6 +12,14 @@ _Avoid_: generation, ped_depth, gen
 The calendar year of birth for one individual, supplied as the optional input column `birth_year` (sentinel `-1` for unknown). One of two analytical stratification axes in pedsum — the other is **Depth**. Required by `ne_hill_overlapping`, which models populations whose parents and offspring may coexist in time. Range-checked against `[--birth-year-min, --birth-year-max]` and topologically validated (`child.birth_year >= parent.birth_year` on every known edge) when supplied.
 _Avoid_: "year of birth", "DOB"
 
+**Birth Date**:
+The calendar day of birth for one individual, supplied to `validate` as the optional ISO (`YYYY-MM-DD`) input column named by `--birth-date-col`. Read only by `validate`: its year is range-checked against `[--birth-year-min, --birth-year-max]` and against **Birth Year** when both are given, and it is used to find **Multiple-Birth Sets**. The analyses stratify by **Birth Year**, not by date.
+_Avoid_: "DOB", "birthday"
+
+**Multiple-Birth Set**:
+Two or more members of one **Sibship** whose **Birth Dates** chain together with no gap above `validate --twin-max-days` days, so twins are a set of two and triplets one set of three. Computed with the **Fixed Pedigree**, so it describes the pedigree `validate` writes (the **Reduced Pedigree** under `--drop-offending`), and written per individual as `multiple_birth_set` in `validate.tsv.gz`; not a **Check**, so it never FAILs. Inferred from dates, not recorded zygosity, so it is not an MZ annotation and is not passed to pedigree-graph as `twin_ids`.
+_Avoid_: "twin pair" for the set (it can hold more than two), "MZ", "zygosity", "delivery"
+
 **Mating Pair**:
 An ordered `(mother, father)` tuple that produced at least one offspring in the pedigree.
 _Avoid_: bare "pair" in this sense; "couple", "parental dyad"

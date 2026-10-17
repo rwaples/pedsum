@@ -220,16 +220,17 @@ def _add_input_args(
         type=int,
         default=BIRTH_YEAR_DEFAULT_MIN,
         metavar="YEAR",
-        help="inclusive lower bound for birth_year sanity check (default: %(default)s). "
-        "No-op without --birth-year-col.",
+        help="inclusive lower bound for the birth_year sanity check, and for the year of a "
+        "validate --birth-date-col date (default: %(default)s). No-op without either column.",
     )
     p.add_argument(
         "--birth-year-max",
         type=int,
         default=None,
         metavar="YEAR",
-        help="inclusive upper bound for birth_year sanity check "
-        "(default: current calendar year + 1). No-op without --birth-year-col.",
+        help="inclusive upper bound for the birth_year sanity check, and for the year of a "
+        "validate --birth-date-col date (default: current calendar year + 1). No-op without "
+        "either column.",
     )
     p.add_argument(
         "--min-parent-age",
@@ -427,6 +428,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "birth_year_dtype (numeric parsing), birth_year_range (within "
         "[--birth-year-min, --birth-year-max]), and birth_year_topology "
         "(child birth_year - parent birth_year >= --min-parent-age, default 0).",
+    )
+    p_val.add_argument(
+        "--birth-date-col",
+        default=None,
+        metavar="NAME",
+        help="optional column name for birth date (ISO YYYY-MM-DD; NA/blank for unknown). "
+        "When set, validate runs birth_date_dtype (date parsing; an unparsable date blocks), "
+        "birth_date_range (the year within [--birth-year-min, --birth-year-max]) and, with "
+        "--birth-year-col, birth_date_year_consistency (the date falls in the birth year).",
+    )
+    p_val.add_argument(
+        "--twin-max-days",
+        type=_nonnegative_int,
+        default=None,
+        metavar="N",
+        help="annotate multiple births: full sibs (same mother and father) born at most N days "
+        "apart form a set, and validate.tsv.gz gets a multiple_birth_set column holding each "
+        "member's set number (blank for none). Triplets are one set. Needs --birth-date-col, "
+        "whose column must then be present. Zygosity is unknown, so a set is not an MZ "
+        "annotation. Without this flag an input multiple_birth_set column is dropped "
+        "(default: off)",
     )
     p_val.add_argument(
         "--no-sex-check",
@@ -682,6 +704,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.sex_concordance = True
     if args.subcommand == "validate" and args.break_cycles and args.birth_year_col is None:
         p_val.error("--break-cycles needs --birth-year-col: it clears links to a parent born after the child")
+    if args.subcommand == "validate" and args.twin_max_days is not None and args.birth_date_col is None:
+        p_val.error("--twin-max-days needs --birth-date-col: twins are full sibs born at most N days apart")
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "assortative-mating":

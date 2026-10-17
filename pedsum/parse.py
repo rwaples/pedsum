@@ -320,6 +320,25 @@ def as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     return as_float.to_numpy().astype(np.int32)
 
 
+def as_birth_date_col(series: pl.Series, name: str) -> np.ndarray:
+    """Parse a birth-date column to ``datetime64[D]`` with ``NaT`` for unknown.
+
+    Accepts only ISO ``YYYY-MM-DD`` (zero-padded, a real calendar day) and
+    the same missing tokens as parent IDs (empty/NA/NaN/N/A/./?/None/null).
+    """
+    cleaned = _replace_missing_with(series, PARENT_MISSING_TOKENS, "")
+    known = cleaned != ""
+    dates = cleaned.str.to_date("%Y-%m-%d", strict=False)
+    bad = known & (dates.is_null() | ~cleaned.str.contains(r"^\d{4}-\d{2}-\d{2}$"))
+    if bad.any():
+        samples = cleaned.filter(bad).head(3).to_list()
+        raise PedigreeError(
+            f"birth-date column {name!r} must hold ISO dates (YYYY-MM-DD, with NA/blank for "
+            f"unknown); failed to parse: {samples}"
+        )
+    return dates.to_numpy().astype("datetime64[D]")
+
+
 BIRTH_YEAR_DEFAULT_MIN = 1800
 
 

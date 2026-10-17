@@ -162,6 +162,11 @@ class ValidationConfig:
     # not as a CLI post-filter, so the tolerance composes wherever run_checks
     # runs: validate, the drop-offending loop, and its self-verify.
     no_sex_check: bool = False
+    # --birth-date-col: an ISO birth date per row (birth_date_dtype).
+    birth_date_col: str | None = None
+    # --twin-max-days: full sibs born at most this many days apart form a
+    # multiple-birth set, written by the Fixed Pedigree. None leaves it off.
+    twin_max_days: int | None = None
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ValidationConfig:
@@ -181,6 +186,8 @@ class ValidationConfig:
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),
             break_cycles=getattr(args, "break_cycles", False),
+            birth_date_col=getattr(args, "birth_date_col", None),
+            twin_max_days=getattr(args, "twin_max_days", None),
         )
 
     @property
@@ -215,6 +222,7 @@ class ValidationContext:
     id_labels: IdLabels | None = None
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
+    birth_date: np.ndarray | None = None  # datetime64[D], NaT unknown
     # The parent links cycle_breaks cleared, as (id, role, parent, reason)
     # with IDs as the input wrote them: validate's cleared-links manifest.
     cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -264,7 +272,7 @@ class ValidationContext:
         refs, ``depth``, ``imputation``); any already built is dropped.
         """
         self.df_raw = self.df_raw.filter(pl.Series(keep))
-        for name in ("ids", "mothers", "fathers", "sex", "birth_year"):
+        for name in ("ids", "mothers", "fathers", "sex", "birth_year", "birth_date"):
             values = getattr(self, name)
             if values is not None:
                 setattr(self, name, values[keep])

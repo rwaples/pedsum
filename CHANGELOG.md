@@ -29,6 +29,21 @@ whole command.
 
 ### Added
 
+- **`validate` can find twins and other multiple births**
+  ([#26](https://github.com/rwaples/pedsum/issues/26)). `--birth-date-col
+  NAME` reads an ISO (`YYYY-MM-DD`) birth date: `birth_date_dtype` BLOCKs
+  on a date it cannot parse, `birth_date_range` (`keep_or_drop`) flags a
+  year outside `[--birth-year-min, --birth-year-max]`, and with
+  `--birth-year-col`, `birth_date_year_consistency` (`keep_or_drop`) flags
+  a date outside its birth year. `--twin-max-days N`, off by default and
+  needing `--birth-date-col`, groups full sibs born at most `N` days apart
+  into multiple-birth sets, computed on the pedigree `validate` writes, and
+  writes each member's set number in a new `multiple_birth_set` column of
+  `validate.tsv.gz`. It WARNs when a chain of births makes a set span more
+  than `N` days. Without the flag, an input's `multiple_birth_set` column
+  is dropped with a WARNING rather than passed on stale. Zygosity is
+  unknown, so the sets are not passed to pedigree-graph as MZ twins, and
+  every other output is unchanged.
 - **A `pedsum` command and `python -m pedsum`**
   ([#18](https://github.com/rwaples/pedsum/issues/18)). Installing the
   package, including from git, now installs the `pedsum` command; before,

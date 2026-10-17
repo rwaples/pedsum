@@ -113,6 +113,14 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
         out_path = out_dir / "validate.tsv.gz"
         to_csv_gz(frame, out_path)
         sys.stderr.write(f"wrote {out_path} ({len(frame):,} rows; {len(fp.founders)} founder(s) added)\n")
+        if fp.multiple_birth_set is not None:
+            # Sets are numbered 1..k, so the largest number is the count.
+            n_sets = max(int(fp.multiple_birth_set.max(initial=0)), 0)
+            n_members = int((fp.multiple_birth_set >= 0).sum())
+            sys.stderr.write(
+                f"multiple births: {n_sets} set(s), {n_members} individual(s) "
+                f"(--twin-max-days {args.twin_max_days}) in the multiple_birth_set column\n"
+            )
         return out_path
 
     def write_manifest(dropped: list[tuple[str, str, int]]) -> None:
