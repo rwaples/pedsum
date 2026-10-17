@@ -56,8 +56,9 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     threaded through as well so the Hill overlapping-generation estimator
     can build its cohort window.
 
-    ``twin_ids`` is left unset because pedsum's input format does not
-    carry twin annotations.
+    ``twin_ids`` (MZ co-twins) is left unset because pedsum's input format
+    carries no zygosity; ``validate --twin-max-days`` finds multiple births
+    from birth dates, which cannot tell MZ from DZ.
 
     pedigree-graph indexes its own ids densely and accepts rows in any
     order, so the compaction is no longer needed for memory or topology.

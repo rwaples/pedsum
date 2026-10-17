@@ -94,7 +94,7 @@ individuals, …) and writes:
 | File | Contents |
 |---|---|
 | `DIR/validate.log` | per-finding TSV (one row per issue): `check`, `id`, `row`, `detail`, and `n_refs`, the number of rows naming a missing parent (`parent_refs_present_*` findings only) |
-| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column (omitted on hard-block findings) |
+| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column and, with `--twin-max-days`, a `multiple_birth_set` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 | `DIR/validate.cleared_links.tsv` | with `--break-cycles`: the parent links it cleared (`id`, `role`, `parent`, `reason`) |
 
@@ -109,8 +109,37 @@ optional checks: `birth_year_dtype` (numeric parsing),
 `birth_year_topology` (`child.birth_year - parent.birth_year >=
 --min-parent-age`, default 0, for every edge where both endpoints are
 known). `--min-parent-age N` flags a parent fewer than `N` years older
-than its child; ages are whole years, since pedsum has birth years, not
-dates. Findings are written to `validate.log` like any other check.
+than its child; ages are whole years, since these checks use birth years,
+not dates. Findings are written to `validate.log` like any other check.
+
+When `--birth-date-col NAME` is passed, validate runs `birth_date_dtype`:
+every known date must be ISO `YYYY-MM-DD` (NA/blank for unknown), and an
+unparsable date BLOCKs. `birth_date_range` flags a date whose year is
+outside `[--birth-year-min, --birth-year-max]`, and with `--birth-year-col`
+as well, `birth_date_year_consistency` flags each row whose date falls
+outside its birth year. Both are kept by plain validate and removed by
+`--drop-offending`.
+
+**Multiple births** are off by default. `--twin-max-days N` (needs
+`--birth-date-col`, whose column must then be present) groups full sibs,
+both parents known and shared, born at most `N` days apart into
+multiple-birth sets: siblings sorted by date join one set while each is
+born within `N` days of the one before, so triplets are one set. `N = 0`
+asks for the same date; `N = 1` also catches births either side of
+midnight. `validate.tsv.gz` gets a `multiple_birth_set` column holding each
+member's set number (`1`, `2`, ...; blank for everyone else, including
+synthesized founders), and a `multiple births:` line after the `wrote`
+line gives the number of sets and members. The sets are computed on the
+pedigree validate writes, so under `--drop-offending` they are those of the
+Reduced Pedigree. Grouping is not a check and never fails, but it WARNs
+when a chain of births makes a set span more than `N` days, which points
+at a wrong `N` or at placeholder dates. Without `--twin-max-days`, an
+input's `multiple_birth_set` column (from an earlier `validate.tsv.gz`) is
+dropped with a WARNING, since the rows may have changed and the sets cannot
+be recomputed. Same parents and birth date
+say nothing of zygosity, so a set is not an MZ annotation and is not passed
+to pedigree-graph as `twin_ids`: `summarize` and `epimight-input` still
+count twins as `FS`.
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
@@ -430,8 +459,9 @@ of both the maternal and paternal pair sets, so these are not three
 independent hypotheses. Holm applies across groupings only — the
 `by_group_size` rows are descriptive and are not tested.
 
-**Interpretation limits.** Pedsum has no twin/multiple-birth
-annotation and no birth order, pools offspring across the whole
+**Interpretation limits.** This analysis does not use multiple-birth
+sets (`validate --twin-max-days` writes them but nothing reads them back)
+and has no birth order, pools offspring across the whole
 multigenerational pedigree, generally cannot tell whether a
 reproductive history is complete, and does not adjust for depth-,
 cohort- or secular variation in sex probability. Multiple births,
@@ -1078,6 +1108,7 @@ through a token as blank, so `summarize` and `effective-size` read
 | Column | Recognised when | Effect |
 |---|---|---|
 | `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year - parent.birth_year >= --min-parent-age`, default 0, on every known edge). |
+| `birth_date` | `validate --birth-date-col NAME` is passed | ISO `YYYY-MM-DD` (NA/blank for unknown). Its year is range-checked against `[--birth-year-min, --birth-year-max]` and checked against `birth_year` when both are given, and read by `--twin-max-days` to find multiple births. Other commands do not read it. |
 | *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
 
 ### Row order

@@ -19,7 +19,7 @@ import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError, logger
 from pedsum.ids import parse_ids
-from pedsum.parse import as_birth_year_col, decode_sex, format_id_sample
+from pedsum.parse import as_birth_date_col, as_birth_year_col, decode_sex, format_id_sample
 from pedsum.pedigree_ops import cycle_components, rows_of_parents
 
 if TYPE_CHECKING:
@@ -117,11 +117,13 @@ def summarize_findings(findings: list[Finding], label: Label) -> str:
 
 def _required_columns(ctx: ValidationContext) -> CheckResult:
     # summarize treats a named --birth-year-col as required; validate omits it
-    # and lets birth_year_dtype SKIP instead.
+    # and lets birth_year_dtype SKIP instead. --twin-max-days needs the dates.
     config = ctx.config
     needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
     if ctx.require_birth_year_col and config.birth_year_col is not None:
         needed.add(config.birth_year_col)
+    if config.twin_max_days is not None and config.birth_date_col is not None:
+        needed.add(config.birth_date_col)
     miss = needed - set(ctx.df_raw.columns)
     if miss:
         return _failed(f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}")
@@ -201,8 +203,8 @@ def _negative_ids(ctx: ValidationContext) -> CheckResult:
 def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
     """One Finding per row that repeats an earlier row; the copies are removed from ``ctx``.
 
-    Rows are compared as read (ADR 0006): the ID, parents, sex and birth year
-    after parsing, so ``NA`` and ``.`` are the same missing parent and ``M``
+    Rows are compared as read (ADR 0006): the ID, parents, sex, birth year and
+    birth date after parsing, so ``NA`` and ``.`` are the same missing parent and ``M``
     and ``1`` the same sex, and every other column as text. Only rows whose
     ID is on more than one row are compared.
     """
@@ -222,6 +224,9 @@ def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
     if ctx.birth_year is not None and config.birth_year_col is not None:
         parsed.add(config.birth_year_col)
         keys["__birth_year"] = ctx.birth_year[rows]
+    if ctx.birth_date is not None and config.birth_date_col is not None:
+        parsed.add(config.birth_date_col)
+        keys["__birth_date"] = ctx.birth_date[rows].astype(np.int64)
     # Positional names, so no input column can collide with the key columns.
     other = ctx.df_raw[rows].select(
         pl.col(c).alias(f"__col{i}") for i, c in enumerate(ctx.df_raw.columns) if c not in parsed
@@ -668,6 +673,67 @@ def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
+# Birth dates (optional)
+# ---------------------------------------------------------------------------
+
+
+def _birth_date_dtype(ctx: ValidationContext) -> CheckResult:
+    column = ctx.config.birth_date_col
+    if column is None:
+        return CheckResult(CheckStatus.SKIP, note="no --birth-date-col specified")
+    if column not in ctx.df_raw.columns:
+        return CheckResult(CheckStatus.SKIP, note=f"column {column!r} not present in file")
+    try:
+        ctx.birth_date = as_birth_date_col(ctx.df_raw[column], column)
+    except PedigreeError as e:
+        return _failed(str(e))
+    return _verdict([])
+
+
+def _birth_date_range(ctx: ValidationContext) -> CheckResult:
+    """One Finding per known birth date whose year is outside ``[--birth-year-min, --birth-year-max]``."""
+    ids, birth_date = ctx.ids, ctx.birth_date
+    assert ids is not None
+    assert birth_date is not None
+    year_min, year_max = ctx.config.birth_year_min, ctx.config.by_max
+    date_year = birth_date.astype("datetime64[Y]").astype(np.int64) + 1970
+    bad = ~np.isnat(birth_date) & ((date_year < year_min) | (date_year > year_max))
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=ctx.row(i),
+                detail=(
+                    f"id={ctx.label(ids[i])} birth_date={birth_date[i]} is outside the sanity range "
+                    f"[{year_min}, {year_max}]"
+                ),
+            )
+            for i in np.flatnonzero(bad)
+        ]
+    )
+
+
+def _birth_date_year_consistency(ctx: ValidationContext) -> CheckResult:
+    """One Finding per row whose known birth date falls outside its known birth year."""
+    ids, birth_year, birth_date = ctx.ids, ctx.birth_year, ctx.birth_date
+    assert ids is not None
+    assert birth_year is not None
+    assert birth_date is not None
+    date_year = birth_date.astype("datetime64[Y]").astype(np.int64) + 1970
+    bad = ~np.isnat(birth_date) & (birth_year != -1) & (date_year != birth_year)
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=ctx.row(i),
+                detail=f"id={ctx.label(ids[i])} birth_date={birth_date[i]} but birth_year={int(birth_year[i])}",
+            )
+            for i in np.flatnonzero(bad)
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -745,6 +811,13 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _birth_year_dtype,
         "birth_year column parses as numeric",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "birth_date_dtype",
+        ("required_columns",),
+        _birth_date_dtype,
+        "birth_date column parses as ISO dates",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -890,6 +963,20 @@ CHECKS: tuple[Check, ...] = (
         "parent age at birth >= min parent age",
         FailPolicy.KEEP_OR_DROP,
     ),
+    Check(
+        "birth_date_range",
+        ("id_dtype", "birth_date_dtype"),
+        _birth_date_range,
+        "birth dates within sanity range",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
+        "birth_date_year_consistency",
+        ("id_dtype", "birth_date_dtype", "birth_year_dtype"),
+        _birth_date_year_consistency,
+        "birth dates fall in their birth year",
+        FailPolicy.KEEP_OR_DROP,
+    ),
 )
 
 # Derived from the registry (single source of truth).
@@ -962,6 +1049,14 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "birth_year_dtype",
             "birth_year_range",
             "birth_year_topology",
+        ),
+    ),
+    (
+        "Birth dates (optional)",
+        (
+            "birth_date_dtype",
+            "birth_date_range",
+            "birth_date_year_consistency",
         ),
     ),
 )

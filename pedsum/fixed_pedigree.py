@@ -16,6 +16,11 @@ The auto-fixes:
   input that has the column, such as ``validate.tsv.gz``, keeps its values
   where this run changed nothing);
 - rows in topological order (parents before children).
+
+With ``--twin-max-days`` it also writes each row's multiple-birth set in a
+``multiple_birth_set`` column (an annotation, not a fix). Without it, an
+input's ``multiple_birth_set`` column is dropped: rows may have changed, and
+the sets cannot be recomputed.
 """
 
 from __future__ import annotations
@@ -53,6 +58,7 @@ class FixedPedigree:
     fathers: np.ndarray
     sex_source: np.ndarray  # where each row's sex came from (object array of str)
     birth_year: np.ndarray | None  # int32, sentinel -1; None without a birth-year column
+    multiple_birth_set: np.ndarray | None  # int32 set number, -1 for none; None without --twin-max-days
     ped_depth: np.ndarray  # int32 topological depth, founders 0
     input_row: np.ndarray  # each row's position in the input
     reordered: bool  # False when the input was already parents-first (input_row is the identity)
@@ -100,6 +106,10 @@ def fix_pedigree(
     _log_sex_imputation(imp, allow_missing_sex=ctx.config.allow_missing_sex)
 
     n = len(ids)
+    max_days = ctx.config.twin_max_days
+    if max_days is not None:
+        assert ctx.birth_date is not None, "--twin-max-days needs the parsed birth dates"
+        sets = multiple_birth_sets(mothers, fathers, ctx.birth_date, max_days)
     founders = (
         _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check, ctx.rows)
         if synthesize_founders
@@ -137,6 +147,7 @@ def fix_pedigree(
         fathers=take(fathers),
         sex_source=take(_keep_recorded_sex_source(imp.sex_source, ctx.df_raw)),
         birth_year=None if ctx.birth_year is None else take(ctx.birth_year),
+        multiple_birth_set=None if max_days is None else take(sets),
         ped_depth=take(depth),
         input_row=order,
         reordered=n_moved > 0,
@@ -165,7 +176,9 @@ def render_fixed_pedigree(
     written as one of ``missing_parent_tokens``, written blank so the file
     reads the same without ``--missing-parent-token``, and a parent slot that
     now holds a phantom. A ``sex_source`` column records which rows pedsum
-    changed. Founder rows come first, with empty cells outside the ID, sex
+    changed, and a ``multiple_birth_set`` column, when ``fp`` has the sets,
+    each row's set number (blank for none); otherwise an input column of that
+    name is dropped. Founder rows come first, with empty cells outside the ID, sex
     and parent columns.
     """
     out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
@@ -173,6 +186,13 @@ def render_fixed_pedigree(
         # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
         pl.Series("sex_source", fp.sex_source, dtype=pl.String),
     )
+    if fp.multiple_birth_set is not None:
+        # Replaces any column of that name the input had, such as a validate.tsv.gz.
+        sets = pl.Series("multiple_birth_set", fp.multiple_birth_set)
+        out = out.with_columns(pl.when(sets >= 0).then(sets.cast(pl.String)).alias("multiple_birth_set"))
+    elif "multiple_birth_set" in out.columns:
+        logger.warning("dropped the input's multiple_birth_set column; pass --twin-max-days to recompute it")
+        out = out.drop("multiple_birth_set")
     if missing_parent_tokens:
         tokens = list(missing_parent_tokens)
         out = out.with_columns(
@@ -204,6 +224,43 @@ def render_fixed_pedigree(
     data["sex_source"] = [SexSource.IMPUTED_FROM_MISSING.value] * n_new
     new_rows = pl.DataFrame(data, schema=dict.fromkeys(out.columns, pl.String))
     return pl.concat([new_rows, out.cast(pl.String)])
+
+
+def multiple_birth_sets(mothers: np.ndarray, fathers: np.ndarray, birth_date: np.ndarray, max_days: int) -> np.ndarray:
+    """Each row's multiple-birth set number (1, 2, ...), -1 for none.
+
+    Within a Sibship (both parents known), siblings sorted by birth date join
+    one set while each is born at most ``max_days`` after the one before, so
+    triplets are one set. A row with an unknown (``NaT``) birth date is in no
+    set. Sets are numbered by (mother, father, birth date). Same parents and
+    date say nothing of zygosity: a set is not an MZ annotation. WARNs when a
+    chain makes a set span more than ``max_days``.
+    """
+    sets = np.full(len(mothers), -1, dtype=np.int32)
+    rows = np.flatnonzero((mothers != -1) & (fathers != -1) & ~np.isnat(birth_date))
+    if len(rows) < 2:
+        return sets
+    days = birth_date.astype(np.int64)
+    rows = rows[np.lexsort((days[rows], fathers[rows], mothers[rows]))]
+    m, f, d = mothers[rows], fathers[rows], days[rows]
+    linked = (m[1:] == m[:-1]) & (f[1:] == f[:-1]) & (d[1:] - d[:-1] <= max_days)
+    starts = np.flatnonzero(np.concatenate(([True], ~linked)))
+    group = np.cumsum(np.concatenate(([False], ~linked)))
+    sizes = np.diff(np.append(starts, len(rows)))
+    in_set = sizes[group] >= 2
+    sets[rows[in_set]] = np.cumsum(sizes >= 2)[group[in_set]]
+    # Each group is a run sorted by day: its span is its last day minus its first.
+    span = d[starts + sizes - 1] - d[starts]
+    wide = (sizes >= 2) & (span > max_days)
+    if wide.any():
+        logger.warning(
+            "%d multiple-birth set(s) span more than --twin-max-days %d through a chain of births "
+            "(widest %d days); check those birth dates",
+            int(wide.sum()),
+            max_days,
+            int(span[wide].max()),
+        )
+    return sets
 
 
 def _keep_recorded_sex_source(derived: np.ndarray, raw: pl.DataFrame) -> np.ndarray:
