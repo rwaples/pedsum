@@ -148,7 +148,7 @@ class ValidationConfig:
     birth_year_col: str | None = None
     birth_year_min: int = BIRTH_YEAR_DEFAULT_MIN
     birth_year_max: int | None = None
-    # --min-parent-age: birth_year_topology wants child - parent >= this.
+    # --min-parent-age: birth_year_topology and birth_date_topology want the parent at least this old.
     min_parent_age: int = 0
     # --missing-parent-token: more tokens that mean a missing parent in the
     # mother and father columns (ADR 0006).

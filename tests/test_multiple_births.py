@@ -226,6 +226,75 @@ def test_year_consistency_skips_without_birth_year_col(tmp_path):
     assert "birth dates fall in their birth year .. SKIP (no --birth-year-col specified)" in r.stderr
 
 
+def _log(tmp_path, out="out"):
+    return (tmp_path / out / "validate.log").read_text()
+
+
+def test_birth_date_topology_flags_a_child_born_before_a_parent_in_the_same_year(tmp_path):
+    """The dates are compared to the day, so no birth-year column is needed and the same year is no cover."""
+    rows = [*FOUNDERS, _child("10", "1", "2", "1960-01-05"), _child("11", "1", "2", "1987-01-01")]
+    r = _validate(tmp_path, rows, "--birth-date-col", "birth_date")
+    assert r.returncode == 1, r.stderr
+    assert "parent age at birth, from birth dates . FAIL (2)" in r.stderr
+    log = _log(tmp_path)
+    assert "id=10 birth_date=1960-01-05 < mother (id=1) birth_date=1960-03-01" in log
+    assert "id=10 birth_date=1960-01-05 < father (id=2) birth_date=1960-05-01" in log
+
+
+def test_birth_date_topology_counts_completed_years(tmp_path):
+    """--min-parent-age 12: a day short of the mother's 12th birthday is flagged, the birthday is not."""
+    rows = [*FOUNDERS, _child("10", "1", "3", "1972-02-29"), _child("11", "1", "3", "1972-03-01")]
+    r = _validate(tmp_path, rows, "--birth-date-col", "birth_date", "--min-parent-age", "12")
+    assert r.returncode == 1, r.stderr
+    log = _log(tmp_path)
+    mother = [line.split("\t")[1] for line in log.splitlines() if "after mother" in line]
+    assert mother == ["10"]
+    assert "id=10 birth_date=1972-02-29 is 11 year(s) after mother (id=1) birth_date=1960-03-01" in log
+
+
+def test_each_edge_is_checked_once_on_its_dates_else_its_years(tmp_path):
+    """Both dates known: the date check owns the edge. One date unknown: the year check does."""
+    rows = [
+        *FOUNDERS,
+        _child("10", "1", "3", "1955-06-01"),
+        _child("11", "1", "3", "", year="1950"),
+    ]
+    r = _validate(tmp_path, rows, "--birth-year-col", "birth_year", "--birth-date-col", "birth_date")
+    assert r.returncode == 1, r.stderr
+    log = _log(tmp_path)
+    assert "id=10 birth_date=1955-06-01 < mother (id=1) birth_date=1960-03-01" in log
+    assert "id=10 birth_year=" not in log
+    assert "id=11 birth_year=1950 < mother (id=1) birth_year=1960" in log
+
+
+def test_dates_cover_edges_whose_birth_years_are_unknown(tmp_path):
+    """Parents with no birth year but a known date are still checked against their child's date."""
+    founders = [dict(f, birth_year="") for f in FOUNDERS]
+    rows = [*founders, _child("10", "1", "2", "1950-01-05")]
+    r = _validate(tmp_path, rows, "--birth-year-col", "birth_year", "--birth-date-col", "birth_date")
+    assert r.returncode == 1, r.stderr
+    assert "id=10 birth_date=1950-01-05 < mother (id=1) birth_date=1960-03-01" in _log(tmp_path)
+
+
+def test_birth_date_topology_runs_when_the_birth_year_column_is_absent(tmp_path):
+    """A --birth-year-col the file lacks SKIPs the year checks; the dates are still checked."""
+    rows = [
+        {k: v for k, v in row.items() if k != "birth_year"} for row in [*FOUNDERS, _child("10", "1", "2", "1955-06-01")]
+    ]
+    r = _validate(tmp_path, rows, "--birth-year-col", "birth_year", "--birth-date-col", "birth_date")
+    assert r.returncode == 1, r.stderr
+    assert "column 'birth_year' not present in file" in r.stderr
+    assert "parent age at birth, from birth dates . FAIL (2)" in r.stderr
+
+
+def test_drop_offending_removes_a_child_born_before_its_parent(tmp_path):
+    """birth_date_topology is keep_or_drop: --drop-offending removes the child and the self-verify passes."""
+    rows = [*FOUNDERS, _child("10", "1", "2", "1955-06-01"), _child("11", "1", "2", "1987-01-01")]
+    r = _validate(tmp_path, rows, "--birth-date-col", "birth_date", "--drop-offending")
+    assert r.returncode == 1, r.stderr
+    assert load_validate_tsv_gz(tmp_path / "out")["id"].to_list() == ["1", "2", "3", "11"]
+
+
 def test_drop_offending_annotates_the_reduced_pedigree(tmp_path):
     """Under --drop-offending the sets and the printed count are the Reduced Pedigree's; the self-verify passes."""
     rows = [

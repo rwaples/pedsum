@@ -30,6 +30,7 @@ EXPECTED = {
     "birth_year_topology": FailPolicy.KEEP_OR_DROP,
     "birth_date_range": FailPolicy.KEEP_OR_DROP,
     "birth_date_year_consistency": FailPolicy.KEEP_OR_DROP,
+    "birth_date_topology": FailPolicy.KEEP_OR_DROP,
     "zero_parent_present": FailPolicy.BLOCK,
     "duplicate_rows": FailPolicy.AUTOFIX,
     "cycle_breaks": FailPolicy.AUTOFIX,

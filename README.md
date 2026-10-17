@@ -107,18 +107,22 @@ optional checks: `birth_year_dtype` (numeric parsing),
 `birth_year_range` (each year within `[--birth-year-min,
 --birth-year-max]`; defaults to `[1800, current_year + 1]`), and
 `birth_year_topology` (`child.birth_year - parent.birth_year >=
---min-parent-age`, default 0, for every edge where both endpoints are
-known). `--min-parent-age N` flags a parent fewer than `N` years older
-than its child; ages are whole years, since these checks use birth years,
-not dates. Findings are written to `validate.log` like any other check.
+--min-parent-age`, default 0, for every edge where both birth years are
+known and the two birth dates are not). `--min-parent-age N` flags a
+parent fewer than `N` years older than its child. Findings are written to
+`validate.log` like any other check.
 
 When `--birth-date-col NAME` is passed, validate runs `birth_date_dtype`:
 every known date must be ISO `YYYY-MM-DD` (NA/blank for unknown), and an
 unparsable date BLOCKs. `birth_date_range` flags a date whose year is
 outside `[--birth-year-min, --birth-year-max]`, and with `--birth-year-col`
 as well, `birth_date_year_consistency` flags each row whose date falls
-outside its birth year. Both are kept by plain validate and removed by
-`--drop-offending`.
+outside its birth year. `birth_date_topology` applies `--min-parent-age`
+to every edge where both birth dates are known, comparing the dates to the
+day: a child born months before a parent in the same year is flagged, and
+the parent's age is in completed years. Each edge is checked once, on its
+dates when both are known, else on its birth years. All three are kept by
+plain validate and removed by `--drop-offending`.
 
 **Multiple births** are off by default. `--twin-max-days N` (needs
 `--birth-date-col`, whose column must then be present) groups full sibs,
