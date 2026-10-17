@@ -43,6 +43,11 @@ whole command.
   sets by size, pairs by sex mix and birth decade, their share of the
   full-sib pairs, and Weinberg's differential-rule estimate of MZ and DZ
   pairs.
+- **`epimight-input` has an opt-in `MZ` kind, and its `FS` leaves MZ
+  co-twins out.** `FS` used to sum pedigree-graph's `FS` and `MZ` codes. A
+  pedigree without `--zygosity-col` has no MZ links, so its `FS` is
+  unchanged. `MZ` is not in the default `--rels`, and EPIMIGHT 2.1 cannot
+  fit it. fitACE's relationship table changes in step.
 - **`validate` can find twins and other multiple births**
   ([#26](https://github.com/rwaples/pedsum/issues/26)). `--birth-date-col
   NAME` reads an ISO (`YYYY-MM-DD`) birth date: `birth_date_dtype` BLOCKs

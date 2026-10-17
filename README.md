@@ -1100,7 +1100,10 @@ Flags:
 - `--parquet` — additionally write the parquet form of each emitted table
   (written natively by polars).
 - `--rels CODES` — comma-separated relationship codes to emit, in order
-  (default: all eight).
+  (default: all eight but `MZ`). `MZ` is opt-in: it holds the co-twins that
+  `--zygosity-col` links, and `FS` leaves them out, so without
+  `--zygosity-col` it is empty. EPIMIGHT 2.1 has no `MZ` kind and cannot
+  fit it.
 - `--disorder NAME` — label for the single emitted `disorder` block (default
   `trait1`; a pedigree carries no trait).
 - `--base-year YEAR` — calendar offset for the derived `born_at_year`

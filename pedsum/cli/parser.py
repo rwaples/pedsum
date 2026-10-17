@@ -531,7 +531,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--rels",
         default=",".join(EPIMIGHT_RELATIONSHIP_ORDER),
         metavar="CODES",
-        help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s).",
+        help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s). "
+        "MZ is opt-in: it holds the co-twins --zygosity-col links, whom FS then leaves out.",
     )
     p_epi.add_argument(
         "--disorder",
