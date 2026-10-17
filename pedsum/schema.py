@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pedsum.multiple_births import redact_multiple_births
 from pedsum.pairs import redact_relationship_pairs
 from pedsum.sections import (
     redact_components,
@@ -73,6 +74,18 @@ _PAIRS_SLIM_KEYS: tuple[str, ...] = (
     "engine",
 )
 
+# Everything but the per-decade breakdown, which goes to extra.
+_MULTIPLE_BIRTHS_SLIM_KEYS: tuple[str, ...] = (
+    "n_sets",
+    "n_individuals",
+    "n_pairs",
+    "sets_by_size",
+    "pairs_by_sex",
+    "full_sib_pair_fraction",
+    "mz_linked_pairs",
+    "weinberg",
+)
+
 SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
     CategorySpec(
         "structure",
@@ -88,6 +101,7 @@ SUMMARY_SCHEMA: tuple[CategorySpec, ...] = (
             SectionSpec("sibship_size", redact=redact_sibship_size),
             SectionSpec("mating_pairs", redact=redact_mating_pairs),
             SectionSpec("offspring_sex_concordance", redact=redact_offspring_sex_concordance),  # per-grouping split
+            SectionSpec("multiple_births", slim_keys=_MULTIPLE_BIRTHS_SLIM_KEYS, redact=redact_multiple_births),
         ),
     ),
     CategorySpec(

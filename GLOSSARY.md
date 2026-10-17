@@ -17,8 +17,12 @@ The calendar day of birth for one individual, supplied to `validate` as the opti
 _Avoid_: "DOB", "birthday"
 
 **Multiple-Birth Set**:
-Two or more members of one **Sibship** whose **Birth Dates** chain together with no gap above `validate --twin-max-days` days, so twins are a set of two and triplets one set of three. Computed with the **Fixed Pedigree**, so it describes the pedigree `validate` writes (the **Reduced Pedigree** under `--drop-offending`), and written per individual as `multiple_birth_set` in `validate.tsv.gz`; not a **Check**, so it never FAILs. Inferred from dates, not recorded zygosity, so it is not an MZ annotation and is not passed to pedigree-graph as `twin_ids`.
+Two or more members of one **Sibship** born in one delivery: either given by `--multiple-birth-col` (a register's id, or a `multiple_birth_set` column `validate` wrote), or found by `validate --twin-max-days` as members whose **Birth Dates** chain together with no gap above that many days. Twins are a set of two and triplets one set of three. A found set is computed with the **Fixed Pedigree**, so it describes the pedigree `validate` writes (the **Reduced Pedigree** under `--drop-offending`), and written per individual as `multiple_birth_set` in `validate.tsv.gz`; not a **Check**, so it never FAILs. It comes from dates, not recorded zygosity, so it is not an MZ annotation and is not passed to pedigree-graph as `twin_ids`. Summarized under `demography.multiple_births`.
 _Avoid_: "twin pair" for the set (it can hold more than two), "MZ", "zygosity", "delivery"
+
+**MZ Link**:
+The pairing of the two members of a **Multiple-Birth Set** whom `--zygosity-col` marks `MZ`, passed to pedigree-graph as `twin_ids` so the two count as an `MZ` **Relationship Pair** instead of `FS`. pedigree-graph accepts only reciprocal pairs of full sibs of compatible sex, so `mz_links` clears any MZ mark that cannot form one, MZ triplets included.
+_Avoid_: "twin flag", "zygosity link"
 
 **Mating Pair**:
 An ordered `(mother, father)` tuple that produced at least one offspring in the pedigree.

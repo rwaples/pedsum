@@ -13,6 +13,7 @@ from pedsum.base import (
     logger,
 )
 from pedsum.cli.common import commit_thread_budget, load_or_fail
+from pedsum.multiple_births import compute_multiple_births
 from pedsum.pairs import augment_pair_counts, build_pedigree_graph
 from pedsum.parse import read_header
 from pedsum.pedigree_ops import group_mating_pairs
@@ -137,6 +138,9 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
             "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
         }
 
+    # --multiple-birth-col: load_and_validate carried the sets in the frame.
+    multiple_births = compute_multiple_births(df, pairs) if "multiple_birth" in df.columns else None
+
     if args.inbreeding:
         if n_indiv * min(2 ** (max_depth + 1) - 2, n_indiv) > F_WALK_WARN_VISITS:
             logger.warning(
@@ -190,6 +194,7 @@ def run_summarize(args: argparse.Namespace, cmd: str) -> int:
         aggregates,
         sex_concordance,
         max_degree=args.max_degree,
+        multiple_births=multiple_births,
     )
 
     ind_data = build_individual_data(idf, args.in_path, cmd)

@@ -56,9 +56,12 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     threaded through as well so the Hill overlapping-generation estimator
     can build its cohort window.
 
-    ``twin_ids`` (MZ co-twins) is left unset because pedsum's input format
-    carries no zygosity; ``validate --twin-max-days`` finds multiple births
-    from birth dates, which cannot tell MZ from DZ.
+    When the df carries a ``twin`` column (``--zygosity-col``: each row's
+    MZ co-twin, -1 for none), it becomes ``twin_ids``, so co-twins count as
+    ``MZ`` rather than ``FS``. The ``mz_links`` Check has made the links
+    reciprocal pairs of full sibs of compatible sex, as pedigree-graph
+    requires. Multiple births found from dates (``validate
+    --twin-max-days``) carry no zygosity and are never linked.
 
     pedigree-graph indexes its own ids densely and accepts rows in any
     order, so the compaction is no longer needed for memory or topology.
@@ -81,12 +84,14 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
         return np.where(parents == -1, -1, id_index.get_indexer(parents)).astype(np.int64)
 
     birth_year = df["birth_year"].to_numpy().astype(np.int32) if "birth_year" in df.columns else None
+    twin_ids = _remap(df["twin"].to_numpy()) if "twin" in df.columns else None
     return PedigreeGraph.from_arrays(
         ids=new_ids,
         mother_ids=_remap(df["mother"].to_numpy()),
         father_ids=_remap(df["father"].to_numpy()),
         sex=df["sex"].to_numpy().astype(np.int8),
         birth_year=birth_year,
+        twin_ids=twin_ids,
     )
 
 
