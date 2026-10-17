@@ -73,6 +73,7 @@ def test_string_ids_run_every_check(tmp_path):
         "birth_year_topology",
         "birth_date_range",
         "birth_date_year_consistency",
+        "birth_date_topology",
         "multiple_birth_sets",
         "mz_links",
     ]

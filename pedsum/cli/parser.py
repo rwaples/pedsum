@@ -237,9 +237,10 @@ def _add_input_args(
         type=_nonnegative_int,
         default=0,
         metavar="YEARS",
-        help="flag a parent fewer than YEARS years older than its child, comparing birth years "
+        help="flag a parent fewer than YEARS years older than its child: on the birth dates when "
+        "both are known (birth_date_topology, completed years), else on the birth years "
         "(birth_year_topology: child.birth_year - parent.birth_year >= YEARS). The default 0 "
-        "flags only a child born before a parent. No-op without --birth-year-col.",
+        "flags only a child born before a parent. Needs --birth-date-col or --birth-year-col.",
     )
     p.add_argument(
         "--multiple-birth-col",
@@ -457,7 +458,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="optional column name for birth date (ISO YYYY-MM-DD; NA/blank for unknown). "
         "When set, validate runs birth_date_dtype (date parsing; an unparsable date blocks), "
         "birth_date_range (the year within [--birth-year-min, --birth-year-max]) and, with "
-        "--birth-year-col, birth_date_year_consistency (the date falls in the birth year).",
+        "--birth-year-col, birth_date_year_consistency (the date falls in the birth year); "
+        "birth_date_topology applies --min-parent-age to the dates of every edge whose two "
+        "dates are known.",
     )
     p_val.add_argument(
         "--twin-max-days",

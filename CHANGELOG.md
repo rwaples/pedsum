@@ -48,6 +48,12 @@ whole command.
   pedigree without `--zygosity-col` has no MZ links, so its `FS` is
   unchanged. `MZ` is not in the default `--rels`, and EPIMIGHT 2.1 cannot
   fit it. fitACE's relationship table changes in step.
+- **`validate --birth-date-col` checks parent ages on the dates.**
+  `birth_date_topology` (`keep_or_drop`) applies `--min-parent-age` to
+  every edge whose two birth dates are known, to the day, so it needs no
+  birth-year column and flags a child born before a parent in the same
+  year. `birth_year_topology` now checks only the edges whose dates are not
+  both known.
 - **`validate` can find twins and other multiple births**
   ([#26](https://github.com/rwaples/pedsum/issues/26)). `--birth-date-col
   NAME` reads an ISO (`YYYY-MM-DD`) birth date: `birth_date_dtype` BLOCKs

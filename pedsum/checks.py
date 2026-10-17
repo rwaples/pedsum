@@ -643,43 +643,62 @@ def _birth_year_range(ctx: ValidationContext) -> CheckResult:
     )
 
 
-def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
-    """One Finding per parent-child edge with ``child.birth_year - parent.birth_year < --min-parent-age``.
+def _parent_ages(
+    ctx: ValidationContext,
+    checked: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    age: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    shown: Label,
+) -> CheckResult:
+    """One Finding per parent-child edge whose parent was younger than ``--min-parent-age`` at the birth.
 
-    The default age 0 flags a child born before a parent. Edges where either
-    endpoint's birth year is unknown (``-1``) are skipped.
+    ``checked(child_rows, parent_rows)`` picks the edges this Check owns, and
+    ``age`` gives the parent's whole years at each of their births, negative
+    for a child born before its parent. The default age 0 flags only such a
+    child. ``shown(row)`` names a row's birth year or date in the detail.
     """
     min_age = ctx.config.min_parent_age
     ids, mothers, fathers = ctx.require_id_parents()
-    birth_year = ctx.birth_year
-    assert birth_year is not None
     findings: list[Finding] = []
     for role, parents in (("mother", mothers), ("father", fathers)):
         parent_rows = ctx.id_index.get_indexer(parents)
-        edges = (parents != -1) & (parent_rows != -1)
-        if not edges.any():
-            continue
-        child_rows = np.where(edges)[0]
-        child_by = birth_year[child_rows]
-        parent_by = birth_year[parent_rows[child_rows]]
-        bad = (child_by != -1) & (parent_by != -1) & (child_by - parent_by < min_age)
-        for i in np.where(bad)[0]:
+        child_rows = np.flatnonzero((parents != -1) & (parent_rows != -1))
+        child_rows = child_rows[checked(child_rows, parent_rows[child_rows])]
+        ages = age(child_rows, parent_rows[child_rows])
+        for i in np.flatnonzero(ages < min_age):
             row_idx = int(child_rows[i])
-            child, parent = int(child_by[i]), int(parent_by[i])
-            detail = (
-                f"id={ctx.label(ids[row_idx])} birth_year={child} < "
-                f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}"
-            )
-            if child >= parent:
-                detail = (
-                    f"id={ctx.label(ids[row_idx])} birth_year={child} is {child - parent} year(s) after "
-                    f"{role} (id={ctx.label(parents[row_idx])}) birth_year={parent}; "
-                    f"--min-parent-age is {min_age}"
-                )
+            parent_idx = int(parent_rows[row_idx])
+            child = f"id={ctx.label(ids[row_idx])} {shown(row_idx)}"
+            parent = f"{role} (id={ctx.label(parents[row_idx])}) {shown(parent_idx)}"
+            detail = f"{child} < {parent}"
+            if ages[i] >= 0:
+                detail = f"{child} is {int(ages[i])} year(s) after {parent}; --min-parent-age is {min_age}"
             findings.append(Finding(id=int(ids[row_idx]), row=ctx.row(row_idx), detail=detail))
     if findings or not min_age:
         return _verdict(findings)
     return CheckResult(CheckStatus.PASS, note=f"--min-parent-age {min_age}")
+
+
+def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
+    """``--min-parent-age`` on the birth years of each edge whose two birth dates are not both known.
+
+    Edges with an unknown birth year are skipped; ``birth_date_topology``
+    checks the edges with both dates known.
+    """
+    birth_year, birth_date = ctx.birth_year, ctx.birth_date
+    assert birth_year is not None
+
+    def checked(child: np.ndarray, parent: np.ndarray) -> np.ndarray:
+        both = (birth_year[child] != -1) & (birth_year[parent] != -1)
+        if birth_date is None:
+            return both
+        return both & (np.isnat(birth_date[child]) | np.isnat(birth_date[parent]))
+
+    return _parent_ages(
+        ctx,
+        checked,
+        lambda child, parent: birth_year[child] - birth_year[parent],
+        lambda i: f"birth_year={int(birth_year[i])}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -700,14 +719,32 @@ def _birth_date_dtype(ctx: ValidationContext) -> CheckResult:
     return _verdict([])
 
 
+def _date_years(birth_date: np.ndarray) -> np.ndarray:
+    """The calendar year of each date, ``-1`` for an unknown (``NaT``) one."""
+    years = birth_date.astype("datetime64[Y]").astype(np.int64) + 1970
+    return np.where(np.isnat(birth_date), -1, years)
+
+
+def _whole_years(start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """Completed years from each known ``start`` date to its known ``end``, negative when ``end`` is earlier."""
+    months = [d.astype("datetime64[M]") for d in (start, end)]
+    # Month (0-11) and day of month as one sortable number per date.
+    month_day = [
+        (m.astype(np.int64) % 12) * 32 + (d - m.astype("datetime64[D]")).astype(np.int64)
+        for d, m in zip((start, end), months, strict=True)
+    ]
+    years = _date_years(end) - _date_years(start)
+    return years - (month_day[1] < month_day[0])
+
+
 def _birth_date_range(ctx: ValidationContext) -> CheckResult:
     """One Finding per known birth date whose year is outside ``[--birth-year-min, --birth-year-max]``."""
     ids, birth_date = ctx.ids, ctx.birth_date
     assert ids is not None
     assert birth_date is not None
     year_min, year_max = ctx.config.birth_year_min, ctx.config.by_max
-    date_year = birth_date.astype("datetime64[Y]").astype(np.int64) + 1970
-    bad = ~np.isnat(birth_date) & ((date_year < year_min) | (date_year > year_max))
+    date_year = _date_years(birth_date)
+    bad = (date_year != -1) & ((date_year < year_min) | (date_year > year_max))
     return _verdict(
         [
             Finding(
@@ -729,8 +766,8 @@ def _birth_date_year_consistency(ctx: ValidationContext) -> CheckResult:
     assert ids is not None
     assert birth_year is not None
     assert birth_date is not None
-    date_year = birth_date.astype("datetime64[Y]").astype(np.int64) + 1970
-    bad = ~np.isnat(birth_date) & (birth_year != -1) & (date_year != birth_year)
+    date_year = _date_years(birth_date)
+    bad = (date_year != -1) & (birth_year != -1) & (date_year != birth_year)
     return _verdict(
         [
             Finding(
@@ -740,6 +777,18 @@ def _birth_date_year_consistency(ctx: ValidationContext) -> CheckResult:
             )
             for i in np.flatnonzero(bad)
         ]
+    )
+
+
+def _birth_date_topology(ctx: ValidationContext) -> CheckResult:
+    """``--min-parent-age`` on the birth dates of each edge whose two dates are known, to the day."""
+    birth_date = ctx.birth_date
+    assert birth_date is not None
+    return _parent_ages(
+        ctx,
+        lambda child, parent: ~np.isnat(birth_date[child]) & ~np.isnat(birth_date[parent]),
+        lambda child, parent: _whole_years(birth_date[parent], birth_date[child]),
+        lambda i: f"birth_date={birth_date[i]}",
     )
 
 
@@ -1111,6 +1160,13 @@ CHECKS: tuple[Check, ...] = (
         FailPolicy.KEEP_OR_DROP,
     ),
     Check(
+        "birth_date_topology",
+        (*_IDS, "birth_date_dtype"),
+        _birth_date_topology,
+        "parent age at birth, from birth dates",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
         # After cycle_breaks: it reads the parents left.
         "multiple_birth_sets",
         _IDS,
@@ -1207,6 +1263,7 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "birth_date_dtype",
             "birth_date_range",
             "birth_date_year_consistency",
+            "birth_date_topology",
         ),
     ),
     (
