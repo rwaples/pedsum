@@ -10,7 +10,7 @@ A pedigree carries only *structure*, so pedsum can fill exactly the columns that
 are a pure function of the pedigree:
 
     person_id          <- id
-    relationship_kind  <- the EPIMIGHT relationship codes (EPIMIGHT_RELATIONSHIP_ORDER)
+    relationship_kind  <- the EPIMIGHT relationship codes (default EPIMIGHT_RELATIONSHIP_ORDER)
     relatives          <- PedigreeGraph.relatives_per_person (pure pedigree structure)
     born_at_year       <- birth_year if available, else base_year + depth
 
@@ -26,7 +26,7 @@ dtype — schema-correct and ready to fill):
 The relationship grouping below mirrors fitACE's ``fitace.relationships``
 (the EPIMIGHT-facing grouping over pedigree-graph pair codes) — pedsum is public
 and cannot import the private ``fitace`` package, so this is a maintained copy.
-Keep the codes, constituent pair codes, and directionality flags in sync.
+Keep the codes, constituent pair codes, directionality and default flags in sync.
 """
 
 from __future__ import annotations
@@ -64,19 +64,21 @@ class _EpiRel:
             junior-first orientation instead of canonicalizing. pedigree-graph
             supplies both (``relatives_per_person`` credits only the junior
             member of an asymmetric category), so nothing is reordered here.
+        default: whether ``--rels`` includes the code when not given. ``MZ``
+            is opt-in.
     """
 
     code: str
     pair_codes: tuple[str, ...]
     directional: bool = False
+    default: bool = True
 
     @property
     def kinship(self) -> float:
         """Nominal kinship coefficient, read from the first constituent pair code.
 
-        Because ``FS`` folds in MZ twins (kinship 0.5), this is the
-        dominant-case coefficient (0.25 for ``FS``), not exact for every
-        constituent pair. Reading it from ``RELATIONSHIPS`` rather than
+        Every constituent of a multi-code kind (``PO``, ``HS``) has the same
+        nominal kinship. Reading it from ``RELATIONSHIPS`` rather than
         restating it here means a change upstream cannot silently leave
         pedsum emitting a stale coefficient.
         """
@@ -84,8 +86,10 @@ class _EpiRel:
 
 
 _EPIMIGHT_RELS: tuple[_EpiRel, ...] = (
+    # MZ co-twins exist only under --zygosity-col; FS is the other full sibs.
+    _EpiRel("MZ", ("MZ",), default=False),
     _EpiRel("PO", ("MO", "FO"), directional=True),
-    _EpiRel("FS", ("FS", "MZ")),
+    _EpiRel("FS", ("FS",)),
     _EpiRel("HS", ("MHS", "PHS")),
     _EpiRel("mHS", ("MHS",)),
     _EpiRel("pHS", ("PHS",)),
@@ -97,8 +101,11 @@ _EPIMIGHT_RELS: tuple[_EpiRel, ...] = (
 #: Registry keyed by EPIMIGHT relationship code.
 _EPI_REGISTRY: dict[str, _EpiRel] = {r.code: r for r in _EPIMIGHT_RELS}
 
-#: Canonical close-to-distant relationship order (matches the fitACE emitter).
-EPIMIGHT_RELATIONSHIP_ORDER: tuple[str, ...] = tuple(r.code for r in _EPIMIGHT_RELS)
+#: Every EPIMIGHT relationship code, close to distant.
+EPIMIGHT_RELATIONSHIP_CODES: tuple[str, ...] = tuple(r.code for r in _EPIMIGHT_RELS)
+
+#: The default codes, in canonical close-to-distant order (matches the fitACE emitter).
+EPIMIGHT_RELATIONSHIP_ORDER: tuple[str, ...] = tuple(r.code for r in _EPIMIGHT_RELS if r.default)
 
 #: Output column order (the EPIMIGHT Pipeline-input schema).
 EPIMIGHT_COLUMNS: tuple[str, ...] = (
@@ -140,10 +147,10 @@ def validate_relationship_codes(codes: Iterable[str]) -> tuple[str, ...]:
     """
     requested = tuple(codes)
     if not requested:
-        raise ValueError(f"no relationship codes given; valid codes: {', '.join(EPIMIGHT_RELATIONSHIP_ORDER)}")
+        raise ValueError(f"no relationship codes given; valid codes: {', '.join(EPIMIGHT_RELATIONSHIP_CODES)}")
     unknown = [c for c in requested if c not in _EPI_REGISTRY]
     if unknown:
-        valid = ", ".join(EPIMIGHT_RELATIONSHIP_ORDER)
+        valid = ", ".join(EPIMIGHT_RELATIONSHIP_CODES)
         raise ValueError(f"unknown relationship code(s) {unknown}; valid codes: {valid}")
     return requested
 
@@ -284,8 +291,8 @@ def iter_relative_pairs(
     ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
     (identical for every pair of a kind) — not computed from the pedigree. Because
     the EPIMIGHT codes overlap, a maternal half-sib pair is listed under both
-    ``HS`` and ``mHS`` and MZ twins appear as ``FS``, so the nominal value is the
-    dominant-case coefficient. With ``exact_kinship=True`` an extra
+    ``HS`` and ``mHS``. MZ co-twins (``--zygosity-col``) are ``MZ``, not
+    ``FS``. With ``exact_kinship=True`` an extra
     ``kinship_exact`` column carries the **exact pedigree** kinship from
     ``pg.pair_kinship`` — inbreeding-, MZ-, and multi-path-aware, so it can
     exceed the nominal value (e.g. inbred sibs, double first cousins).

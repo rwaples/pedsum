@@ -67,11 +67,14 @@ def test_string_ids_run_every_check(tmp_path):
     assert [n for n, r in results.items() if r.status != "PASS"] == [
         "birth_year_dtype",
         "birth_date_dtype",
+        "zygosity_tokens",
         "cycle_breaks",
         "birth_year_range",
         "birth_year_topology",
         "birth_date_range",
         "birth_date_year_consistency",
+        "multiple_birth_sets",
+        "mz_links",
     ]
 
 

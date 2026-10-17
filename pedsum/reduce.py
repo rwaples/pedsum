@@ -251,5 +251,7 @@ def _write_fixed(
         mother_col=ctx.config.mother_col,
         father_col=ctx.config.father_col,
         missing_parent_tokens=ctx.config.missing_parent_tokens,
+        multiple_birth_col=ctx.config.multiple_birth_col,
+        zygosity_col=ctx.config.zygosity_col,
     )
     return fp, write(frame, fp)

@@ -435,3 +435,31 @@ def test_exact_kinship_without_pairs_warns(tmp_path):
     assert res.returncode == 0, res.stderr
     assert "no effect without --pairs" in res.stderr
     assert not (out / "relative_pairs.tsv").exists()
+
+
+def test_mz_is_opt_in_and_leaves_fs(tmp_path):
+    """With --zygosity-col, linked co-twins are MZ relatives, not FS; MZ is not a default kind."""
+    rows = [
+        {"id": 1, "sex": "F", "mother": -1, "father": -1, "set": "", "zyg": ""},
+        {"id": 2, "sex": "M", "mother": -1, "father": -1, "set": "", "zyg": ""},
+        {"id": 3, "sex": "F", "mother": 1, "father": 2, "set": "A", "zyg": "MZ"},
+        {"id": 4, "sex": "F", "mother": 1, "father": 2, "set": "A", "zyg": "MZ"},
+        {"id": 5, "sex": "M", "mother": 1, "father": 2, "set": "", "zyg": ""},
+    ]
+    ped = write_ped(tmp_path / "p.tsv", rows)
+    assert "MZ" not in EPIMIGHT_RELATIONSHIP_ORDER
+    twins = ["--multiple-birth-col", "set", "--zygosity-col", "zyg"]
+    out = tmp_path / "mz"
+    res = _run(["epimight-input", "--in", str(ped), "--out", str(out), *twins, "--rels", "MZ,FS", "--pairs"])
+    assert res.returncode == 0, res.stderr
+    skel = pl.read_csv(out / "pipeline_input.tsv", separator="\t").filter(pl.col("person_id") >= 3)
+    got = {(r["person_id"], r["relationship_kind"]): r["relatives"] for r in skel.iter_rows(named=True)}
+    assert got == {(3, "MZ"): 1, (4, "MZ"): 1, (5, "MZ"): 0, (3, "FS"): 1, (4, "FS"): 1, (5, "FS"): 2}
+    pairs = pl.read_csv(out / "relative_pairs.tsv", separator="\t")
+    assert pairs.filter(pl.col("relationship_kind") == "MZ").select("id1", "id2", "kinship").rows() == [(3, 4, 0.5)]
+    # Without the zygosity link the co-twins are an ordinary FS pair.
+    plain = tmp_path / "plain"
+    res = _run(["epimight-input", "--in", str(ped), "--out", str(plain), "--rels", "MZ,FS"])
+    assert res.returncode == 0, res.stderr
+    skel = pl.read_csv(plain / "pipeline_input.tsv", separator="\t").filter(pl.col("person_id") == 3)
+    assert dict(skel.select("relationship_kind", "relatives").rows()) == {"MZ": 0, "FS": 2}

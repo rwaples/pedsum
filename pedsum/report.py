@@ -164,6 +164,7 @@ def build_pedigree_data(
     sex_concordance: dict | None,
     *,
     max_degree: int = 5,
+    multiple_births: dict | None = None,
 ) -> dict:
     """Build the flat pedigree-level payload.
 
@@ -180,6 +181,9 @@ def build_pedigree_data(
         # Opt-in (`--sex-concordance`); None keeps the section out of every
         # output entirely, which is what holds the slim YAML line budget.
         "offspring_sex_concordance": sex_concordance,
+        # Opt-in (`--multiple-birth-col`). Absent rather than None, so a run
+        # without it writes no empty "meta multiple_births" row to the long TSV.
+        **({"multiple_births": multiple_births} if multiple_births is not None else {}),
         "relationship_summary": relationship_summary,
         "reproduction": aggregates["reproduction"],
         "genealogy": aggregates["genealogy"],

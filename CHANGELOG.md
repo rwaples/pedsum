@@ -29,6 +29,25 @@ whole command.
 
 ### Added
 
+- **Multiple births in every command, and MZ co-twins apart from full sibs**
+  ([#26](https://github.com/rwaples/pedsum/issues/26)).
+  `--multiple-birth-col NAME` reads a multiple-birth set id, for example
+  `validate --twin-max-days`'s `multiple_birth_set` or a register's own id,
+  and `--zygosity-col NAME` reads `MZ` / `DZ` per member. Two new autofix
+  Checks, `multiple_birth_sets` and `mz_links`, clear the marks
+  pedigree-graph cannot take (a member alone or not a full sib of the rest,
+  an MZ mark without exactly one co-twin of compatible sex), and
+  `zygosity_tokens` BLOCKs on an unknown token. The MZ co-twins are passed
+  to pedigree-graph as `twin_ids`, so `relationship_pairs` counts them as
+  `MZ`, not `FS`. `summarize` adds a `demography.multiple_births` section:
+  sets by size, pairs by sex mix and birth decade, their share of the
+  full-sib pairs, and Weinberg's differential-rule estimate of MZ and DZ
+  pairs.
+- **`epimight-input` has an opt-in `MZ` kind, and its `FS` leaves MZ
+  co-twins out.** `FS` used to sum pedigree-graph's `FS` and `MZ` codes. A
+  pedigree without `--zygosity-col` has no MZ links, so its `FS` is
+  unchanged. `MZ` is not in the default `--rels`, and EPIMIGHT 2.1 cannot
+  fit it. fitACE's relationship table changes in step.
 - **`validate` can find twins and other multiple births**
   ([#26](https://github.com/rwaples/pedsum/issues/26)). `--birth-date-col
   NAME` reads an ISO (`YYYY-MM-DD`) birth date: `birth_date_dtype` BLOCKs

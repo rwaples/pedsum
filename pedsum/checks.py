@@ -17,9 +17,18 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, PedigreeError, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.ids import parse_ids
-from pedsum.parse import as_birth_date_col, as_birth_year_col, decode_sex, format_id_sample
+from pedsum.parse import (
+    ZYGOSITY_MZ,
+    ZYGOSITY_UNKNOWN,
+    as_birth_date_col,
+    as_birth_year_col,
+    as_group_codes,
+    as_zygosity_col,
+    decode_sex,
+    format_id_sample,
+)
 from pedsum.pedigree_ops import cycle_components, rows_of_parents
 
 if TYPE_CHECKING:
@@ -124,6 +133,7 @@ def _required_columns(ctx: ValidationContext) -> CheckResult:
         needed.add(config.birth_year_col)
     if config.twin_max_days is not None and config.birth_date_col is not None:
         needed.add(config.birth_date_col)
+    needed |= {c for c in (config.multiple_birth_col, config.zygosity_col) if c is not None}
     miss = needed - set(ctx.df_raw.columns)
     if miss:
         return _failed(f"missing required columns: {sorted(miss)}; file has {list(ctx.df_raw.columns)}")
@@ -734,6 +744,122 @@ def _birth_date_year_consistency(ctx: ValidationContext) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
+# Multiple births (optional)
+# ---------------------------------------------------------------------------
+
+
+def _zygosity_tokens(ctx: ValidationContext) -> CheckResult:
+    column = ctx.config.zygosity_col
+    if column is None:
+        return CheckResult(CheckStatus.SKIP, note="no --zygosity-col specified")
+    try:
+        ctx.zygosity = as_zygosity_col(ctx.df_raw[column], column)
+    except PedigreeError as e:
+        return _failed(str(e))
+    return _verdict([])
+
+
+def _multiple_birth_sets(ctx: ValidationContext) -> CheckResult:
+    """One Finding per set member whose set cell ``validate`` clears.
+
+    A member stays when both its parents are known and shared with at least
+    one other member, and its set holds no other such group of full sibs
+    (which of the two deliveries the id means is then ambiguous). Sets
+    ``ctx.multiple_birth`` to the set codes left and
+    ``ctx.cleared_multiple_birth`` to the rows cleared.
+    """
+    column = ctx.config.multiple_birth_col
+    if column is None:
+        return CheckResult(CheckStatus.SKIP, note="no --multiple-birth-col specified")
+    ids, mothers, fathers = ctx.require_id_parents()
+    sets = as_group_codes(ctx.df_raw[column])
+    rows = np.flatnonzero(sets >= 0)
+    members = pl.DataFrame({"row": rows, "set": sets[rows], "m": mothers[rows], "f": fathers[rows]}).with_columns(
+        known=(pl.col("m") != -1) & (pl.col("f") != -1),
+        n_set=pl.len().over("set"),
+        n_sibs=pl.len().over("set", "m", "f"),
+    )
+    members = members.with_columns(full_sibs=pl.col("known") & (pl.col("n_sibs") >= 2))
+    n_sibships = members.filter("full_sibs").group_by("set").agg(n_sibships=pl.struct("m", "f").n_unique())
+    members = members.join(n_sibships, on="set", how="left").with_columns(pl.col("n_sibships").fill_null(0))
+    reason = (
+        pl.when(pl.col("n_set") == 1)
+        .then(pl.lit("it is the only member of its set"))
+        .when(~pl.col("known"))
+        .then(pl.lit("a parent is unknown"))
+        .when(pl.col("n_sibs") < 2)
+        .then(pl.lit("no other member of its set has the same mother and father"))
+        .when(pl.col("n_sibships") > 1)
+        .then(pl.lit("its set holds more than one group of full sibs"))
+    )
+    cleared = members.with_columns(reason=reason).filter(pl.col("reason").is_not_null())
+    tokens = ctx.df_raw[column].cast(pl.String).str.strip_chars()
+    mask = np.zeros(len(sets), dtype=bool)
+    mask[cleared["row"].to_numpy()] = True
+    ctx.multiple_birth = np.where(mask, -1, sets)
+    ctx.cleared_multiple_birth = mask
+    return _verdict(
+        [
+            Finding(
+                id=int(ids[i]),
+                row=ctx.row(i),
+                detail=f"id={ctx.label(ids[i])} multiple-birth set {tokens[i]!r} cleared: {why}",
+            )
+            for i, why in cleared.select("row", "reason").sort("row").iter_rows()
+        ]
+    )
+
+
+def _mz_links(ctx: ValidationContext) -> CheckResult:
+    """One Finding per zygosity mark ``validate`` clears; the rest link MZ co-twins.
+
+    The two MZ members of a set become co-twins (``ctx.co_twin``, as ID
+    codes). A mark is cleared when its row is in no set, when it is the only
+    MZ in its set, when its set has three or more (pedigree-graph links MZ
+    co-twins in pairs), or when the two co-twins have known, different sex.
+    ``ctx.cleared_zygosity`` records the rows cleared.
+    """
+    ids = ctx.ids
+    sets, zygosity = ctx.multiple_birth, ctx.zygosity
+    assert ids is not None
+    # --zygosity-col needs --multiple-birth-col, so multiple_birth_sets ran.
+    assert sets is not None
+    assert zygosity is not None
+    sex = ctx.imputation.imputed_sex
+    reasons: dict[int, str] = {}
+    for i in np.flatnonzero((zygosity != ZYGOSITY_UNKNOWN) & (sets < 0)):
+        reasons[int(i)] = "it is in no multiple-birth set"
+    co_twin = np.full(len(ids), -1, dtype=np.int64)
+    mz = np.flatnonzero((zygosity == ZYGOSITY_MZ) & (sets >= 0))
+    mz = mz[np.argsort(sets[mz], kind="stable")]
+    _, starts, counts = np.unique(sets[mz], return_index=True, return_counts=True)
+    for start, count in zip(starts.tolist(), counts.tolist(), strict=True):
+        group = mz[start : start + count]
+        if count == 1:
+            reasons[int(group[0])] = "it is the only MZ member of its set"
+        elif count > 2:
+            for i in group:
+                reasons[int(i)] = f"its set has {count} MZ members; MZ co-twins are linked in pairs"
+        else:
+            a, b = int(group[0]), int(group[1])
+            if SEX_UNKNOWN not in (sex[a], sex[b]) and sex[a] != sex[b]:
+                reasons[a] = f"its MZ co-twin id={ctx.label(ids[b])} has the opposite sex"
+                reasons[b] = f"its MZ co-twin id={ctx.label(ids[a])} has the opposite sex"
+            else:
+                co_twin[a], co_twin[b] = ids[b], ids[a]
+    mask = np.zeros(len(ids), dtype=bool)
+    mask[list(reasons)] = True
+    ctx.co_twin = co_twin
+    ctx.cleared_zygosity = mask
+    return _verdict(
+        [
+            Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={ctx.label(ids[i])} zygosity cleared: {why}")
+            for i, why in sorted(reasons.items())
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -818,6 +944,13 @@ CHECKS: tuple[Check, ...] = (
         ("required_columns",),
         _birth_date_dtype,
         "birth_date column parses as ISO dates",
+        FailPolicy.BLOCK,
+    ),
+    Check(
+        "zygosity_tokens",
+        ("required_columns",),
+        _zygosity_tokens,
+        "zygosity column holds MZ / DZ",
         FailPolicy.BLOCK,
     ),
     Check(
@@ -977,6 +1110,23 @@ CHECKS: tuple[Check, ...] = (
         "birth dates fall in their birth year",
         FailPolicy.KEEP_OR_DROP,
     ),
+    Check(
+        # After cycle_breaks: it reads the parents left.
+        "multiple_birth_sets",
+        _IDS,
+        _multiple_birth_sets,
+        "multiple-birth sets are full sibs",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
+        # Not after multiple_birth_sets: its FAIL is an autofix that still
+        # leaves the set codes, so the links form in the same pass.
+        "mz_links",
+        (*_IDS, "sex_tokens", "zygosity_tokens"),
+        _mz_links,
+        "MZ marks form co-twin pairs",
+        FailPolicy.AUTOFIX,
+    ),
 )
 
 # Derived from the registry (single source of truth).
@@ -1057,6 +1207,14 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "birth_date_dtype",
             "birth_date_range",
             "birth_date_year_consistency",
+        ),
+    ),
+    (
+        "Multiple births (optional)",
+        (
+            "multiple_birth_sets",
+            "zygosity_tokens",
+            "mz_links",
         ),
     ),
 )

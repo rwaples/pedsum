@@ -339,6 +339,35 @@ def as_birth_date_col(series: pl.Series, name: str) -> np.ndarray:
     return dates.to_numpy().astype("datetime64[D]")
 
 
+#: Zygosity codes ``as_zygosity_col`` returns.
+ZYGOSITY_UNKNOWN, ZYGOSITY_MZ, ZYGOSITY_DZ = 0, 1, 2
+
+
+def as_zygosity_col(series: pl.Series, name: str) -> np.ndarray:
+    """Parse a zygosity column to int8 ``ZYGOSITY_*`` codes.
+
+    Accepts ``MZ`` and ``DZ`` in any case, and the same missing tokens as
+    parent IDs for unknown.
+    """
+    cleaned = _replace_missing_with(series, PARENT_MISSING_TOKENS, "")
+    upper = cleaned.str.to_uppercase()
+    bad = ~upper.is_in(["", "MZ", "DZ"])
+    if bad.any():
+        samples = cleaned.filter(bad).unique(maintain_order=True).head(3).to_list()
+        raise PedigreeError(f"zygosity column {name!r} must hold MZ, DZ or NA/blank; got {samples}")
+    out = np.full(len(cleaned), ZYGOSITY_UNKNOWN, dtype=np.int8)
+    out[(upper == "MZ").to_numpy()] = ZYGOSITY_MZ
+    out[(upper == "DZ").to_numpy()] = ZYGOSITY_DZ
+    return out
+
+
+def as_group_codes(series: pl.Series) -> np.ndarray:
+    """Each row's group as an int64 code, -1 for a missing token; equal stripped tokens share a code."""
+    cleaned = _replace_missing_with(series, PARENT_MISSING_TOKENS, "")
+    codes = cleaned.cast(pl.Categorical).to_physical().cast(pl.Int64).to_numpy()
+    return np.where((cleaned == "").to_numpy(), -1, codes)
+
+
 BIRTH_YEAR_DEFAULT_MIN = 1800
 
 

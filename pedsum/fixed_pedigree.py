@@ -18,9 +18,11 @@ The auto-fixes:
 - rows in topological order (parents before children).
 
 With ``--twin-max-days`` it also writes each row's multiple-birth set in a
-``multiple_birth_set`` column (an annotation, not a fix). Without it, an
-input's ``multiple_birth_set`` column is dropped: rows may have changed, and
-the sets cannot be recomputed.
+``multiple_birth_set`` column (an annotation, not a fix). Without it (and
+unless ``--multiple-birth-col`` names it), an input's ``multiple_birth_set``
+column is dropped: rows may have changed, and the sets cannot be recomputed.
+With ``--multiple-birth-col`` / ``--zygosity-col`` it clears the set and
+zygosity cells the ``multiple_birth_sets`` and ``mz_links`` Checks flagged.
 """
 
 from __future__ import annotations
@@ -59,6 +61,12 @@ class FixedPedigree:
     sex_source: np.ndarray  # where each row's sex came from (object array of str)
     birth_year: np.ndarray | None  # int32, sentinel -1; None without a birth-year column
     multiple_birth_set: np.ndarray | None  # int32 set number, -1 for none; None without --twin-max-days
+    # --multiple-birth-col: each row's set code (-1 none) and whether its cell was cleared.
+    multiple_birth: np.ndarray | None
+    cleared_multiple_birth: np.ndarray | None
+    # --zygosity-col: each row's MZ co-twin ID code (-1 none) and whether its cell was cleared.
+    co_twin: np.ndarray | None
+    cleared_zygosity: np.ndarray | None
     ped_depth: np.ndarray  # int32 topological depth, founders 0
     input_row: np.ndarray  # each row's position in the input
     reordered: bool  # False when the input was already parents-first (input_row is the identity)
@@ -69,7 +77,11 @@ class FixedPedigree:
     labels: IdLabels
 
     def frame(self) -> pl.DataFrame:
-        """The input rows as ``load_and_validate`` returns them: ID codes, int8 sex, ``ped_depth``."""
+        """The input rows as ``load_and_validate`` returns them: ID codes, int8 sex, ``ped_depth``.
+
+        With ``--multiple-birth-col`` also ``multiple_birth`` (set code, -1
+        none), and with ``--zygosity-col`` ``twin`` (MZ co-twin ID code, -1 none).
+        """
         columns = {
             "id": self.ids,
             "sex": self.sex,
@@ -79,6 +91,10 @@ class FixedPedigree:
         }
         if self.birth_year is not None:
             columns["birth_year"] = self.birth_year
+        if self.multiple_birth is not None:
+            columns["multiple_birth"] = self.multiple_birth
+        if self.co_twin is not None:
+            columns["twin"] = self.co_twin
         columns["ped_depth"] = self.ped_depth
         # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
         return pl.DataFrame(columns, schema_overrides={"sex_source": pl.String})
@@ -148,6 +164,10 @@ def fix_pedigree(
         sex_source=take(_keep_recorded_sex_source(imp.sex_source, ctx.df_raw)),
         birth_year=None if ctx.birth_year is None else take(ctx.birth_year),
         multiple_birth_set=None if max_days is None else take(sets),
+        multiple_birth=None if ctx.multiple_birth is None else take(ctx.multiple_birth),
+        cleared_multiple_birth=None if ctx.cleared_multiple_birth is None else take(ctx.cleared_multiple_birth),
+        co_twin=None if ctx.co_twin is None else take(ctx.co_twin),
+        cleared_zygosity=None if ctx.cleared_zygosity is None else take(ctx.cleared_zygosity),
         ped_depth=take(depth),
         input_row=order,
         reordered=n_moved > 0,
@@ -167,6 +187,8 @@ def render_fixed_pedigree(
     mother_col: str,
     father_col: str,
     missing_parent_tokens: tuple[str, ...] = (),
+    multiple_birth_col: str | None = None,
+    zygosity_col: str | None = None,
 ) -> pl.DataFrame:
     """The string frame ``validate`` writes: the input's columns and tokens, with the fixes.
 
@@ -178,7 +200,8 @@ def render_fixed_pedigree(
     now holds a phantom. A ``sex_source`` column records which rows pedsum
     changed, and a ``multiple_birth_set`` column, when ``fp`` has the sets,
     each row's set number (blank for none); otherwise an input column of that
-    name is dropped. Founder rows come first, with empty cells outside the ID, sex
+    name is dropped unless it is ``multiple_birth_col``. The set and zygosity
+    cells the Checks cleared are written blank. Founder rows come first, with empty cells outside the ID, sex
     and parent columns.
     """
     out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
@@ -190,9 +213,12 @@ def render_fixed_pedigree(
         # Replaces any column of that name the input had, such as a validate.tsv.gz.
         sets = pl.Series("multiple_birth_set", fp.multiple_birth_set)
         out = out.with_columns(pl.when(sets >= 0).then(sets.cast(pl.String)).alias("multiple_birth_set"))
-    elif "multiple_birth_set" in out.columns:
+    elif "multiple_birth_set" in out.columns and multiple_birth_col != "multiple_birth_set":
         logger.warning("dropped the input's multiple_birth_set column; pass --twin-max-days to recompute it")
         out = out.drop("multiple_birth_set")
+    for column, cleared in ((multiple_birth_col, fp.cleared_multiple_birth), (zygosity_col, fp.cleared_zygosity)):
+        if column is not None and cleared is not None and cleared.any():
+            out = out.with_columns(pl.when(pl.Series(cleared)).then(None).otherwise(pl.col(column)).alias(column))
     if missing_parent_tokens:
         tokens = list(missing_parent_tokens)
         out = out.with_columns(

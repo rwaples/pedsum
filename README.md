@@ -139,7 +139,57 @@ dropped with a WARNING, since the rows may have changed and the sets cannot
 be recomputed. Same parents and birth date
 say nothing of zygosity, so a set is not an MZ annotation and is not passed
 to pedigree-graph as `twin_ids`: `summarize` and `epimight-input` still
-count twins as `FS`.
+count twins as `FS`. To report the sets, pass `--multiple-birth-col
+multiple_birth_set` to `summarize` (see "Multiple births").
+
+### Multiple births
+
+Every command takes two optional columns that annotate multiple births:
+
+- `--multiple-birth-col NAME`: a set id shared by everyone born in one
+  delivery (blank/NA for none). It can be `validate --twin-max-days`'s
+  `multiple_birth_set` or a register's own id. It cannot be combined with
+  `--twin-max-days`.
+- `--zygosity-col NAME`: `MZ` or `DZ` (any case; blank/NA for unknown) for
+  set members. It needs `--multiple-birth-col`. An unknown token blocks
+  (`zygosity_tokens`).
+
+Two auto-fix checks make the annotation one pedigree-graph accepts, and
+`validate` writes the cells they clear blank:
+
+- `multiple_birth_sets` clears a member alone in its set, a member with an
+  unknown parent, a member whose mother and father no other member shares,
+  and every member of a set that holds two groups of full sibs.
+- `mz_links` links the two MZ members of a set as MZ co-twins. It clears an
+  MZ or DZ mark outside a set, the only MZ in a set, every MZ in a set with
+  three or more (pedigree-graph links co-twins in pairs, so MZ triplets
+  cannot be represented), and MZ co-twins of known, different sex.
+
+As with every finding, `summarize` and the other commands refuse an input
+these checks would change, so run them on `validate.tsv.gz`.
+
+With `--zygosity-col`, the PedigreeGraph gets the co-twin links: the
+co-twin pair counts as `MZ` instead of `FS` in `relationship_pairs`, exact
+kinship and inbreeding treat co-twins as one genome, and Ne estimators
+collapse them. Every other relationship is classified by structure, so a
+child of one MZ co-twin is still the other's niece (`Av`), and children of
+two MZ co-twins are still first cousins (`1C`).
+
+With `--multiple-birth-col`, `summarize` adds `demography.multiple_births`:
+
+| Key | Meaning |
+|---|---|
+| `n_sets`, `n_individuals` | sets, and their members |
+| `n_pairs` | pairs of members of one set: `k(k-1)/2` for a set of `k` |
+| `sets_by_size` | sets by number of members |
+| `pairs_by_sex` | those pairs as `male_male`, `female_female`, `male_female` and `unknown_sex` |
+| `full_sib_pair_fraction` | `n_pairs` over the full-sib pairs (`FS` + `MZ`); empty when `--max-degree 0` left full sibs uncounted |
+| `mz_linked_pairs` | with `--zygosity-col`, the co-twin pairs linked |
+| `weinberg` | Weinberg's differential rule on sets of two with both sexes known: `same_sex`, `opposite_sex`, `mz_pairs_estimate` = same − opposite, `dz_pairs_estimate` = 2 × opposite, `mz_fraction_estimate`. It assumes DZ pairs are as often same-sex as opposite-sex, and on few pairs the MZ estimate can be negative. |
+| `by_birth_decade` | with `--birth-year-col`, `summary.extra.yaml` only: the pairs by sex mix per decade of the set's earliest known birth year |
+
+`--safe-attempt` nulls counts below 5, and all of `weinberg` but
+`n_twin_pairs` when either of its counts is below 5.
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
@@ -460,8 +510,8 @@ independent hypotheses. Holm applies across groupings only — the
 `by_group_size` rows are descriptive and are not tested.
 
 **Interpretation limits.** This analysis does not use multiple-birth
-sets (`validate --twin-max-days` writes them but nothing reads them back)
-and has no birth order, pools offspring across the whole
+sets (`--multiple-birth-col` reports them in their own section) and has
+no birth order, pools offspring across the whole
 multigenerational pedigree, generally cannot tell whether a
 reproductive history is complete, and does not adjust for depth-,
 cohort- or secular variation in sex probability. Multiple births,
@@ -1050,7 +1100,10 @@ Flags:
 - `--parquet` — additionally write the parquet form of each emitted table
   (written natively by polars).
 - `--rels CODES` — comma-separated relationship codes to emit, in order
-  (default: all eight).
+  (default: all eight but `MZ`). `MZ` is opt-in: it holds the co-twins that
+  `--zygosity-col` links, and `FS` leaves them out, so without
+  `--zygosity-col` it is empty. EPIMIGHT 2.1 has no `MZ` kind and cannot
+  fit it.
 - `--disorder NAME` — label for the single emitted `disorder` block (default
   `trait1`; a pedigree carries no trait).
 - `--base-year YEAR` — calendar offset for the derived `born_at_year`
@@ -1109,6 +1162,8 @@ through a token as blank, so `summarize` and `effective-size` read
 |---|---|---|
 | `birth_year` | `--birth-year-col NAME` is passed | Integer calendar year (sentinel `-1` for unknown). In `effective-size` it feeds the Hill overlapping-generation estimator; without it, Ne_H collapses to Ne_V. Range-checked against `[--birth-year-min, --birth-year-max]` (default `[1800, current_year + 1]`) and topologically checked (`child.birth_year - parent.birth_year >= --min-parent-age`, default 0, on every known edge). |
 | `birth_date` | `validate --birth-date-col NAME` is passed | ISO `YYYY-MM-DD` (NA/blank for unknown). Its year is range-checked against `[--birth-year-min, --birth-year-max]` and checked against `birth_year` when both are given, and read by `--twin-max-days` to find multiple births. Other commands do not read it. |
+| multiple-birth set id | `--multiple-birth-col NAME` is passed | Shared by the members of one delivery; see "Multiple births". |
+| zygosity | `--zygosity-col NAME` is passed | `MZ` / `DZ` per set member; MZ co-twins become `MZ`, not `FS`, pairs. See "Multiple births". |
 | *(any other)* | always | Carried through verbatim into `annotated.tsv.gz` as a user-supplied extra. Collisions with derived columns (`ped_depth`, `F`, `n_*`, etc.) are preserved under a `_input` suffix with a `WARNING` — see "Column preservation" below. |
 
 ### Row order

@@ -241,6 +241,27 @@ def _add_input_args(
         "(birth_year_topology: child.birth_year - parent.birth_year >= YEARS). The default 0 "
         "flags only a child born before a parent. No-op without --birth-year-col.",
     )
+    p.add_argument(
+        "--multiple-birth-col",
+        default=None,
+        metavar="NAME",
+        help="optional column holding a multiple-birth set id shared by everyone born in one "
+        "delivery (blank/NA for none), such as validate --twin-max-days's multiple_birth_set or a "
+        "register's own id. A member whose parents are not both known and shared with another "
+        "member, or who is alone in a set, is a multiple_birth_sets finding; validate writes that "
+        "cell blank. summarize reports the sets under demography.multiple_births (default: off)",
+    )
+    p.add_argument(
+        "--zygosity-col",
+        default=None,
+        metavar="NAME",
+        help="optional column holding MZ or DZ (blank/NA for unknown) per multiple-birth set "
+        "member; needs --multiple-birth-col. The two MZ members of a set are linked as MZ "
+        "co-twins in the PedigreeGraph, so they count as MZ, not FS, pairs. A mark that cannot "
+        "form such a link (outside a set, the only MZ in its set, three or more MZ in a set, or "
+        "MZ co-twins of opposite sex) is an mz_links finding; validate writes that cell blank "
+        "(default: off)",
+    )
 
 
 def _estimator_list(v: str) -> list[str]:
@@ -510,7 +531,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--rels",
         default=",".join(EPIMIGHT_RELATIONSHIP_ORDER),
         metavar="CODES",
-        help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s).",
+        help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s). "
+        "MZ is opt-in: it holds the co-twins --zygosity-col links, whom FS then leaves out.",
     )
     p_epi.add_argument(
         "--disorder",
@@ -706,6 +728,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p_val.error("--break-cycles needs --birth-year-col: it clears links to a parent born after the child")
     if args.subcommand == "validate" and args.twin_max_days is not None and args.birth_date_col is None:
         p_val.error("--twin-max-days needs --birth-date-col: twins are full sibs born at most N days apart")
+    if args.subcommand == "validate" and args.twin_max_days is not None and args.multiple_birth_col is not None:
+        p_val.error("--twin-max-days and --multiple-birth-col both define the multiple-birth sets; pass one")
+    if getattr(args, "zygosity_col", None) is not None and args.multiple_birth_col is None:
+        parser.error("--zygosity-col needs --multiple-birth-col: zygosity is read within multiple-birth sets")
     if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
     if args.subcommand == "assortative-mating":

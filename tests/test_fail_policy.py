@@ -18,6 +18,7 @@ EXPECTED = {
     "parent_token_range_father": FailPolicy.BLOCK,
     "birth_year_dtype": FailPolicy.BLOCK,
     "birth_date_dtype": FailPolicy.BLOCK,
+    "zygosity_tokens": FailPolicy.BLOCK,
     "duplicate_ids": FailPolicy.BLOCK_OR_DROP,
     "parent_refs_sex_conflict": FailPolicy.BLOCK_OR_DROP,
     "sex_role_ambiguity": FailPolicy.BLOCK_OR_DROP,
@@ -35,6 +36,8 @@ EXPECTED = {
     "sex_role_override": FailPolicy.AUTOFIX,
     "parent_refs_present_mother": FailPolicy.AUTOFIX,
     "parent_refs_present_father": FailPolicy.AUTOFIX,
+    "multiple_birth_sets": FailPolicy.AUTOFIX,
+    "mz_links": FailPolicy.AUTOFIX,
 }
 
 
@@ -95,14 +98,16 @@ def test_validation_config_carries_every_option():
     from pedsum.cli.parser import parse_args
     from pedsum.validate import ValidationConfig
 
-    args = parse_args(
-        [
-            "validate", "--in", "p.tsv", "--out", "o",
-            "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
-            "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
-            "--min-parent-age", "2", "--birth-date-col", "d", "--twin-max-days", "1",
-            "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
-        ]
-    )  # fmt: skip
-    config = ValidationConfig.from_args(args)
-    assert [f.name for f in fields(config) if getattr(config, f.name) == f.default] == []
+    common = [
+        "validate", "--in", "p.tsv", "--out", "o",
+        "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
+        "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
+        "--min-parent-age", "2", "--birth-date-col", "d",
+        "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
+    ]  # fmt: skip
+    # --twin-max-days and --multiple-birth-col exclude each other, so two command lines cover every option.
+    configs = [
+        ValidationConfig.from_args(parse_args([*common, *extra]))
+        for extra in (["--twin-max-days", "1"], ["--multiple-birth-col", "s2", "--zygosity-col", "z"])
+    ]
+    assert [f.name for f in fields(ValidationConfig) if all(getattr(c, f.name) == f.default for c in configs)] == []

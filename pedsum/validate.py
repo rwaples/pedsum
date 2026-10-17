@@ -167,6 +167,10 @@ class ValidationConfig:
     # --twin-max-days: full sibs born at most this many days apart form a
     # multiple-birth set, written by the Fixed Pedigree. None leaves it off.
     twin_max_days: int | None = None
+    # --multiple-birth-col / --zygosity-col: given sets, and MZ / DZ marks
+    # within them (multiple_birth_sets, zygosity_tokens, mz_links).
+    multiple_birth_col: str | None = None
+    zygosity_col: str | None = None
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ValidationConfig:
@@ -188,6 +192,8 @@ class ValidationConfig:
             break_cycles=getattr(args, "break_cycles", False),
             birth_date_col=getattr(args, "birth_date_col", None),
             twin_max_days=getattr(args, "twin_max_days", None),
+            multiple_birth_col=getattr(args, "multiple_birth_col", None),
+            zygosity_col=getattr(args, "zygosity_col", None),
         )
 
     @property
@@ -223,6 +229,15 @@ class ValidationContext:
     sex: np.ndarray | None = None
     birth_year: np.ndarray | None = None
     birth_date: np.ndarray | None = None  # datetime64[D], NaT unknown
+    zygosity: np.ndarray | None = None  # int8 ZYGOSITY_* codes
+    # Set by multiple_birth_sets: each row's set code (-1 none) after the
+    # members it clears, and which rows' set cells it cleared.
+    multiple_birth: np.ndarray | None = None
+    cleared_multiple_birth: np.ndarray | None = None
+    # Set by mz_links: each row's MZ co-twin ID code (-1 none), and which
+    # rows' zygosity cells it cleared.
+    co_twin: np.ndarray | None = None
+    cleared_zygosity: np.ndarray | None = None
     # The parent links cycle_breaks cleared, as (id, role, parent, reason)
     # with IDs as the input wrote them: validate's cleared-links manifest.
     cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -272,7 +287,7 @@ class ValidationContext:
         refs, ``depth``, ``imputation``); any already built is dropped.
         """
         self.df_raw = self.df_raw.filter(pl.Series(keep))
-        for name in ("ids", "mothers", "fathers", "sex", "birth_year", "birth_date"):
+        for name in ("ids", "mothers", "fathers", "sex", "birth_year", "birth_date", "zygosity"):
             values = getattr(self, name)
             if values is not None:
                 setattr(self, name, values[keep])
