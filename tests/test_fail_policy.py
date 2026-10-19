@@ -25,6 +25,7 @@ EXPECTED = {
     "parents_distinct": FailPolicy.BLOCK_OR_DROP,
     "acyclic": FailPolicy.BLOCK_OR_DROP,
     "self_loops": FailPolicy.KEEP_OR_DROP,
+    "parent_child_count": FailPolicy.KEEP_OR_DROP,
     "sex_role_consistency": FailPolicy.KEEP_OR_DROP,
     "birth_year_range": FailPolicy.KEEP_OR_DROP,
     "birth_year_topology": FailPolicy.KEEP_OR_DROP,
@@ -105,6 +106,7 @@ def test_validation_config_carries_every_option():
         "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
         "--min-parent-age", "2", "--birth-date-col", "d",
         "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
+        "--max-children-mother", "20", "--max-children-father", "50",
     ]  # fmt: skip
     # --twin-max-days and --multiple-birth-col exclude each other, so two command lines cover every option.
     configs = [

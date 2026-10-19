@@ -1160,6 +1160,21 @@ the ID of a row is an error. `validate` writes a parent read as missing
 through a token as blank, so `summarize` and `effective-size` read
 `validate.tsv.gz` without the flag.
 
+A token pedsum does not know, such as `9999` for an unknown father,
+reads as one parent of every child it stands in for, so those children
+become full or half sibs of strangers. `validate` can flag such a
+parent: with `--max-children-mother N` or `--max-children-father N`,
+`parent_child_count` is a finding for a parent of that role with more
+than `N` children, whether or not it has a row. Both are off by default,
+because an animal pedigree's sires can have thousands of offspring; for a
+human register, 20 and 50 keep a real large family clear, while a
+placeholder usually has hundreds of children. The detail names the token
+to pass to `--missing-parent-token`, after deleting the parent's row when
+it has one (a token cannot also be an individual's id). Plain `validate`
+writes the pedigree unchanged (exit 1); `--drop-offending` drops the
+parent, which clears its children's links and keeps the children. The
+other commands do not run this check.
+
 ### Optional columns
 
 | Column | Recognised when | Effect |
@@ -1343,6 +1358,7 @@ Exit codes:
 | `sex column has N invalid value(s)` | a numeric coding other than PLINK's 1=male, 2=female, 0=unknown | recode the sex column to PLINK or `M`/`F` |
 | WARNING `sex column has '0' tokens and no '2'` | a `0` = female, `1` = male column, such as pedsum output before 0.15.0 | recode `0` → `2` |
 | `parent ID 0 has no row` | file writes a missing parent as `0` | pass `--missing-parent-token 0` |
+| `parent_child_count`: `id=9999 is the mother of N children` | file writes an unknown parent as a code | delete the code's row, if it has one, and pass `--missing-parent-token 9999` |
 | WARNING `IDs read as strings` | an ID token that is not a plain integer, e.g. `001`, `1.0`, or a non-standard missing token | expected for string IDs; otherwise fix the token, or replace a missing token with `-1`, `NA`, blank, or `.` |
 | `missing required columns` | wrong column names | use `--id-col` / `--sex-col` / `--mother-col` / `--father-col` |
 
