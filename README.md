@@ -264,9 +264,12 @@ and exits non-zero whenever anything was dropped. Column- and parse-level
 failures (a missing column, a row without an id, negative IDs) still hard-block — no
 removal can fix those.
 
-**`--break-cycles`** (needs `--birth-year-col`) clears the parent links the
-data show to be wrong instead of blocking on them: every self-link, and
-within a descent cycle every link to a parent born after the child. The
+**`--break-cycles`** (needs `--birth-date-col` or `--birth-year-col`)
+clears the parent links the data show to be wrong instead of blocking on
+them: every self-link, and within a descent cycle every link to a parent
+born after the child. A link is compared on the birth dates when both are
+known, which also resolves a parent and child born in the same year, and
+otherwise on the birth years. A named column must be present. The
 individuals stay; their cleared slot is written blank. Each cleared link is a
 `cycle_breaks` finding in `validate.log` (so `validate` exits 1) and a row of
 `DIR/validate.cleared_links.tsv`. A cycle with no such link is left as it

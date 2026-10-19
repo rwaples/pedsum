@@ -126,12 +126,13 @@ def summarize_findings(findings: list[Finding], label: Label) -> str:
 
 def _required_columns(ctx: ValidationContext) -> CheckResult:
     # summarize treats a named --birth-year-col as required; validate omits it
-    # and lets birth_year_dtype SKIP instead. --twin-max-days needs the dates.
+    # and lets birth_year_dtype SKIP instead. --twin-max-days needs the dates,
+    # and --break-cycles every birth column it is given.
     config = ctx.config
     needed = {config.id_col, config.sex_col, config.mother_col, config.father_col}
-    if ctx.require_birth_year_col and config.birth_year_col is not None:
+    if (ctx.require_birth_year_col or config.break_cycles) and config.birth_year_col is not None:
         needed.add(config.birth_year_col)
-    if config.twin_max_days is not None and config.birth_date_col is not None:
+    if (config.twin_max_days is not None or config.break_cycles) and config.birth_date_col is not None:
         needed.add(config.birth_date_col)
     needed |= {c for c in (config.multiple_birth_col, config.zygosity_col) if c is not None}
     miss = needed - set(ctx.df_raw.columns)
@@ -354,39 +355,50 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
     """One Finding per parent link ``--break-cycles`` clears; the links are cleared in ``ctx``.
 
     It clears every self-link, and within each descent cycle every link whose
-    parent is born after the child (ADR 0006). A cycle with no such link is
-    left for ``acyclic``. Clearing a link inside a cycle cannot put another
-    such link into a new cycle, so one pass suffices.
+    parent is born after the child (ADR 0006): on the birth dates when both
+    are known, else on the birth years, the split of ``birth_date_topology``
+    and ``birth_year_topology`` (:func:`_both_dated`). A birth year missing
+    from the year column is taken from the birth date. A cycle with no such
+    link is left for ``acyclic``. Clearing a link inside a cycle cannot put
+    another such link into a new cycle, so one pass suffices. Every named
+    birth column must have parsed: half-parsed data clears nothing.
     """
-    if not ctx.config.break_cycles:
+    config = ctx.config
+    if not config.break_cycles:
         return CheckResult(CheckStatus.SKIP, note="no --break-cycles")
+    birth_year, birth_date = ctx.birth_year, ctx.birth_date
+    for flag, column, parsed in (
+        ("--birth-year-col", config.birth_year_col, birth_year),
+        ("--birth-date-col", config.birth_date_col, birth_date),
+    ):
+        if column is not None and parsed is None:
+            return CheckResult(CheckStatus.SKIP, note=f"{flag} {column!r} did not parse")
+    if birth_year is None and birth_date is None:
+        return CheckResult(CheckStatus.SKIP, note="no --birth-year-col or --birth-date-col")
     ids, mothers, fathers = ctx.require_id_parents()
-    birth_year = ctx.birth_year
-    assert birth_year is not None
+    years = _birth_years(birth_year, birth_date)
     m_row, _ = rows_of_parents(mothers, ctx.id_index)
     f_row, _ = rows_of_parents(fathers, ctx.id_index)
     component = cycle_components(m_row, f_row)
+    rows = np.arange(len(ids))
     findings: list[Finding] = []
     for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
         own = parents == ids
         known = parent_rows >= 0
         prow = np.where(known, parent_rows, 0)
-        child_by, parent_by = birth_year, birth_year[prow]
-        late = (
-            known
-            & ~own
-            & (component >= 0)
-            & (component == component[prow])
-            & (child_by != -1)
-            & (parent_by != -1)
-            & (parent_by > child_by)
-        )
+        by_date = _both_dated(birth_date, rows, prow)
+        born_later = ~by_date & (years != -1) & (years[prow] != -1) & (years[prow] > years)
+        if birth_date is not None:
+            born_later |= by_date & (birth_date[prow] > birth_date)
+        late = known & ~own & (component >= 0) & (component == component[prow]) & born_later
         for i in np.flatnonzero(own | late):
             child, parent = ctx.label(ids[i]), ctx.label(parents[i])
             if own[i]:
                 reason = f"listed as own {role}"
             else:
-                reason = f"in a cycle, {role} born {int(parent_by[i])} after the child (born {int(child_by[i])})"
+                births = birth_date if by_date[i] and birth_date is not None else years
+                child_born, parent_born = (str(b) for b in births[[i, prow[i]]])
+                reason = f"in a cycle, {role} born {parent_born} after the child (born {child_born})"
             findings.append(
                 Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={child}: cleared {role} id={parent}, {reason}")
             )
@@ -394,6 +406,22 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
         if (own | late).any():
             ctx.clear_parents(role, np.flatnonzero(own | late))
     return _verdict(findings)
+
+
+def _both_dated(birth_date: np.ndarray | None, child: np.ndarray, parent: np.ndarray) -> np.ndarray:
+    """Edges whose two birth dates are known: compared on the dates; the rest on the birth years."""
+    if birth_date is None:
+        return np.zeros(len(child), dtype=bool)
+    return ~np.isnat(birth_date[child]) & ~np.isnat(birth_date[parent])
+
+
+def _birth_years(birth_year: np.ndarray | None, birth_date: np.ndarray | None) -> np.ndarray:
+    """Each row's birth year, -1 unknown: from the year column, else from the birth date."""
+    if birth_date is None:
+        assert birth_year is not None
+        return birth_year
+    from_dates = _date_years(birth_date)
+    return from_dates if birth_year is None else np.where(birth_year != -1, birth_year, from_dates)
 
 
 def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
@@ -689,9 +717,7 @@ def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
 
     def checked(child: np.ndarray, parent: np.ndarray) -> np.ndarray:
         both = (birth_year[child] != -1) & (birth_year[parent] != -1)
-        if birth_date is None:
-            return both
-        return both & (np.isnat(birth_date[child]) | np.isnat(birth_date[parent]))
+        return both & ~_both_dated(birth_date, child, parent)
 
     return _parent_ages(
         ctx,
@@ -786,7 +812,7 @@ def _birth_date_topology(ctx: ValidationContext) -> CheckResult:
     assert birth_date is not None
     return _parent_ages(
         ctx,
-        lambda child, parent: ~np.isnat(birth_date[child]) & ~np.isnat(birth_date[parent]),
+        partial(_both_dated, birth_date),
         lambda child, parent: _whole_years(birth_date[parent], birth_date[child]),
         lambda i: f"birth_date={birth_date[i]}",
     )
@@ -1051,9 +1077,10 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         # Before every Check that reads the parent refs, depth or sex
-        # imputation: it clears parent links.
+        # imputation: it clears parent links. Not after birth_year_dtype or
+        # birth_date_dtype: either one's SKIP leaves the other to read.
         "cycle_breaks",
-        (*_IDS, "birth_year_dtype"),
+        _IDS,
         _cycle_breaks,
         "no cycle links to clear",
         FailPolicy.AUTOFIX,

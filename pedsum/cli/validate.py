@@ -82,9 +82,8 @@ def run_validate(args: argparse.Namespace, cmd: str) -> int:
         return 1
     _remove_stale_validate_outputs(args.out_dir)
     try:
-        # --break-cycles needs the birth years, so a missing column BLOCKs.
         n_total, results, findings, ctx = validate_pedigree(
-            args.in_path, ValidationConfig.from_args(args), sep=args.sep, require_birth_year_col=args.break_cycles
+            args.in_path, ValidationConfig.from_args(args), sep=args.sep
         )
     except PedigreeError as e:
         logger.error("validation could not run: %s", e)

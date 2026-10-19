@@ -48,6 +48,20 @@ whole command.
   pedigree without `--zygosity-col` has no MZ links, so its `FS` is
   unchanged. `MZ` is not in the default `--rels`, and EPIMIGHT 2.1 cannot
   fit it. fitACE's relationship table changes in step.
+- **`--break-cycles` reads birth dates**
+  ([#28](https://github.com/rwaples/pedsum/issues/28)). It needed
+  `--birth-year-col` and exited 2 without it, so a pedigree with only
+  `--birth-date-col` could not have its cycles broken. `cycle_breaks` now
+  compares a link on the two birth dates when both are known, to the day,
+  and on the birth years otherwise, the same split as
+  `birth_date_topology` and `birth_year_topology`. Dates also clear a link
+  to a parent born later in the child's own year, which birth years leave
+  in the cycle. A birth year missing from the year column is taken from
+  the birth date, so a link with a date on one side and a year on the
+  other is compared too. Under `--break-cycles` every named birth column
+  must be in the file (`required_columns` BLOCKs otherwise, now also for
+  library callers of `validate_pedigree`) and must parse: when one does
+  not, `cycle_breaks` SKIPs and clears nothing.
 - **`validate --birth-date-col` checks parent ages on the dates.**
   `birth_date_topology` (`keep_or_drop`) applies `--min-parent-age` to
   every edge whose two birth dates are known, to the day, so it needs no
