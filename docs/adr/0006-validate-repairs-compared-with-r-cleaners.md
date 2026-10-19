@@ -61,7 +61,9 @@ both parents of 276000802875148 (born 1976): the mother, born 2004, and a father
 cycle.
 
 - A new opt-in option, `--break-cycles`, clears only links the data show to be wrong: a self-link, and
-  within a cycle, each link whose parent is born after the child (this needs `--birth-year-col`). The
+  within a cycle, each link whose parent is born after the child (this needs `--birth-year-col`, or
+  since [pedsum#28](https://github.com/rwaples/pedsum/issues/28) `--birth-date-col`: a link is
+  compared on the two birth dates when both are known, else on the birth years). The
   individuals stay, and each cleared link is written to a manifest beside `validate.tsv.gz`.
 - A cycle with no such link is left to the existing rule: BLOCK, or removal of its members under
   `--drop-offending`. pedsum does not pick a link to cut without evidence.

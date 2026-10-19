@@ -1,11 +1,11 @@
-"""``validate --break-cycles``: clear the links the birth years show to be wrong (ADR 0006)."""
+"""``validate --break-cycles``: clear the links the birth dates or years show to be wrong (ADR 0006, #28)."""
 
 from __future__ import annotations
 
 import polars as pl
 from conftest import load_validate_tsv_gz, run_check, run_pedsum
 
-from pedsum.validate import ValidationConfig
+from pedsum.validate import ValidationConfig, validate_pedigree
 
 BREAK = ValidationConfig(birth_year_col="by", break_cycles=True)
 
@@ -101,12 +101,12 @@ def test_drop_offending_breaks_then_drops_what_is_left(tmp_path):
     assert sorted(dropped["id"].to_list()) == ["20", "21"]
 
 
-def test_needs_birth_year_col(tmp_path):
-    """--break-cycles without --birth-year-col is a usage error."""
+def test_needs_birth_year_or_birth_date_col(tmp_path):
+    """--break-cycles with neither --birth-year-col nor --birth-date-col is a usage error."""
     ped = _write(tmp_path / "p.tsv", CYCLE)
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "o"), "--break-cycles"])
     assert r.returncode == 2
-    assert "--break-cycles needs --birth-year-col" in r.stderr
+    assert "--break-cycles needs --birth-year-col or --birth-date-col" in r.stderr
 
 
 def test_missing_birth_year_column_blocks(tmp_path):
@@ -122,3 +122,92 @@ def test_stale_manifest_removed(tmp_path):
     assert (out / "validate.cleared_links.tsv").exists()
     _validate(tmp_path, CYCLE)
     assert not (out / "validate.cleared_links.tsv").exists()
+
+
+DATES = ValidationConfig(birth_date_col="bd", break_cycles=True)
+BOTH = ValidationConfig(birth_year_col="by", birth_date_col="bd", break_cycles=True)
+# CYCLE with birth dates instead of birth years.
+DATED_CYCLE = (
+    "id\tsex\tmother\tfather\tbd\n1\tM\t-1\t-1\t1950-01-01\n6\tF\t7\t1\t1990-01-01\n"
+    "7\tF\t6\t1\t1980-01-01\n8\tF\t6\t1\t2010-01-01\n"
+)
+
+
+def _validate_dated(tmp_path, text):
+    ped = _write(tmp_path / "p.tsv", text)
+    out = tmp_path / "out"
+    return run_pedsum(
+        ["validate", "--in", str(ped), "--out", str(out), "--birth-date-col", "bd", "--break-cycles"]
+    ), out
+
+
+def test_birth_dates_alone_break_the_cycle(tmp_path):
+    """With --birth-date-col and no --birth-year-col, the link to a parent born later by date is cleared (#28)."""
+    r, out = _validate_dated(tmp_path, DATED_CYCLE)
+    assert r.returncode == 1, r.stderr
+    cleared = pl.read_csv(out / "validate.cleared_links.tsv", separator="\t", infer_schema=False)
+    assert cleared.rows() == [
+        ("7", "mother", "6", "in a cycle, mother born 1990-01-01 after the child (born 1980-01-01)")
+    ]
+
+
+def test_dates_resolve_a_parent_born_in_the_childs_year():
+    """Birth years tie, so only the dates show the mother is born after the child (#28)."""
+    rows = [
+        {"id": "6", "sex": "F", "mother": "7", "father": "-1", "by": "1980", "bd": "1980-09-01"},
+        {"id": "7", "sex": "F", "mother": "6", "father": "-1", "by": "1980", "bd": "1980-03-01"},
+    ]
+    result = run_check("cycle_breaks", rows, BOTH)
+    assert [f.detail for f in result.findings] == [
+        "id=7: cleared mother id=6, in a cycle, mother born 1980-09-01 after the child (born 1980-03-01)"
+    ]
+
+
+def test_birth_years_cover_links_without_both_dates():
+    """A link missing a date falls back to the birth years (#28)."""
+    rows = [
+        {"id": "6", "sex": "F", "mother": "7", "father": "-1", "by": "1990", "bd": ""},
+        {"id": "7", "sex": "F", "mother": "6", "father": "-1", "by": "1980", "bd": "1980-03-01"},
+    ]
+    result = run_check("cycle_breaks", rows, BOTH)
+    assert [f.detail for f in result.findings] == [
+        "id=7: cleared mother id=6, in a cycle, mother born 1990 after the child (born 1980)"
+    ]
+    assert run_check("cycle_breaks", rows, DATES).status == "PASS"
+
+
+def test_missing_birth_date_column_blocks(tmp_path):
+    """A named birth-date column the file lacks BLOCKs instead of skipping the clearing (#28)."""
+    r, out = _validate_dated(tmp_path, DATED_CYCLE.replace("\tbd\n", "\tdate\n", 1))
+    assert r.returncode == 2, r.stderr
+    assert "required_columns" in (out / "validate.log").read_text()
+
+
+def test_a_birth_column_that_does_not_parse_clears_nothing():
+    """With a named column unparsed, cycle_breaks SKIPs instead of acting on the other one (#28)."""
+    rows = [
+        {"id": "6", "sex": "F", "mother": "7", "father": "-1", "by": "abc", "bd": "1990-01-01"},
+        {"id": "7", "sex": "F", "mother": "6", "father": "-1", "by": "1980", "bd": "1980-01-01"},
+    ]
+    result = run_check("cycle_breaks", rows, BOTH)
+    assert result.status == "SKIP"
+    assert result.note == "--birth-year-col 'by' did not parse"
+
+
+def test_a_date_on_one_side_and_a_year_on_the_other_are_compared():
+    """A missing birth year is taken from the birth date, so a date and a year still order the link (#28)."""
+    rows = [
+        {"id": "6", "sex": "F", "mother": "7", "father": "-1", "by": "", "bd": "1990-05-01"},
+        {"id": "7", "sex": "F", "mother": "6", "father": "-1", "by": "1980", "bd": ""},
+    ]
+    result = run_check("cycle_breaks", rows, BOTH)
+    assert [f.detail for f in result.findings] == [
+        "id=7: cleared mother id=6, in a cycle, mother born 1990 after the child (born 1980)"
+    ]
+
+
+def test_library_callers_get_the_named_columns_required(tmp_path):
+    """Without the CLI, --break-cycles still needs every named birth column in the file (#28)."""
+    ped = _write(tmp_path / "p.tsv", CYCLE.replace("\tby\n", "\tyear\n", 1))
+    _, results, _, _ = validate_pedigree(ped, BREAK)
+    assert {r.name: r.status for r in results}["required_columns"] == "FAIL"

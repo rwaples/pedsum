@@ -509,7 +509,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="clear the parent links the data show to be wrong instead of blocking on them: "
         "every self-link, and within a descent cycle every link to a parent born after the "
-        "child. Needs --birth-year-col. Individuals stay; each cleared link is a cycle_breaks "
+        "child, compared on the birth dates when both are known, else on the birth years. Needs "
+        "--birth-date-col or --birth-year-col. Individuals stay; each cleared link is a cycle_breaks "
         "finding and a row of validate.cleared_links.tsv (id, role, parent, reason). A cycle "
         "with no such link still BLOCKs, or loses its members under --drop-offending "
         "(default: off)",
@@ -742,8 +743,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
-    if args.subcommand == "validate" and args.break_cycles and args.birth_year_col is None:
-        p_val.error("--break-cycles needs --birth-year-col: it clears links to a parent born after the child")
+    if (
+        args.subcommand == "validate"
+        and args.break_cycles
+        and args.birth_year_col is None
+        and args.birth_date_col is None
+    ):
+        p_val.error(
+            "--break-cycles needs --birth-year-col or --birth-date-col: it clears links to a parent born after the child"
+        )
     if args.subcommand == "validate" and args.twin_max_days is not None and args.birth_date_col is None:
         p_val.error("--twin-max-days needs --birth-date-col: twins are full sibs born at most N days apart")
     if args.subcommand == "validate" and args.twin_max_days is not None and args.multiple_birth_col is not None:
