@@ -12,7 +12,7 @@ from typing import Literal
 #: the cost. 1M rows at depth 11 come to about 4.1e9 and took 29 s.
 F_WALK_WARN_VISITS = 4_000_000_000
 
-VERSION = "0.14.0"
+VERSION = "0.15.0"
 
 SEX_FEMALE = 0
 

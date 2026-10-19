@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — 2026-10-19 — effective-size command, memory limit, string IDs, multiple births
 
-Breaking; ships as 0.15.0. Effective population size leaves `summarize`
+Breaking. Effective population size leaves `summarize`
 for its own command, and every command runs under a memory limit
 ([ADR 0004](docs/adr/0004-effective-size-subcommand-and-memory-limit.md)).
 On the 783,029-row horse pedigree, `summarize` ran 30 minutes and was then
@@ -344,10 +344,10 @@ whole command.
   `validate.dropped.tsv` writes its `id` column as text. In the Python
   API, `load_and_validate` returns `(frame, IdLabels)`: the frame's id
   columns hold int64 codes, and `IdLabels` prints them as the input's IDs.
-- **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.13`): the progress bar
+- **Requires pedigree-graph 0.12.1** (`>=0.12.1,<0.14`, so 0.13 too): the progress bar
   needs its `progress=` keyword, and under it `Ne_C` and `Ne_GC` no
   longer run the kinship DP.
-- **Requires pg-phenotype 0.3** (`>=0.3,<0.4`), which computes
+- **Requires pg-phenotype 0.3** (`>=0.3,<0.6`, so 0.4 and 0.5 too), which computes
   `assortative-mating` ([#20](https://github.com/rwaples/pedsum/issues/20)).
   Its `mate_correlation` refuses a constant trait or more than two
   traits, which the CLI never passes. Its port reproduces pedsum#13's
