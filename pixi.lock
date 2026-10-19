@@ -41,7 +41,6 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/16/d5/928078d2b28f26829b138b4a6c3980045022fb409f570657a224ae60ef4e/numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/28/de/0999a0ccb672570ef4da6f3caf8398d8cea201456156ec1c6e4947b9d315/pg_phenotype-0.3.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/2c/6c/c84014bf21cdb15693c94c95e8374e800f7738b86482377ac920a9dc5fa8/pedigree_graph-0.12.4-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3d/5f/2bd2fd4b99b0b5e76fea2f1fe149e05a7ec19a9a177758688bb82c7e3126/numba-0.68.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/3e/61/da22c714fd4f4dff642d60fb0d8bf8da1985d126f21cc89237f8bf707c92/ty-0.0.89-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -59,6 +58,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/e9/24/ed9982657c446dd5491b089370eea196725673570cfc61f7225a9fdd7ef0/polars_runtime_32-1.44.2-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/f9/51/d4d76d9ce610ae27178d369d9a215bad6a768635b61880bb9bf32389e568/pedigree_graph-0.13.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -405,7 +405,7 @@ packages:
   - polars>=1.43.2,<2
   - pyyaml>=6,<7
   - tqdm>=4.66,<5
-  - pedigree-graph>=0.12.1,<0.13
+  - pedigree-graph>=0.12.1,<0.14
   - numba>=0.68,<1
   - pg-phenotype>=0.3,<0.4
   - pytest>=9,<10 ; extra == 'test'
@@ -453,24 +453,6 @@ packages:
   - hypothesis>=6,<7 ; extra == 'test'
   - pandas>=3.0,<4 ; extra == 'test'
   - polars>=1.43.2,<2 ; extra == 'test'
-  - ty==0.0.84 ; extra == 'typecheck'
-  requires_python: '>=3.13'
-- pypi: https://files.pythonhosted.org/packages/2c/6c/c84014bf21cdb15693c94c95e8374e800f7738b86482377ac920a9dc5fa8/pedigree_graph-0.12.4-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: pedigree-graph
-  version: 0.12.4
-  sha256: 9c4c552dc6bd15655028159115dca00ed916cb2f2c29216370343bf91e5ff239
-  requires_dist:
-  - numpy>=2.2,<3
-  - scipy>=1.14,<2
-  - numba>=0.60,<1 ; extra == 'test'
-  - pytest>=9,<10 ; extra == 'test'
-  - pytest-cov>=7,<8 ; extra == 'test'
-  - pytest-xdist>=3.8,<4 ; extra == 'test'
-  - ruff>=0.16,<0.17 ; extra == 'test'
-  - hypothesis>=6,<7 ; extra == 'test'
-  - pandas>=3.0,<4 ; extra == 'test'
-  - polars>=1.43.2,<2 ; extra == 'test'
-  - pyarrow>=17,<26 ; extra == 'test'
   - ty==0.0.84 ; extra == 'typecheck'
   requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
@@ -692,3 +674,21 @@ packages:
   version: 1.44.2
   sha256: a1bafb441e99199a62c63bf1bbdc0ea09ee9776dbac2bf31452b5000fb1df2f7
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/f9/51/d4d76d9ce610ae27178d369d9a215bad6a768635b61880bb9bf32389e568/pedigree_graph-0.13.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: pedigree-graph
+  version: 0.13.0
+  sha256: 2be8a432a42e2d95a7b21a120a6c2e409ded745ed1b5e01bf66a5d5bd8f6af18
+  requires_dist:
+  - numpy>=2.2,<3
+  - scipy>=1.14,<2
+  - numba>=0.60,<1 ; extra == 'test'
+  - pytest>=9,<10 ; extra == 'test'
+  - pytest-cov>=7,<8 ; extra == 'test'
+  - pytest-xdist>=3.8,<4 ; extra == 'test'
+  - ruff>=0.17,<0.18 ; extra == 'test'
+  - hypothesis>=6,<7 ; extra == 'test'
+  - pandas>=3.0,<4 ; extra == 'test'
+  - polars>=1.43.2,<2 ; extra == 'test'
+  - pyarrow>=17,<26 ; extra == 'test'
+  - ty==0.0.89 ; extra == 'typecheck'
+  requires_python: '>=3.13'
