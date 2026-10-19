@@ -69,6 +69,7 @@ def test_string_ids_run_every_check(tmp_path):
         "birth_date_dtype",
         "zygosity_tokens",
         "cycle_breaks",
+        "parent_child_count",
         "birth_year_range",
         "birth_year_topology",
         "birth_date_range",

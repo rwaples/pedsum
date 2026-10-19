@@ -66,16 +66,22 @@ class IdIndex:
 
 @dataclass(frozen=True)
 class ParentRefs:
-    """The distinct ids one parent column references (sorted) and each one's own row, -1 when it has none."""
+    """The distinct ids one parent column references (sorted), each one's own row (-1 when it has none) and its children."""
 
     ids: np.ndarray
     rows: np.ndarray
+    n_children: np.ndarray  # rows naming each id in this column
 
     @classmethod
     def of(cls, parents: np.ndarray, id_index: IdIndex) -> ParentRefs:
         """Collect the references in ``parents`` (``-1`` is no parent) and look up their rows."""
-        ids = unique_ints(parents[parents != -1])
-        return cls(ids, id_index.get_indexer(ids))
+        # unique_ints' sort, keeping the run lengths.
+        ordered = np.sort(parents[parents != -1])
+        first = np.ones(ordered.size, dtype=bool)
+        np.not_equal(ordered[1:], ordered[:-1], out=first[1:])
+        starts = np.flatnonzero(first)
+        ids = ordered[starts]
+        return cls(ids, id_index.get_indexer(ids), np.diff(np.append(starts, ordered.size)))
 
 
 def rows_of_parents(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:

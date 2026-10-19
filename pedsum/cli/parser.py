@@ -476,6 +476,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "annotation. Without this flag or --multiple-birth-col an input multiple_birth_set "
         "column is dropped (default: off)",
     )
+    for role, suggested in (("mother", 20), ("father", 50)):
+        p_val.add_argument(
+            f"--max-children-{role}",
+            type=_nonnegative_int,
+            default=0,
+            metavar="N",
+            help=f"flag a {role} of more than N children (parent_child_count), which points at a "
+            "placeholder code for an unknown parent, such as 9999, that --missing-parent-token "
+            "should name. The flag is a finding; the pedigree is written as it is, and "
+            f"--drop-offending drops the {role} and keeps the children. {suggested} suits a human "
+            "register; leave it off for an animal pedigree, whose sires can have thousands of "
+            "offspring (default: 0, off)",
+        )
     p_val.add_argument(
         "--no-sex-check",
         action="store_true",

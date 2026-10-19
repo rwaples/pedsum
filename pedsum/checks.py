@@ -300,14 +300,9 @@ def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
 
 def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
     """One Finding per ``role`` ID that has no row of its own."""
-    parents = ctx.mothers if role == "mother" else ctx.fathers
-    assert parents is not None
     refs = ctx.mother_refs if role == "mother" else ctx.father_refs
-    missing = refs.ids[refs.rows == -1]
-    if len(missing) == 0:
-        return _verdict([])
-    named = np.sort(parents[parents != -1])
-    counts = np.searchsorted(named, missing, side="right") - np.searchsorted(named, missing, side="left")
+    no_row = refs.rows == -1
+    missing, counts = refs.ids[no_row], refs.n_children[no_row]
     findings = []
     for mid, n in zip(missing, counts, strict=True):
         n_refs = int(n)
@@ -316,6 +311,46 @@ def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
         if name == "0":
             detail += " (if the file writes a missing parent as 0, pass --missing-parent-token 0)"
         findings.append(Finding(id=int(mid), detail=detail, n_refs=n_refs))
+    return _verdict(findings)
+
+
+def _parent_child_count(ctx: ValidationContext) -> CheckResult:
+    """One Finding per parent with more children than its role's limit (pedsum#27).
+
+    A placeholder for an unknown parent, such as ``9999``, becomes one parent
+    of everyone it stands in for, and so a full or half sib of strangers.
+    The limits are per role, as a real father can have more children than a
+    real mother; 0 turns a role off.
+    """
+    config = ctx.config
+    if not config.max_children_mother and not config.max_children_father:
+        return CheckResult(CheckStatus.SKIP, note="no --max-children-mother or --max-children-father")
+    findings = []
+    for role, refs, limit in (
+        ("mother", ctx.mother_refs, config.max_children_mother),
+        ("father", ctx.father_refs, config.max_children_father),
+    ):
+        if not limit:
+            continue
+        for k in np.flatnonzero(refs.n_children > limit):
+            pid, row, name = int(refs.ids[k]), int(refs.rows[k]), ctx.label(refs.ids[k])
+            # A missing-parent token cannot also be an id with a row.
+            remedy = (
+                f"it has no row, so validate adds it as a founder. If it stands for an unknown {role}, "
+                f"pass --missing-parent-token {name}"
+                if row == -1
+                else f"if it stands for an unknown {role}, delete its row and pass --missing-parent-token {name}"
+            )
+            findings.append(
+                Finding(
+                    id=pid,
+                    row=None if row == -1 else ctx.row(row),
+                    detail=(
+                        f"id={name} is the {role} of {int(refs.n_children[k])} children "
+                        f"(more than --max-children-{role} {limit}); {remedy}"
+                    ),
+                )
+            )
     return _verdict(findings)
 
 
@@ -1073,6 +1108,15 @@ CHECKS: tuple[Check, ...] = (
         FailPolicy.AUTOFIX,
     ),
     Check(
+        # Kept in plain validate; --drop-offending drops the parent, which
+        # clears its children's links and keeps the children.
+        "parent_child_count",
+        _IDS,
+        _parent_child_count,
+        "children per parent within limits",
+        FailPolicy.KEEP_OR_DROP,
+    ),
+    Check(
         "parent_refs_sex_conflict",
         _IDS,
         _parent_refs_sex_conflict,
@@ -1234,6 +1278,7 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "zero_parent_present",
             "parent_refs_present_mother",
             "parent_refs_present_father",
+            "parent_child_count",
             "parents_distinct",
             "parent_refs_sex_conflict",
             "sex_role_ambiguity",

@@ -171,6 +171,10 @@ class ValidationConfig:
     # within them (multiple_birth_sets, zygosity_tokens, mz_links).
     multiple_birth_col: str | None = None
     zygosity_col: str | None = None
+    # validate --max-children-mother / --max-children-father: the most
+    # children one parent of that role may have (parent_child_count, #27); 0 is off.
+    max_children_mother: int = 0
+    max_children_father: int = 0
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> ValidationConfig:
@@ -194,6 +198,8 @@ class ValidationConfig:
             twin_max_days=getattr(args, "twin_max_days", None),
             multiple_birth_col=getattr(args, "multiple_birth_col", None),
             zygosity_col=getattr(args, "zygosity_col", None),
+            max_children_mother=getattr(args, "max_children_mother", 0),
+            max_children_father=getattr(args, "max_children_father", 0),
         )
 
     @property

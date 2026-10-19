@@ -29,6 +29,23 @@ whole command.
 
 ### Added
 
+- **`validate` can flag a parent with implausibly many children**
+  ([#27](https://github.com/rwaples/pedsum/issues/27)). A register that
+  writes an unknown parent as a code, such as `9999`, made one parent of
+  thousands of children, all of them full or half sibs, and nothing
+  stopped: a code without a row became an added founder, and a code with
+  a row was not flagged at all. With `--max-children-mother N` or
+  `--max-children-father N`, the new `parent_child_count` Check
+  (`keep_or_drop`) flags a parent of that role with more than `N`
+  children and names the `--missing-parent-token` to pass, after deleting
+  the parent's row when it has one. Plain `validate` writes the pedigree
+  as it is and exits 1; `--drop-offending` drops the parent and keeps its
+  children. Both limits are off by default, so an animal pedigree's sires
+  are not flagged or dropped; the help suggests 20 and 50 for a human
+  register. They are `validate` flags only: `summarize` and the other
+  commands do not run the Check. `ParentRefs` now carries each parent's
+  child count, which `parent_refs_present_*` also reads.
+
 - **Multiple births in every command, and MZ co-twins apart from full sibs**
   ([#26](https://github.com/rwaples/pedsum/issues/26)).
   `--multiple-birth-col NAME` reads a multiple-birth set id, for example
