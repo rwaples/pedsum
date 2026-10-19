@@ -250,7 +250,9 @@ def _add_input_args(
         "delivery (blank/NA for none), such as validate --twin-max-days's multiple_birth_set or a "
         "register's own id. A member whose parents are not both known and shared with another "
         "member, or who is alone in a set, is a multiple_birth_sets finding; validate writes that "
-        "cell blank. summarize reports the sets under demography.multiple_births (default: off)",
+        "cell blank. validate also writes the sets it read in a multiple_birth_set column "
+        "(numbered 1, 2, ...; missing tokens are no set, ids are compared without surrounding "
+        "spaces). summarize reports the sets under demography.multiple_births (default: off)",
     )
     p.add_argument(
         "--zygosity-col",
@@ -471,8 +473,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "apart form a set, and validate.tsv.gz gets a multiple_birth_set column holding each "
         "member's set number (blank for none). Triplets are one set. Needs --birth-date-col, "
         "whose column must then be present. Zygosity is unknown, so a set is not an MZ "
-        "annotation. Without this flag an input multiple_birth_set column is dropped "
-        "(default: off)",
+        "annotation. Without this flag or --multiple-birth-col an input multiple_birth_set "
+        "column is dropped (default: off)",
     )
     p_val.add_argument(
         "--no-sex-check",

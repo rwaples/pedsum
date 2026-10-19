@@ -18,16 +18,20 @@ The auto-fixes:
 - rows in topological order (parents before children).
 
 With ``--twin-max-days`` it also writes each row's multiple-birth set in a
-``multiple_birth_set`` column (an annotation, not a fix). Without it (and
-unless ``--multiple-birth-col`` names it), an input's ``multiple_birth_set``
-column is dropped: rows may have changed, and the sets cannot be recomputed.
-With ``--multiple-birth-col`` / ``--zygosity-col`` it clears the set and
-zygosity cells the ``multiple_birth_sets`` and ``mz_links`` Checks flagged.
+``multiple_birth_set`` column (an annotation, not a fix). With
+``--multiple-birth-col`` that column holds the sets pedsum read from the named
+column, renumbered: missing tokens are no set and ids equal after stripping
+whitespace are one set, so a reader sees the sets the Checks saw (pedsum#29).
+Without either flag an input's ``multiple_birth_set`` column is dropped: rows
+may have changed, and the sets cannot be recomputed. With
+``--multiple-birth-col`` / ``--zygosity-col`` it clears the set and zygosity
+cells the ``multiple_birth_sets`` and ``mz_links`` Checks flagged.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -75,6 +79,24 @@ class FixedPedigree:
     # Synthesized founder rows ({"id", "sex"[, "reason"]}): missing parents by ID, then phantoms.
     founders: list[dict]
     labels: IdLabels
+
+    @cached_property
+    def written_sets(self) -> np.ndarray | None:
+        """The ``multiple_birth_set`` column ``validate`` writes: set numbers 1, 2, ..., -1 for none.
+
+        ``--twin-max-days``'s sets, or ``--multiple-birth-col``'s set codes
+        renumbered in order of each set's first row (pedsum#29); None with neither.
+        """
+        if self.multiple_birth_set is not None or self.multiple_birth is None:
+            return self.multiple_birth_set
+        codes = self.multiple_birth
+        sets = np.full(len(codes), -1, dtype=np.int32)
+        rows = np.flatnonzero(codes >= 0)
+        _, first, inverse = np.unique(codes[rows], return_index=True, return_inverse=True)
+        rank = np.empty(len(first), dtype=np.int32)
+        rank[np.argsort(first, kind="stable")] = np.arange(1, len(first) + 1, dtype=np.int32)
+        sets[rows] = rank[inverse]
+        return sets
 
     def frame(self) -> pl.DataFrame:
         """The input rows as ``load_and_validate`` returns them: ID codes, int8 sex, ``ped_depth``.
@@ -200,21 +222,29 @@ def render_fixed_pedigree(
     now holds a phantom. A ``sex_source`` column records which rows pedsum
     changed, and a ``multiple_birth_set`` column, when ``fp`` has the sets,
     each row's set number (blank for none); otherwise an input column of that
-    name is dropped unless it is ``multiple_birth_col``. The set and zygosity
-    cells the Checks cleared are written blank. Founder rows come first, with empty cells outside the ID, sex
-    and parent columns.
+    name is dropped. An input ``multiple_birth_set`` column holding other
+    values is replaced with a WARNING, unless ``--twin-max-days`` recomputes
+    it. The set and zygosity cells the Checks cleared are written blank.
+    Founder rows come first, with empty cells outside the ID, sex and parent
+    columns.
     """
     out = (raw[fp.input_row] if fp.reordered else raw).with_columns(
         pl.Series(sex_col, plink_sex(fp.sex)).cast(pl.String),
         # From the object array directly: a numpy unicode (astype(str)) column converts ~8x slower.
         pl.Series("sex_source", fp.sex_source, dtype=pl.String),
     )
-    if fp.multiple_birth_set is not None:
-        # Replaces any column of that name the input had, such as a validate.tsv.gz.
-        sets = pl.Series("multiple_birth_set", fp.multiple_birth_set)
-        out = out.with_columns(pl.when(sets >= 0).then(sets.cast(pl.String)).alias("multiple_birth_set"))
-    elif "multiple_birth_set" in out.columns and multiple_birth_col != "multiple_birth_set":
-        logger.warning("dropped the input's multiple_birth_set column; pass --twin-max-days to recompute it")
+    sets = fp.written_sets
+    if sets is not None:
+        written = pl.Series("multiple_birth_set", sets)
+        written = pl.select(pl.when(written >= 0).then(written.cast(pl.String))).to_series()
+        if fp.multiple_birth_set is None and "multiple_birth_set" in out.columns:
+            _warn_replaced_sets(out["multiple_birth_set"], written, fp.cleared_multiple_birth, multiple_birth_col)
+        # A --twin-max-days run replaces the column of an earlier validate.tsv.gz silently: it recomputes it.
+        out = out.with_columns(written.alias("multiple_birth_set"))
+    elif "multiple_birth_set" in out.columns:
+        logger.warning(
+            "dropped the input's multiple_birth_set column; pass --twin-max-days or --multiple-birth-col to write it"
+        )
         out = out.drop("multiple_birth_set")
     for column, cleared in ((multiple_birth_col, fp.cleared_multiple_birth), (zygosity_col, fp.cleared_zygosity)):
         if column is not None and cleared is not None and cleared.any():
@@ -287,6 +317,31 @@ def multiple_birth_sets(mothers: np.ndarray, fathers: np.ndarray, birth_date: np
             int(span[wide].max()),
         )
     return sets
+
+
+def _warn_replaced_sets(
+    current: pl.Series, written: pl.Series, cleared: np.ndarray | None, source_col: str | None
+) -> None:
+    """WARN when the ``--multiple-birth-col`` sets replace an input ``multiple_birth_set`` holding other values.
+
+    Rows the ``multiple_birth_sets`` Check cleared are findings already, so
+    they are not counted.
+    """
+    differs = current.cast(pl.String).str.strip_chars().ne_missing(written)
+    if cleared is not None:
+        differs = differs & ~pl.Series(cleared)
+    n = int(differs.sum())
+    if not n:
+        return
+    if source_col == "multiple_birth_set":
+        logger.warning("rewrote %d multiple_birth_set cell(s) as pedsum's set numbers (blank for none)", n)
+    else:
+        logger.warning(
+            "replaced the input's multiple_birth_set column with the sets from --multiple-birth-col %s "
+            "(%d row(s) differ)",
+            source_col,
+            n,
+        )
 
 
 def _keep_recorded_sex_source(derived: np.ndarray, raw: pl.DataFrame) -> np.ndarray:
