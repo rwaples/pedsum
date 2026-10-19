@@ -39,8 +39,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - pypi: ./
       - pypi: https://files.pythonhosted.org/packages/16/d5/928078d2b28f26829b138b4a6c3980045022fb409f570657a224ae60ef4e/numpy-2.5.4-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/1e/07/f971f0cb2531c8ad9961299355140f3f311b5c2ddb030bf09773ea3be455/pg_phenotype-0.5.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/28/de/0999a0ccb672570ef4da6f3caf8398d8cea201456156ec1c6e4947b9d315/pg_phenotype-0.3.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3d/5f/2bd2fd4b99b0b5e76fea2f1fe149e05a7ec19a9a177758688bb82c7e3126/numba-0.68.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/3e/61/da22c714fd4f4dff642d60fb0d8bf8da1985d126f21cc89237f8bf707c92/ty-0.0.89-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -407,7 +407,7 @@ packages:
   - tqdm>=4.66,<5
   - pedigree-graph>=0.12.1,<0.14
   - numba>=0.68,<1
-  - pg-phenotype>=0.3,<0.4
+  - pg-phenotype>=0.3,<0.6
   - pytest>=9,<10 ; extra == 'test'
   - pytest-xdist>=3.8,<4 ; extra == 'test'
   - hypothesis>=6,<7 ; extra == 'test'
@@ -419,6 +419,22 @@ packages:
   version: 2.5.4
   sha256: d549420b8858885cea8838a727842249218b9c1da24dd517e25c9c7a948310a3
   requires_python: '>=3.12'
+- pypi: https://files.pythonhosted.org/packages/1e/07/f971f0cb2531c8ad9961299355140f3f311b5c2ddb030bf09773ea3be455/pg_phenotype-0.5.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: pg-phenotype
+  version: 0.5.0
+  sha256: 48e096cc7f2c5e9b6640a534ab04e8a54326cd1c317d2c7ae86d498ecca18821
+  requires_dist:
+  - numpy>=2.2,<3
+  - scipy>=1.14,<2 ; extra == 'test'
+  - pedigree-graph>=0.12.2,<0.14 ; extra == 'test'
+  - pytest>=9,<10 ; extra == 'test'
+  - pytest-xdist>=3.8,<4 ; extra == 'test'
+  - ruff>=0.17,<0.18 ; extra == 'test'
+  - hypothesis>=6,<7 ; extra == 'test'
+  - pandas>=3.0,<4 ; extra == 'test'
+  - polars>=1.43.2,<2 ; extra == 'test'
+  - ty==0.0.89 ; extra == 'typecheck'
+  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl
   name: pytest
   version: 9.1.1
@@ -439,22 +455,6 @@ packages:
   - setuptools ; extra == 'dev'
   - xmlschema ; extra == 'dev'
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/28/de/0999a0ccb672570ef4da6f3caf8398d8cea201456156ec1c6e4947b9d315/pg_phenotype-0.3.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  name: pg-phenotype
-  version: 0.3.0
-  sha256: e2d36145a8e0e59f2d944635d48cf85fbad60e83d26216874b0e933c108f701d
-  requires_dist:
-  - numpy>=2.2,<3
-  - scipy>=1.14,<2 ; extra == 'test'
-  - pedigree-graph>=0.12.2,<0.13 ; extra == 'test'
-  - pytest>=9,<10 ; extra == 'test'
-  - pytest-xdist>=3.8,<4 ; extra == 'test'
-  - ruff>=0.16,<0.17 ; extra == 'test'
-  - hypothesis>=6,<7 ; extra == 'test'
-  - pandas>=3.0,<4 ; extra == 'test'
-  - polars>=1.43.2,<2 ; extra == 'test'
-  - ty==0.0.84 ; extra == 'typecheck'
-  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl
   name: sortedcontainers
   version: 2.4.0
