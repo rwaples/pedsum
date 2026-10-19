@@ -94,7 +94,7 @@ individuals, …) and writes:
 | File | Contents |
 |---|---|
 | `DIR/validate.log` | per-finding TSV (one row per issue): `check`, `id`, `row`, `detail`, and `n_refs`, the number of rows naming a missing parent (`parent_refs_present_*` findings only) |
-| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column and, with `--twin-max-days`, a `multiple_birth_set` column (omitted on hard-block findings) |
+| `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column and, with `--twin-max-days` or `--multiple-birth-col`, a `multiple_birth_set` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
 | `DIR/validate.cleared_links.tsv` | with `--break-cycles`: the parent links it cleared (`id`, `role`, `parent`, `reason`) |
 
@@ -137,10 +137,10 @@ line gives the number of sets and members. The sets are computed on the
 pedigree validate writes, so under `--drop-offending` they are those of the
 Reduced Pedigree. Grouping is not a check and never fails, but it WARNs
 when a chain of births makes a set span more than `N` days, which points
-at a wrong `N` or at placeholder dates. Without `--twin-max-days`, an
-input's `multiple_birth_set` column (from an earlier `validate.tsv.gz`) is
-dropped with a WARNING, since the rows may have changed and the sets cannot
-be recomputed. Same parents and birth date
+at a wrong `N` or at placeholder dates. Without `--twin-max-days` or
+`--multiple-birth-col`, an input's `multiple_birth_set` column (from an
+earlier `validate.tsv.gz`) is dropped with a WARNING, since the rows may
+have changed and the sets cannot be recomputed. Same parents and birth date
 say nothing of zygosity, so a set is not an MZ annotation and is not passed
 to pedigree-graph as `twin_ids`: `summarize` and `epimight-input` still
 count twins as `FS`. To report the sets, pass `--multiple-birth-col
@@ -157,6 +157,18 @@ Every command takes two optional columns that annotate multiple births:
 - `--zygosity-col NAME`: `MZ` or `DZ` (any case; blank/NA for unknown) for
   set members. It needs `--multiple-birth-col`. An unknown token blocks
   (`zygosity_tokens`).
+
+With `--multiple-birth-col`, `validate.tsv.gz` also gets a
+`multiple_birth_set` column holding the sets as pedsum read them, numbered
+`1`, `2`, ... in output order and blank outside a set: a missing token
+(`.`, `NA`, ...) is no set, and ids that differ only in surrounding spaces
+(`D7`, `D7 `) are one set. The named column is written as the input had it
+apart from the cleared cells, so read the sets from `multiple_birth_set`.
+The `multiple births:` line reports them as for `--twin-max-days`. When the
+named column is itself `multiple_birth_set`, it is rewritten with pedsum's
+numbers, and a WARNING counts the cells that changed; pedsum's own output
+reads back unchanged. An input `multiple_birth_set` column next to another
+named column is replaced, with a WARNING when its sets differ.
 
 Two auto-fix checks make the annotation one pedigree-graph accepts, and
 `validate` writes the cells they clear blank:

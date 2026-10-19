@@ -421,6 +421,20 @@ whole command.
 
 ### Fixed
 
+- **`validate --multiple-birth-col` writes the sets it checked**
+  ([#29](https://github.com/rwaples/pedsum/issues/29)). The sets come from
+  the cleaned ids, where a missing token (`.`, `NA`, ...) is no set and
+  `D7` and `D7 ` are one set, but the column was written back as the input
+  had it, so a reader of `validate.tsv.gz` saw other sets: `.` as one large
+  set, and `D7` and `D7 ` as two. `validate.tsv.gz` now also has a
+  `multiple_birth_set` column with pedsum's set numbers (`1`, `2`, ... in
+  output order, blank outside a set), as with `--twin-max-days`, and the
+  `multiple births:` line reports them. The named column passes through
+  unchanged apart from the cells `multiple_birth_sets` clears, unless it is
+  `multiple_birth_set` itself, which is rewritten with pedsum's numbers
+  under a WARNING. An input `multiple_birth_set` column that the sets of
+  another named column replace gets a WARNING too, where it was dropped
+  with one before. A reader needs only `multiple_birth_set` in either mode.
 - **`validate` finds cycles when a parent ID is missing**
   ([#22](https://github.com/rwaples/pedsum/issues/22)). `acyclic` was
   skipped whenever any parent ID was missing from the file, so a cycle was

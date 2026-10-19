@@ -262,15 +262,73 @@ def test_twin_max_days_output_feeds_summarize(tmp_path):
     assert _section(tmp_path)["weinberg"]["opposite_sex"] == 1
 
 
-def test_validating_with_the_column_named_keeps_multiple_birth_set(tmp_path):
-    """--multiple-birth-col multiple_birth_set keeps the column that --twin-max-days would otherwise own."""
-    rows = [{**r, "multiple_birth_set": r.pop("set")} for r in [*PARENTS, _kid("10", "F", "1"), _kid("11", "F", "1")]]
+def _validate_named(tmp_path, sets: list[str], column: str) -> tuple:
+    kids = [_kid(str(10 + k), "F", s) for k, s in enumerate(sets)]
+    # A copy without "set": PARENTS is shared by every test.
+    rows = [{**{k: v for k, v in r.items() if k != "set"}, column: r["set"]} for r in [*PARENTS, *kids]]
     ped = write_ped(tmp_path / "p.tsv", rows)
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--multiple-birth-col",
-                    "multiple_birth_set"])  # fmt: skip
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--multiple-birth-col", column])
+    return r, load_validate_tsv_gz(tmp_path / "out")
+
+
+def test_validating_pedsum_set_numbers_again_keeps_them(tmp_path):
+    """--multiple-birth-col multiple_birth_set on pedsum's own numbers writes them back unchanged and quietly."""
+    r, out = _validate_named(tmp_path, ["1", "1"], "multiple_birth_set")
     assert r.returncode == 0, r.stderr
-    assert "dropped" not in r.stderr
-    assert load_validate_tsv_gz(tmp_path / "out")["multiple_birth_set"].to_list()[-2:] == ["1", "1"]
+    assert "WARNING" not in r.stderr
+    assert out["multiple_birth_set"].to_list()[-2:] == ["1", "1"]
+
+
+def test_register_ids_in_multiple_birth_set_are_renumbered_with_a_warning(tmp_path):
+    """Other ids in a column named multiple_birth_set become pedsum's set numbers, and validate says so (#29)."""
+    r, out = _validate_named(tmp_path, ["D7", "D7 ", ".", "5", "5"], "multiple_birth_set")
+    assert r.returncode == 0, r.stderr
+    assert "rewrote 5 multiple_birth_set cell(s)" in r.stderr
+    assert out["multiple_birth_set"].to_list()[-5:] == ["1", "1", None, "2", "2"]
+
+
+def test_an_input_multiple_birth_set_replaced_by_another_column_warns(tmp_path):
+    """--multiple-birth-col delivery over an input multiple_birth_set holding other sets WARNs (#29)."""
+    rows = [
+        {**r, "delivery": r["set"], "multiple_birth_set": "9"}
+        for r in [*PARENTS, _kid("10", "F", "A"), _kid("11", "F", "A")]
+    ]
+    ped = write_ped(tmp_path / "p.tsv", rows)
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--multiple-birth-col", "delivery"])
+    assert r.returncode == 0, r.stderr
+    assert "replaced the input's multiple_birth_set column with the sets from --multiple-birth-col delivery" in r.stderr
+    assert load_validate_tsv_gz(tmp_path / "out")["multiple_birth_set"].to_list() == [None, None, None, "1", "1"]
+
+
+def test_validate_writes_cleaned_set_numbers_beside_the_register_column(tmp_path):
+    """multiple_birth_set has missing tokens as no set and padded ids as one set; the register column is kept (#29)."""
+    rows = [
+        {"id": "m", "sex": "2", "mother": "NA", "father": "NA", "delivery": "."},
+        {"id": "f", "sex": "1", "mother": "NA", "father": "NA", "delivery": "."},
+        {"id": "a", "sex": "1", "mother": "m", "father": "f", "delivery": "D7"},
+        {"id": "b", "sex": "2", "mother": "m", "father": "f", "delivery": "D7 "},
+        {"id": "c", "sex": "2", "mother": "m", "father": "f", "delivery": "."},
+        {"id": "d", "sex": "1", "mother": "m", "father": "f", "delivery": "."},
+        {"id": "e", "sex": "1", "mother": "m", "father": "f", "delivery": "X"},
+        {"id": "g", "sex": "2", "mother": "m", "father": "f", "delivery": "X"},
+    ]
+    ped = write_ped(tmp_path / "p.tsv", rows)
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--multiple-birth-col", "delivery"])
+    assert r.returncode == 0, r.stderr
+    out = load_validate_tsv_gz(tmp_path / "out")
+    by_id = dict(zip(out["id"].to_list(), out["multiple_birth_set"].to_list(), strict=True))
+    assert by_id == {"m": None, "f": None, "a": "1", "b": "1", "c": None, "d": None, "e": "2", "g": "2"}
+    assert out.filter(pl.col("id") == "b")["delivery"].item() == "D7 "
+    assert "multiple births: 2 set(s), 4 individual(s) (--multiple-birth-col delivery)" in r.stderr
+
+
+def test_cleared_set_members_are_blank_in_multiple_birth_set(tmp_path):
+    """A member multiple_birth_sets clears has no set number (#29)."""
+    rows = [*PARENTS, _kid("10", "F", "A"), _kid("11", "F", "A"), _kid("12", "M", "B")]
+    r = _validate(tmp_path, rows)
+    assert r.returncode == 1, r.stderr
+    out = load_validate_tsv_gz(tmp_path / "out")
+    assert out.filter(pl.col("id").is_in(["10", "11", "12"]))["multiple_birth_set"].to_list() == ["1", "1", None]
 
 
 def _payload(n_same: int, n_opposite: int) -> dict:
