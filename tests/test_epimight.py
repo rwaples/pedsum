@@ -542,3 +542,22 @@ def test_lineage_split_leaves_out_a_parents_mz_co_twin(tmp_path):
         skel = pl.read_csv(out / "pipeline_input.tsv", separator="\t").filter(pl.col("person_id") == 7)
         assert skel["relatives"].to_list() == [len(expected)]
         assert pl.read_csv(out / "relative_pairs.tsv", separator="\t").select("id1", "id2").rows() == expected
+
+
+def test_lineage_split_computes_parent_kinship_once_with_pairs(tmp_path, monkeypatch):
+    """The skeleton and --pairs share one couples pair_kinship call."""
+    from pedigree_graph import PedigreeGraph
+
+    from pedsum.cli import main
+
+    calls = []
+    pair_kinship = PedigreeGraph.pair_kinship
+
+    def counted(self, *args, **kwargs):
+        calls.append(args)
+        return pair_kinship(self, *args, **kwargs)
+
+    monkeypatch.setattr(PedigreeGraph, "pair_kinship", counted)
+    argv = ["epimight-input", "--in", str(EXAMPLE), "--out", str(tmp_path), "--rels", "mAv,pAv", "--pairs"]
+    assert main(argv) == 0
+    assert len(calls) == 1

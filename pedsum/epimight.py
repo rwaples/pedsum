@@ -228,29 +228,31 @@ def _children_of_sibs(first: np.ndarray, second: np.ndarray, parent: np.ndarray)
     return np.repeat(child, k), sibs[offsets]
 
 
-def _lineage_parent_rows(pg: PedigreeGraph) -> dict[Parent, np.ndarray]:
+def lineage_parent_rows(pg: PedigreeGraph, rels: Iterable[str]) -> dict[Parent, np.ndarray] | None:
     """Each graph row's mother and father row for the lineage split, -1 where it is skipped.
 
+    None unless ``rels`` holds a lineage-split code (``mAv``, ``pAv``). Compute
+    it once and pass it to both :func:`build_epimight_skeleton` and
+    :func:`iter_relative_pairs`, which compute it themselves when given None.
     -1 where the parent is missing, and on both sides where the parents'
     kinship is at least :data:`RELATED_PARENTS_KINSHIP`. fitACE also matches
     recorded ids (sibs, half sibs, parent and child) to catch a parent outside
     its graph; ``load_and_validate`` puts every parent in pedsum's graph, so
     the kinship test already covers those cases (¼ or ⅛).
     """
-    mother, father = pg.mother_rows.astype(np.int64), pg.father_rows.astype(np.int64)
+    if not any(_EPI_REGISTRY[code].via_parent for code in validate_relationship_codes(rels)):
+        return None
+    mother, father = pg.mother_rows.astype(np.int32), pg.father_rows.astype(np.int32)
     related = np.zeros(len(mother), dtype=bool)
     both = (mother >= 0) & (father >= 0)
-    couples, inverse = np.unique(mother[both] * len(mother) + father[both], return_inverse=True)
+    # int64 key: mother * n overflows int32 beyond ~46k people.
+    couples, inverse = np.unique(mother[both].astype(np.int64) * len(mother) + father[both], return_inverse=True)
     if len(couples):
         kin = np.asarray(pg.pair_kinship(*np.divmod(couples, len(mother))))
         related[both] = kin[inverse] >= RELATED_PARENTS_KINSHIP
     if n_related := int(related.sum()):
         logger.info("mAv/pAv: %d people of related parents get no aunts or uncles", n_related)
     return {"mother": np.where(related, -1, mother), "father": np.where(related, -1, father)}
-
-
-def _needs_parent_rows(rels: Iterable[str]) -> bool:
-    return any(_EPI_REGISTRY[code].via_parent for code in rels)
 
 
 def _born_at_year(df: pl.DataFrame, depths: np.ndarray, base_year: int) -> pl.Series:
@@ -278,6 +280,7 @@ def build_epimight_skeleton(
     disorder: str = "trait1",
     base_year: int = BASE_YEAR,
     drop_founders: bool = False,
+    parent_rows: dict[Parent, np.ndarray] | None = None,
 ) -> pl.DataFrame:
     """Build the EPIMIGHT long-form skeleton from a validated pedigree.
 
@@ -298,6 +301,8 @@ def build_epimight_skeleton(
             skeleton favors completeness; the fitACE emitter drops them because a
             founder's degenerate full-sib stratum breaks h² estimation, so opt in
             when the output feeds estimation.
+        parent_rows: :func:`lineage_parent_rows` for ``rels``, computed here
+            when omitted.
 
     Returns:
         A DataFrame with the EPIMIGHT Pipeline-input columns, sorted by
@@ -314,7 +319,8 @@ def build_epimight_skeleton(
     pair_codes = tuple(dict.fromkeys(pc for code in rels for pc in _EPI_REGISTRY[code].count_codes))
     with relationship_progress("relatives_per_person") as progress:
         counts = pg.relatives_per_person(categories=pair_codes, progress=progress)
-    parent_rows = _lineage_parent_rows(pg) if _needs_parent_rows(rels) else {}
+    if parent_rows is None:
+        parent_rows = lineage_parent_rows(pg, rels) or {}
 
     # Reused placeholder columns — every block shares the same null columns.
     na_i8 = pl.Series("failure_status", [None] * n, dtype=pl.Int8)
@@ -363,6 +369,7 @@ def iter_relative_pairs(
     *,
     rels: tuple[str, ...] = EPIMIGHT_RELATIONSHIP_ORDER,
     exact_kinship: bool = False,
+    parent_rows: dict[Parent, np.ndarray] | None = None,
 ) -> Iterator[pl.DataFrame]:
     """Yield the relative pairs backing the skeleton's counts, one relationship kind at a time.
 
@@ -391,12 +398,15 @@ def iter_relative_pairs(
 
     ``df`` is the frame from ``load_and_validate`` and ``pg`` a
     ``PedigreeGraph`` built from it (row order must match ``df``).
+    ``parent_rows`` is :func:`lineage_parent_rows` for ``rels``, computed here
+    when omitted.
     """
     rels = validate_relationship_codes(rels)
     ids = df["id"].to_numpy()
     kinds = sorted(dict.fromkeys(rels))
     # Before the pair list exists, so the couples' kinship call does not add to its peak.
-    parent_rows = _lineage_parent_rows(pg) if _needs_parent_rows(kinds) else {}
+    if parent_rows is None:
+        parent_rows = lineage_parent_rows(pg, kinds) or {}
     # Only the categories these kinds read: the engine still resolves the closer
     # categories a selected one depends on, so each pair keeps its closest code.
     # The "memory" assembly lowers the --pairs peak by 18% at 20M rows for 5%

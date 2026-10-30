@@ -16,6 +16,7 @@ from pedsum.epimight import (
     PLACEHOLDER_COLUMNS,
     build_epimight_skeleton,
     iter_relative_pairs,
+    lineage_parent_rows,
     relationship_diagnostics,
     validate_relationship_codes,
 )
@@ -96,6 +97,8 @@ def run_epimight_input(args: argparse.Namespace) -> int:
     # The skeleton counts relatives without a pair list. --pairs extracts the
     # list for its own export, after the skeleton's counts are freed.
     with timed("epimight skeleton"):
+        # Shared by the skeleton and --pairs: one couples pair_kinship call, not two.
+        parent_rows = lineage_parent_rows(pg, rels)
         # person_id comes from df's id column: relabel it once, at N rows,
         # not the 8N-row skeleton.
         frame = build_epimight_skeleton(
@@ -105,6 +108,7 @@ def run_epimight_input(args: argparse.Namespace) -> int:
             disorder=args.disorder,
             base_year=args.base_year,
             drop_founders=args.drop_founders,
+            parent_rows=parent_rows,
         )
 
     out_dir = args.out_dir
@@ -121,7 +125,9 @@ def run_epimight_input(args: argparse.Namespace) -> int:
             _write_relative_pairs(
                 (
                     labels.relabel(pairs, "id1", "id2")
-                    for pairs in iter_relative_pairs(df, pg, rels=rels, exact_kinship=args.exact_kinship)
+                    for pairs in iter_relative_pairs(
+                        df, pg, rels=rels, exact_kinship=args.exact_kinship, parent_rows=parent_rows
+                    )
                 ),
                 out_dir,
                 parquet=args.parquet,
