@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Requires pedigree-graph 0.14 (`>=0.14,<0.15`), whose full and half
+  relationship categories are decided by path count (its ADR 0018). On
+  pedigrees with double connections, pairs move from a half category to the
+  full one or to a closer degree: on the `clean` golden input `Av` goes from
+  259 to 271 pairs (`HAv` 465 to 453), `GAv` 288 to 366, `GGAv` 186 to 282
+  and `1C` 291 to 294, and the by-degree, burden and `epimight-input`
+  per-person counts move with them. The total number of related pairs is
+  unchanged.
+
 ## 0.15.0 — 2026-10-19 — effective-size command, memory limit, string IDs, multiple births
 
 Breaking. Effective population size leaves `summarize`

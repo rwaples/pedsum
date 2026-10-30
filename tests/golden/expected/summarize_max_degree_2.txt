@@ -855,7 +855,7 @@ pedigree:
       MHS: 77
       PHS: 55
       GP: 514
-      Av: 259
+      Av: 271
       GGP: null
       HAv: null
       GAv: null

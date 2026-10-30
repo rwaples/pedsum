@@ -183,14 +183,14 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 179	trait1			1C	2		2020	
 180	trait1			1C	2		2020	
 181	trait1			1C	3		2020	
-182	trait1			1C	0		2020	
+182	trait1			1C	3		2020	
 183	trait1			1C	3		2020	
-184	trait1			1C	4		2020	
+184	trait1			1C	5		2020	
 185	trait1			1C	2		2020	
 186	trait1			1C	2		2020	
 187	trait1			1C	1		2020	
 188	trait1			1C	2		2020	
-189	trait1			1C	2		2020	
+189	trait1			1C	3		2020	
 190	trait1			1C	2		2020	
 191	trait1			1C	3		2020	
 192	trait1			1C	3		2020	
@@ -201,7 +201,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 197	trait1			1C	3		2020	
 198	trait1			1C	2		2020	
 199	trait1			1C	2		2020	
-200	trait1			1C	3		2020	
+200	trait1			1C	4		2020	
 1	trait1			1G	0		2000	
 2	trait1			1G	0		2000	
 3	trait1			1G	0		2000	
@@ -484,7 +484,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 80	trait1			Av	2		2010	
 81	trait1			Av	2		2010	
 82	trait1			Av	2		2010	
-83	trait1			Av	2		2010	
+83	trait1			Av	4		2010	
 84	trait1			Av	2		2010	
 85	trait1			Av	2		2010	
 86	trait1			Av	2		2010	
@@ -509,7 +509,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 105	trait1			Av	2		2010	
 106	trait1			Av	2		2010	
 107	trait1			Av	2		2010	
-108	trait1			Av	2		2010	
+108	trait1			Av	4		2010	
 109	trait1			Av	2		2010	
 110	trait1			Av	2		2010	
 111	trait1			Av	2		2010	
@@ -523,7 +523,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 119	trait1			Av	2		2010	
 120	trait1			Av	2		2010	
 121	trait1			Av	2		2015	
-122	trait1			Av	2		2015	
+122	trait1			Av	4		2015	
 123	trait1			Av	2		2015	
 124	trait1			Av	2		2015	
 125	trait1			Av	2		2015	
@@ -547,7 +547,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 143	trait1			Av	2		2015	
 144	trait1			Av	2		2015	
 145	trait1			Av	2		2015	
-146	trait1			Av	2		2015	
+146	trait1			Av	4		2015	
 147	trait1			Av	2		2015	
 148	trait1			Av	2		2015	
 149	trait1			Av	2		2015	
@@ -571,7 +571,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 167	trait1			Av	2		2015	
 168	trait1			Av	2		2015	
 169	trait1			Av	2		2015	
-170	trait1			Av	2		2015	
+170	trait1			Av	4		2015	
 171	trait1			Av	2		2020	
 172	trait1			Av	2		2020	
 173	trait1			Av	0		2020	
@@ -583,7 +583,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 179	trait1			Av	2		2020	
 180	trait1			Av	3		2020	
 181	trait1			Av	3		2020	
-182	trait1			Av	0		2020	
+182	trait1			Av	2		2020	
 183	trait1			Av	2		2020	
 184	trait1			Av	2		2020	
 185	trait1			Av	2		2020	
@@ -1786,14 +1786,14 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 179	trait1			1C	2		2020	
 180	trait1			1C	2		2020	
 181	trait1			1C	3		2020	
-182	trait1			1C	0		2020	
+182	trait1			1C	3		2020	
 183	trait1			1C	3		2020	
-184	trait1			1C	4		2020	
+184	trait1			1C	5		2020	
 185	trait1			1C	2		2020	
 186	trait1			1C	2		2020	
 187	trait1			1C	1		2020	
 188	trait1			1C	2		2020	
-189	trait1			1C	2		2020	
+189	trait1			1C	3		2020	
 190	trait1			1C	2		2020	
 191	trait1			1C	3		2020	
 192	trait1			1C	3		2020	
@@ -1804,7 +1804,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 197	trait1			1C	3		2020	
 198	trait1			1C	2		2020	
 199	trait1			1C	2		2020	
-200	trait1			1C	3		2020	
+200	trait1			1C	4		2020	
 1	trait1			1G	0		2000	
 2	trait1			1G	0		2000	
 3	trait1			1G	0		2000	
@@ -2087,7 +2087,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 80	trait1			Av	2		2010	
 81	trait1			Av	2		2010	
 82	trait1			Av	2		2010	
-83	trait1			Av	2		2010	
+83	trait1			Av	4		2010	
 84	trait1			Av	2		2010	
 85	trait1			Av	2		2010	
 86	trait1			Av	2		2010	
@@ -2112,7 +2112,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 105	trait1			Av	2		2010	
 106	trait1			Av	2		2010	
 107	trait1			Av	2		2010	
-108	trait1			Av	2		2010	
+108	trait1			Av	4		2010	
 109	trait1			Av	2		2010	
 110	trait1			Av	2		2010	
 111	trait1			Av	2		2010	
@@ -2126,7 +2126,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 119	trait1			Av	2		2010	
 120	trait1			Av	2		2010	
 121	trait1			Av	2		2015	
-122	trait1			Av	2		2015	
+122	trait1			Av	4		2015	
 123	trait1			Av	2		2015	
 124	trait1			Av	2		2015	
 125	trait1			Av	2		2015	
@@ -2150,7 +2150,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 143	trait1			Av	2		2015	
 144	trait1			Av	2		2015	
 145	trait1			Av	2		2015	
-146	trait1			Av	2		2015	
+146	trait1			Av	4		2015	
 147	trait1			Av	2		2015	
 148	trait1			Av	2		2015	
 149	trait1			Av	2		2015	
@@ -2174,7 +2174,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 167	trait1			Av	2		2015	
 168	trait1			Av	2		2015	
 169	trait1			Av	2		2015	
-170	trait1			Av	2		2015	
+170	trait1			Av	4		2015	
 171	trait1			Av	2		2020	
 172	trait1			Av	2		2020	
 173	trait1			Av	0		2020	
@@ -2186,7 +2186,7 @@ person_id	disorder	failure_status	failure_time	relationship_kind	relatives	relat
 179	trait1			Av	2		2020	
 180	trait1			Av	3		2020	
 181	trait1			Av	3		2020	
-182	trait1			Av	0		2020	
+182	trait1			Av	2		2020	
 183	trait1			Av	2		2020	
 184	trait1			Av	2		2020	
 185	trait1			Av	2		2020	
@@ -3484,6 +3484,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 180	181	1C	0.0625	0.087890625
 181	185	1C	0.0625	0.1015625
 181	188	1C	0.0625	0.078125
+182	184	1C	0.0625	0.0859375
+182	189	1C	0.0625	0.078125
+182	200	1C	0.0625	0.08203125
 183	191	1C	0.0625	0.099609375
 183	197	1C	0.0625	0.1015625
 184	189	1C	0.0625	0.078125
@@ -4038,7 +4041,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 82	54	Av	0.125	0.125
 82	61	Av	0.125	0.125
 83	39	Av	0.125	0.125
+83	47	Av	0.125	0.125
 83	56	Av	0.125	0.125
+83	67	Av	0.125	0.125
 84	41	Av	0.125	0.125
 84	53	Av	0.125	0.125
 85	44	Av	0.125	0.125
@@ -4088,7 +4093,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 107	54	Av	0.125	0.125
 107	61	Av	0.125	0.125
 108	39	Av	0.125	0.125
+108	47	Av	0.125	0.125
 108	56	Av	0.125	0.125
+108	67	Av	0.125	0.125
 109	41	Av	0.125	0.125
 109	53	Av	0.125	0.125
 110	44	Av	0.125	0.125
@@ -4115,8 +4122,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 120	47	Av	0.125	0.125
 121	90	Av	0.125	0.15625
 121	103	Av	0.125	0.15625
+122	73	Av	0.125	0.125
 122	79	Av	0.125	0.125
 122	82	Av	0.125	0.125
+122	98	Av	0.125	0.125
 123	92	Av	0.125	0.125
 123	106	Av	0.125	0.125
 124	101	Av	0.125	0.125
@@ -4163,8 +4172,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 144	108	Av	0.125	0.125
 145	90	Av	0.125	0.15625
 145	103	Av	0.125	0.15625
+146	73	Av	0.125	0.125
 146	79	Av	0.125	0.125
 146	82	Av	0.125	0.125
+146	98	Av	0.125	0.125
 147	92	Av	0.125	0.125
 147	106	Av	0.125	0.125
 148	101	Av	0.125	0.125
@@ -4211,8 +4222,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 168	108	Av	0.125	0.125
 169	90	Av	0.125	0.15625
 169	103	Av	0.125	0.15625
+170	73	Av	0.125	0.125
 170	79	Av	0.125	0.125
 170	82	Av	0.125	0.125
+170	98	Av	0.125	0.125
 171	127	Av	0.125	0.1328125
 171	164	Av	0.125	0.140625
 172	144	Av	0.125	0.1328125
@@ -4233,6 +4246,8 @@ id1	id2	relationship_kind	kinship	kinship_exact
 181	146	Av	0.125	0.140625
 181	157	Av	0.125	0.140625
 181	170	Av	0.125	0.140625
+182	134	Av	0.125	0.140625
+182	158	Av	0.125	0.140625
 183	151	Av	0.125	0.14453125
 183	163	Av	0.125	0.14453125
 184	134	Av	0.125	0.13671875
@@ -5228,6 +5243,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 180	181	1C	0.0625	0.087890625
 181	185	1C	0.0625	0.1015625
 181	188	1C	0.0625	0.078125
+182	184	1C	0.0625	0.0859375
+182	189	1C	0.0625	0.078125
+182	200	1C	0.0625	0.08203125
 183	191	1C	0.0625	0.099609375
 183	197	1C	0.0625	0.1015625
 184	189	1C	0.0625	0.078125
@@ -5782,7 +5800,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 82	54	Av	0.125	0.125
 82	61	Av	0.125	0.125
 83	39	Av	0.125	0.125
+83	47	Av	0.125	0.125
 83	56	Av	0.125	0.125
+83	67	Av	0.125	0.125
 84	41	Av	0.125	0.125
 84	53	Av	0.125	0.125
 85	44	Av	0.125	0.125
@@ -5832,7 +5852,9 @@ id1	id2	relationship_kind	kinship	kinship_exact
 107	54	Av	0.125	0.125
 107	61	Av	0.125	0.125
 108	39	Av	0.125	0.125
+108	47	Av	0.125	0.125
 108	56	Av	0.125	0.125
+108	67	Av	0.125	0.125
 109	41	Av	0.125	0.125
 109	53	Av	0.125	0.125
 110	44	Av	0.125	0.125
@@ -5859,8 +5881,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 120	47	Av	0.125	0.125
 121	90	Av	0.125	0.15625
 121	103	Av	0.125	0.15625
+122	73	Av	0.125	0.125
 122	79	Av	0.125	0.125
 122	82	Av	0.125	0.125
+122	98	Av	0.125	0.125
 123	92	Av	0.125	0.125
 123	106	Av	0.125	0.125
 124	101	Av	0.125	0.125
@@ -5907,8 +5931,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 144	108	Av	0.125	0.125
 145	90	Av	0.125	0.15625
 145	103	Av	0.125	0.15625
+146	73	Av	0.125	0.125
 146	79	Av	0.125	0.125
 146	82	Av	0.125	0.125
+146	98	Av	0.125	0.125
 147	92	Av	0.125	0.125
 147	106	Av	0.125	0.125
 148	101	Av	0.125	0.125
@@ -5955,8 +5981,10 @@ id1	id2	relationship_kind	kinship	kinship_exact
 168	108	Av	0.125	0.125
 169	90	Av	0.125	0.15625
 169	103	Av	0.125	0.15625
+170	73	Av	0.125	0.125
 170	79	Av	0.125	0.125
 170	82	Av	0.125	0.125
+170	98	Av	0.125	0.125
 171	127	Av	0.125	0.1328125
 171	164	Av	0.125	0.140625
 172	144	Av	0.125	0.1328125
@@ -5977,6 +6005,8 @@ id1	id2	relationship_kind	kinship	kinship_exact
 181	146	Av	0.125	0.140625
 181	157	Av	0.125	0.140625
 181	170	Av	0.125	0.140625
+182	134	Av	0.125	0.140625
+182	158	Av	0.125	0.140625
 183	151	Av	0.125	0.14453125
 183	163	Av	0.125	0.14453125
 184	134	Av	0.125	0.13671875

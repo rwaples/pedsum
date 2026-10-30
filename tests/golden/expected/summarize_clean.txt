@@ -1257,42 +1257,42 @@ relationship_summary	n_related_pairs		7471
 relationship_summary	n_unrelated_pairs		12429
 relationship_summary	related_pair_density		0.3754
 relationship_summary	related_pairs_by_closest_degree	1	413
-relationship_summary	related_pairs_by_closest_degree	2	905
-relationship_summary	related_pairs_by_closest_degree	3	1632
-relationship_summary	related_pairs_by_closest_degree	4	2333
-relationship_summary	related_pairs_by_closest_degree	5	2188
+relationship_summary	related_pairs_by_closest_degree	2	917
+relationship_summary	related_pairs_by_closest_degree	3	1701
+relationship_summary	related_pairs_by_closest_degree	4	2348
+relationship_summary	related_pairs_by_closest_degree	5	2092
 relationship_summary	closest_relationship_per_individual	none	0
 relationship_summary	closest_relationship_per_individual	1	200
 relationship_summary	closest_relationship_per_individual	2	0
 relationship_summary	closest_relationship_per_individual	3	0
 relationship_summary	closest_relationship_per_individual	4	0
 relationship_summary	closest_relationship_per_individual	5	0
-relationship_summary	relatives_by_degree	5.mean	21.88
-relationship_summary	relatives_by_degree	5.std	16.6454
+relationship_summary	relatives_by_degree	5.mean	20.92
+relationship_summary	relatives_by_degree	5.std	16.4049
 relationship_summary	relatives_by_degree	5.min	0
-relationship_summary	relatives_by_degree	5.q1	6
+relationship_summary	relatives_by_degree	5.q1	4
 relationship_summary	relatives_by_degree	5.median	22
-relationship_summary	relatives_by_degree	5.q3	36
-relationship_summary	relatives_by_degree	5.max	55
+relationship_summary	relatives_by_degree	5.q3	35
+relationship_summary	relatives_by_degree	5.max	54
 relationship_summary	relatives_by_degree	5.nz	156
-relationship_summary	relatives_by_degree	4.mean	23.33
-relationship_summary	relatives_by_degree	4.std	11.3952
+relationship_summary	relatives_by_degree	4.mean	23.48
+relationship_summary	relatives_by_degree	4.std	11.5871
 relationship_summary	relatives_by_degree	4.min	0
-relationship_summary	relatives_by_degree	4.q1	14
-relationship_summary	relatives_by_degree	4.median	24
+relationship_summary	relatives_by_degree	4.q1	15
+relationship_summary	relatives_by_degree	4.median	22
 relationship_summary	relatives_by_degree	4.q3	32
-relationship_summary	relatives_by_degree	4.max	54
+relationship_summary	relatives_by_degree	4.max	56
 relationship_summary	relatives_by_degree	4.nz	198
-relationship_summary	relatives_by_degree	3.mean	16.32
-relationship_summary	relatives_by_degree	3.std	5.8856
+relationship_summary	relatives_by_degree	3.mean	17.01
+relationship_summary	relatives_by_degree	3.std	6.2647
 relationship_summary	relatives_by_degree	3.min	4
-relationship_summary	relatives_by_degree	3.q1	12
-relationship_summary	relatives_by_degree	3.median	16
-relationship_summary	relatives_by_degree	3.q3	20
-relationship_summary	relatives_by_degree	3.max	29
+relationship_summary	relatives_by_degree	3.q1	13
+relationship_summary	relatives_by_degree	3.median	17
+relationship_summary	relatives_by_degree	3.q3	21
+relationship_summary	relatives_by_degree	3.max	33
 relationship_summary	relatives_by_degree	3.nz	200
-relationship_summary	relatives_by_degree	2.mean	9.05
-relationship_summary	relatives_by_degree	2.std	3.2942
+relationship_summary	relatives_by_degree	2.mean	9.17
+relationship_summary	relatives_by_degree	2.std	3.4013
 relationship_summary	relatives_by_degree	2.min	2
 relationship_summary	relatives_by_degree	2.q1	7
 relationship_summary	relatives_by_degree	2.median	9
@@ -1769,18 +1769,18 @@ relationship_pairs	FS		73
 relationship_pairs	MHS		77
 relationship_pairs	PHS		55
 relationship_pairs	GP		514
-relationship_pairs	Av		259
+relationship_pairs	Av		271
 relationship_pairs	GGP		588
-relationship_pairs	HAv		465
-relationship_pairs	GAv		288
-relationship_pairs	1C		291
+relationship_pairs	HAv		453
+relationship_pairs	GAv		366
+relationship_pairs	1C		294
 relationship_pairs	GGGP		371
-relationship_pairs	HGAv		490
-relationship_pairs	GGAv		186
-relationship_pairs	H1C		430
+relationship_pairs	HGAv		412
+relationship_pairs	GGAv		282
+relationship_pairs	H1C		427
 relationship_pairs	1C1R		856
 relationship_pairs	G3GP		0
-relationship_pairs	HGGAv		256
+relationship_pairs	HGGAv		160
 relationship_pairs	G3Av		0
 relationship_pairs	H1C1R		697
 relationship_pairs	1C2R		608
@@ -1788,10 +1788,10 @@ relationship_pairs	2C		627
 relationship_pairs	PO		340
 relationship_pairs	by_degree	0	0
 relationship_pairs	by_degree	1	413
-relationship_pairs	by_degree	2	905
-relationship_pairs	by_degree	3	1632
-relationship_pairs	by_degree	4	2333
-relationship_pairs	by_degree	5	2188
+relationship_pairs	by_degree	2	917
+relationship_pairs	by_degree	3	1701
+relationship_pairs	by_degree	4	2348
+relationship_pairs	by_degree	5	2092
 inbreeding	n_inbred		43
 inbreeding	frac_inbred		0.215
 inbreeding	mean_F		0.0116
@@ -2112,18 +2112,18 @@ pedigree:
       MHS: 77
       PHS: 55
       GP: 514
-      Av: 259
+      Av: 271
       GGP: 588
-      HAv: 465
-      GAv: 288
-      1C: 291
+      HAv: 453
+      GAv: 366
+      1C: 294
       GGGP: 371
-      HGAv: 490
-      GGAv: 186
-      H1C: 430
+      HGAv: 412
+      GGAv: 282
+      H1C: 427
       1C1R: 856
       G3GP: 0
-      HGGAv: 256
+      HGGAv: 160
       G3Av: 0
       H1C1R: 697
       1C2R: 608
@@ -2139,10 +2139,10 @@ pedigree:
       related_pair_density: 0.3754
       related_pairs_by_closest_degree:
         '1': 413
-        '2': 905
-        '3': 1632
-        '4': 2333
-        '5': 2188
+        '2': 917
+        '3': 1701
+        '4': 2348
+        '5': 2092
       closest_relationship_per_individual:
         none: 0
         '1': 200
@@ -2152,35 +2152,35 @@ pedigree:
         '5': 0
       relatives_by_degree:
         '5':
-          mean: 21.88
-          std: 16.6454
+          mean: 20.92
+          std: 16.4049
           min: 0
-          q1: 6
+          q1: 4
           median: 22
-          q3: 36
-          max: 55
+          q3: 35
+          max: 54
           nz: 156
         '4':
-          mean: 23.33
-          std: 11.3952
+          mean: 23.48
+          std: 11.5871
           min: 0
-          q1: 14
-          median: 24
+          q1: 15
+          median: 22
           q3: 32
-          max: 54
+          max: 56
           nz: 198
         '3':
-          mean: 16.32
-          std: 5.8856
+          mean: 17.01
+          std: 6.2647
           min: 4
-          q1: 12
-          median: 16
-          q3: 20
-          max: 29
+          q1: 13
+          median: 17
+          q3: 21
+          max: 33
           nz: 200
         '2':
-          mean: 9.05
-          std: 3.2942
+          mean: 9.17
+          std: 3.4013
           min: 2
           q1: 7
           median: 9
