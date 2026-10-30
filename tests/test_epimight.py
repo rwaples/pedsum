@@ -15,11 +15,13 @@ from __future__ import annotations
 from collections import Counter
 
 import polars as pl
+import pytest
 from conftest import EXAMPLE, write_ped
 from conftest import run_pedsum as _run
 
 from pedsum.epimight import (
     EPIMIGHT_COLUMNS,
+    EPIMIGHT_RELATIONSHIP_CODES,
     EPIMIGHT_RELATIONSHIP_ORDER,
     PLACEHOLDER_COLUMNS,
     RELATIVE_PAIR_COLUMNS,
@@ -27,7 +29,7 @@ from pedsum.epimight import (
     iter_relative_pairs,
 )
 
-_DIRECTIONAL = {"PO", "Av", "1G"}
+_DIRECTIONAL = {"PO", "MO", "FO", "Av", "mAv", "pAv", "1G"}
 
 # --- a small deterministic pedigree with one of each relationship -----------
 #
@@ -302,9 +304,9 @@ def test_iter_relative_pairs_one_sorted_frame_per_kind(tmp_path):
 
 def test_pairs_reconcile_with_skeleton_counts(tmp_path):
     """Pair counts back the skeleton: Σrelatives == 2·n_pairs (symmetric) or n_pairs (directional)."""
-    skeleton = _skeleton_from_rows(_PEDIGREE, tmp_path)
-    pairs = _pairs_from_rows(_PEDIGREE, tmp_path)
-    for rel in EPIMIGHT_RELATIONSHIP_ORDER:
+    skeleton = _skeleton_from_rows(_PEDIGREE, tmp_path, rels=EPIMIGHT_RELATIONSHIP_CODES)
+    pairs = _pairs_from_rows(_PEDIGREE, tmp_path, rels=EPIMIGHT_RELATIONSHIP_CODES)
+    for rel in EPIMIGHT_RELATIONSHIP_CODES:
         n_pairs = int((pairs["relationship_kind"] == rel).sum())
         rel_sum = int(skeleton.filter(pl.col("relationship_kind") == rel)["relatives"].sum())
         expected = n_pairs if rel in _DIRECTIONAL else 2 * n_pairs
@@ -336,7 +338,15 @@ def test_pairs_exact_and_orientation(tmp_path):
     assert by_kind["1C"] == 0.0625
 
 
-def test_emitted_outputs_consistent_per_person(tmp_path):
+@pytest.mark.parametrize(
+    ("rels", "flags"),
+    [
+        (EPIMIGHT_RELATIONSHIP_ORDER, []),
+        (EPIMIGHT_RELATIONSHIP_CODES, ["--rels", ",".join(EPIMIGHT_RELATIONSHIP_CODES)]),
+    ],
+    ids=["default", "all"],
+)
+def test_emitted_outputs_consistent_per_person(tmp_path, rels, flags):
     """The two emitted files reconcile per person.
 
     For every (person, kind), the skeleton's ``relatives`` equals how often that
@@ -344,7 +354,7 @@ def test_emitted_outputs_consistent_per_person(tmp_path):
     the younger member is charged) or on either side for symmetric kinds.
     """
     out = tmp_path / "out"
-    res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--pairs"])
+    res = _run(["epimight-input", "--in", str(EXAMPLE), "--out", str(out), "--pairs", *flags])
     assert res.returncode == 0, res.stderr
 
     # Read ids as strings so the skeleton's person_id and the pairs' id1/id2 align.
@@ -353,7 +363,8 @@ def test_emitted_outputs_consistent_per_person(tmp_path):
         out / "relative_pairs.tsv", separator="\t", schema_overrides={"id1": pl.String, "id2": pl.String}
     )
 
-    for rel in EPIMIGHT_RELATIONSHIP_ORDER:
+    assert set(skeleton["relationship_kind"]) == set(rels)
+    for rel in rels:
         block_sk = skeleton.filter(pl.col("relationship_kind") == rel)
         block_pairs = pairs.filter(pl.col("relationship_kind") == rel)
         charged = (
@@ -463,3 +474,71 @@ def test_mz_is_opt_in_and_leaves_fs(tmp_path):
     assert res.returncode == 0, res.stderr
     skel = pl.read_csv(plain / "pipeline_input.tsv", separator="\t").filter(pl.col("person_id") == 3)
     assert dict(skel.select("relationship_kind", "relatives").rows()) == {"MZ": 0, "FS": 2}
+
+
+def test_mo_fo_split_po_and_are_opt_in(tmp_path):
+    """MO and FO are PO's mother and father halves, and neither is a default kind."""
+    assert {"MO", "FO"}.isdisjoint(EPIMIGHT_RELATIONSHIP_ORDER)
+    pairs = _pairs_from_rows(_PEDIGREE, tmp_path, rels=("PO", "MO", "FO"))
+    assert _pair_set(pairs, "MO") == {(5, 1), (6, 1), (7, 5), (8, 3)}
+    assert _pair_set(pairs, "FO") == {(5, 2), (6, 2), (7, 4), (8, 6)}
+    assert _pair_set(pairs, "MO") | _pair_set(pairs, "FO") == _pair_set(pairs, "PO")
+    assert set(pairs.filter(pl.col("relationship_kind").is_in(["MO", "FO"]))["kinship"]) == {0.25}
+
+
+def test_lineage_split_av_by_parent(tmp_path):
+    """The mAv count is the mother's full sibs and pAv the father's; together they are Av here."""
+    assert {"mAv", "pAv"}.isdisjoint(EPIMIGHT_RELATIONSHIP_ORDER)
+    rels = ("Av", "mAv", "pAv")
+    frame = _skeleton_from_rows(_PEDIGREE, tmp_path, rels=rels)
+    assert [_relatives(frame, "7", r) for r in rels] == [1, 1, 0]  # mother 5's sib 6
+    assert [_relatives(frame, "8", r) for r in rels] == [1, 0, 1]  # father 6's sib 5
+    assert _relatives(frame, "5", "mAv") == 0
+    pairs = _pairs_from_rows(_PEDIGREE, tmp_path, rels=rels)
+    assert _pair_set(pairs, "mAv") == {(7, 6)}
+    assert _pair_set(pairs, "pAv") == {(8, 5)}
+    assert set(pairs.filter(pl.col("relationship_kind").is_in(["mAv", "pAv"]))["kinship"]) == {0.125}
+
+
+def test_lineage_split_skips_children_of_related_parents(tmp_path):
+    """Sib parents (by id) and first-cousin parents (by kinship) give their children neither half."""
+    frame = _skeleton_from_rows(_INBRED, tmp_path, rels=("mAv", "pAv"))
+    assert frame.filter(pl.col("person_id").is_in(["5", "6"]))["relatives"].to_list() == [0, 0, 0, 0]
+
+    # 7 and 8 are first cousins (kinship 1/16) and 9 is 7's full sib. Child 10 of
+    # the cousins is skipped; child 11 of 9 and an outsider is not.
+    rows = [
+        *_PEDIGREE,
+        {"id": 9, "sex": "M", "mother": 5, "father": 4},
+        {"id": 10, "sex": "F", "mother": 8, "father": 7},
+        {"id": 12, "sex": "F", "mother": -1, "father": -1},
+        {"id": 11, "sex": "F", "mother": 12, "father": 9},
+    ]
+    frame = _skeleton_from_rows(rows, tmp_path, rels=("Av", "pAv"))
+    assert _relatives(frame, "10", "Av") == 1
+    assert _relatives(frame, "10", "pAv") == 0
+    assert _relatives(frame, "11", "pAv") == 1
+    pairs = _pairs_from_rows(rows, tmp_path, rels=("pAv",))
+    assert _pair_set(pairs, "pAv") == {(8, 5), (11, 7)}
+
+
+def test_lineage_split_leaves_out_a_parents_mz_co_twin(tmp_path):
+    """A mother's MZ co-twin is MZ, not FS, under --zygosity-col, so mAv drops her."""
+    rows = [
+        {"id": 1, "sex": "F", "mother": -1, "father": -1, "set": "", "zyg": ""},
+        {"id": 2, "sex": "M", "mother": -1, "father": -1, "set": "", "zyg": ""},
+        {"id": 3, "sex": "F", "mother": 1, "father": 2, "set": "A", "zyg": "MZ"},
+        {"id": 4, "sex": "F", "mother": 1, "father": 2, "set": "A", "zyg": "MZ"},
+        {"id": 5, "sex": "M", "mother": 1, "father": 2, "set": "", "zyg": ""},
+        {"id": 6, "sex": "M", "mother": -1, "father": -1, "set": "", "zyg": ""},
+        {"id": 7, "sex": "F", "mother": 3, "father": 6, "set": "", "zyg": ""},
+    ]
+    ped = write_ped(tmp_path / "p.tsv", rows)
+    twins = ["--multiple-birth-col", "set", "--zygosity-col", "zyg"]
+    for flags, expected in ((twins, [(7, 5)]), ([], [(7, 4), (7, 5)])):
+        out = tmp_path / f"out{len(flags)}"
+        res = _run(["epimight-input", "--in", str(ped), "--out", str(out), *flags, "--rels", "mAv", "--pairs"])
+        assert res.returncode == 0, res.stderr
+        skel = pl.read_csv(out / "pipeline_input.tsv", separator="\t").filter(pl.col("person_id") == 7)
+        assert skel["relatives"].to_list() == [len(expected)]
+        assert pl.read_csv(out / "relative_pairs.tsv", separator="\t").select("id1", "id2").rows() == expected

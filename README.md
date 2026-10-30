@@ -1108,7 +1108,7 @@ Flags:
 
 - `--pairs` — also write `relative_pairs.tsv`, the list of relative pairs that
   the skeleton's `relatives` counts aggregate. For directional kinds (`PO`,
-  `Av`, `1G`) `id1` is the younger member; symmetric kinds are canonicalized
+  `MO`, `FO`, `Av`, `mAv`, `pAv`, `1G`) `id1` is the younger member; symmetric kinds are canonicalized
   `id1 < id2`. Materialises every pair, so it can be large on pair-dense
   pedigrees (cousins scale ~quadratically).
 - `--exact-kinship` — add a `kinship_exact` column to `relative_pairs.tsv` with
@@ -1119,10 +1119,17 @@ Flags:
 - `--parquet` — additionally write the parquet form of each emitted table
   (written natively by polars).
 - `--rels CODES` — comma-separated relationship codes to emit, in order
-  (default: all eight but `MZ`). `MZ` is opt-in: it holds the co-twins that
+  (default: the eight EPIMIGHT 2.1 codes). `MZ` is opt-in: it holds the co-twins that
   `--zygosity-col` links, and `FS` leaves them out, so without
-  `--zygosity-col` it is empty. EPIMIGHT 2.1 has no `MZ` kind and cannot
-  fit it.
+  `--zygosity-col` it is empty. `MO` and `FO` are also opt-in: they split
+  `PO` into mother-offspring and father-offspring pairs. EPIMIGHT 2.1 has no
+  `MZ`, `MO` or `FO` kind and cannot fit them. `mAv` and `pAv` (opt-in,
+  and also not in EPIMIGHT 2.1) split `Av` by the proband's mother or
+  father. Each counts the full sibs of that parent, so a parent's MZ co-twin
+  (kinship ¼ with the proband, not ⅛) is left out. A proband whose parents
+  are related (kinship ≥ 1/16, or sibs or parent and child by recorded id)
+  gets 0 in both. Without `--zygosity-col` a parent's MZ co-twin is an
+  ordinary full sib and is counted.
 - `--disorder NAME` — label for the single emitted `disorder` block (default
   `trait1`; a pedigree carries no trait).
 - `--base-year YEAR` — calendar offset for the derived `born_at_year`

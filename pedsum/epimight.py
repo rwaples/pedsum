@@ -27,17 +27,26 @@ The relationship grouping below mirrors fitACE's ``fitace.relationships``
 (the EPIMIGHT-facing grouping over pedigree-graph pair codes) — pedsum is public
 and cannot import the private ``fitace`` package, so this is a maintained copy.
 Keep the codes, constituent pair codes, directionality and default flags in sync.
+
+``mAv`` and ``pAv`` split ``Av`` by the proband's mother or father. They are
+not a union of pair codes. A proband's count is the parent's full-sib count,
+read at the parent's row, so a parent's MZ co-twin (kinship ¼ with the
+proband, not ⅛) is left out. A proband whose parents are related
+(:data:`RELATED_PARENTS_KINSHIP`) gets neither half. This follows
+``fitace_epimight.create_input._lineage_parent_rows`` (fitACE's ``multimight``
+branch); keep the two in step.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import polars as pl
 from pedigree_graph import RELATIONSHIPS
 
+from pedsum.base import logger
 from pedsum.progress import relationship_progress
 
 if TYPE_CHECKING:
@@ -49,6 +58,16 @@ if TYPE_CHECKING:
 #: ``born_at_year = base_year + depth`` (depth 0 = founders).
 #: Matches ``fitace_epimight.constants.BASE_YEAR``.
 BASE_YEAR = 1960
+
+#: The pair codes of a parent's sibs that a lineage split counts.
+PARENT_SIB_PAIR_CODES: tuple[str, ...] = ("FS",)
+
+#: Parents at least this kin (first cousins) give their children no ``mAv`` or
+#: ``pAv``: their own relationship adds paths, and can make a parent's sib a
+#: grandparent. Matches ``fitace_epimight.create_input.RELATED_PARENTS_KINSHIP``.
+RELATED_PARENTS_KINSHIP = 1 / 16
+
+Parent = Literal["mother", "father"]
 
 
 @dataclass(frozen=True)
@@ -64,14 +83,23 @@ class _EpiRel:
             junior-first orientation instead of canonicalizing. pedigree-graph
             supplies both (``relatives_per_person`` credits only the junior
             member of an asymmetric category), so nothing is reordered here.
-        default: whether ``--rels`` includes the code when not given. ``MZ``
-            is opt-in.
+        default: whether ``--rels`` includes the code when not given. ``MZ``,
+            ``MO``, ``FO``, ``mAv`` and ``pAv`` are opt-in.
+        via_parent: the parent of a lineage split. Its ``pair_codes`` then only
+            name the unsplit kind; the count reads
+            :data:`PARENT_SIB_PAIR_CODES` at that parent's row.
     """
 
     code: str
     pair_codes: tuple[str, ...]
     directional: bool = False
     default: bool = True
+    via_parent: Parent | None = None
+
+    @property
+    def count_codes(self) -> tuple[str, ...]:
+        """The pair codes the engine resolves for this kind."""
+        return PARENT_SIB_PAIR_CODES if self.via_parent else self.pair_codes
 
     @property
     def kinship(self) -> float:
@@ -89,11 +117,16 @@ _EPIMIGHT_RELS: tuple[_EpiRel, ...] = (
     # MZ co-twins exist only under --zygosity-col; FS is the other full sibs.
     _EpiRel("MZ", ("MZ",), default=False),
     _EpiRel("PO", ("MO", "FO"), directional=True),
+    # PO's maternal and paternal halves; EPIMIGHT 2.1 has no kind for either.
+    _EpiRel("MO", ("MO",), directional=True, default=False),
+    _EpiRel("FO", ("FO",), directional=True, default=False),
     _EpiRel("FS", ("FS",)),
     _EpiRel("HS", ("MHS", "PHS")),
     _EpiRel("mHS", ("MHS",)),
     _EpiRel("pHS", ("PHS",)),
     _EpiRel("Av", ("Av",), directional=True),
+    _EpiRel("mAv", ("Av",), directional=True, default=False, via_parent="mother"),
+    _EpiRel("pAv", ("Av",), directional=True, default=False, via_parent="father"),
     _EpiRel("1G", ("GP",), directional=True),
     _EpiRel("1C", ("1C",)),
 )
@@ -155,7 +188,9 @@ def validate_relationship_codes(codes: Iterable[str]) -> tuple[str, ...]:
     return requested
 
 
-def _relationship_rows(all_pairs: RelationshipPairs, code: str) -> tuple[np.ndarray, np.ndarray]:
+def _relationship_rows(
+    all_pairs: RelationshipPairs, code: str, parent_rows: dict[Parent, np.ndarray]
+) -> tuple[np.ndarray, np.ndarray]:
     """The ``(idx1, idx2)`` graph rows of every pair of one EPIMIGHT code.
 
     Concatenates the row arrays of the code's constituent pair codes, so one
@@ -165,9 +200,57 @@ def _relationship_rows(all_pairs: RelationshipPairs, code: str) -> tuple[np.ndar
     directional EPIMIGHT kind charges. Re-deriving it from depth would disagree with the contract on a
     skipped-generation pedigree, where an aunt can sit at the same depth as
     her niece.
+
+    A lineage split pairs each child with its parent's sibs instead.
     """
-    blocks = [all_pairs[pair_code] for pair_code in _EPI_REGISTRY[code].pair_codes]
-    return np.concatenate([b.first_rows for b in blocks]), np.concatenate([b.second_rows for b in blocks])
+    rel = _EPI_REGISTRY[code]
+    blocks = [all_pairs[pair_code] for pair_code in rel.count_codes]
+    first, second = np.concatenate([b.first_rows for b in blocks]), np.concatenate([b.second_rows for b in blocks])
+    if rel.via_parent is None:
+        return first, second
+    return _children_of_sibs(first, second, parent_rows[rel.via_parent])
+
+
+def _children_of_sibs(first: np.ndarray, second: np.ndarray, parent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(child, parent's sib)`` rows for every child whose ``parent`` row is not -1.
+
+    ``first``/``second`` list each sib pair once, in either order.
+    """
+    src, dst = np.concatenate([first, second]), np.concatenate([second, first])
+    sibs = dst[np.argsort(src, kind="stable")]
+    degree = np.bincount(src, minlength=len(parent))
+    start = np.cumsum(degree) - degree
+    child = np.flatnonzero(parent >= 0)
+    of_child = parent[child]
+    k = degree[of_child]
+    # Entry j of child i's run reads sibs[start[parent of i] + j].
+    offsets = np.repeat(start[of_child] - (np.cumsum(k) - k), k) + np.arange(int(k.sum()))
+    return np.repeat(child, k), sibs[offsets]
+
+
+def _lineage_parent_rows(pg: PedigreeGraph) -> dict[Parent, np.ndarray]:
+    """Each graph row's mother and father row for the lineage split, -1 where it is skipped.
+
+    -1 where the parent is missing, and on both sides where the parents'
+    kinship is at least :data:`RELATED_PARENTS_KINSHIP`. fitACE also matches
+    recorded ids (sibs, half sibs, parent and child) to catch a parent outside
+    its graph; ``load_and_validate`` puts every parent in pedsum's graph, so
+    the kinship test already covers those cases (¼ or ⅛).
+    """
+    mother, father = pg.mother_rows.astype(np.int64), pg.father_rows.astype(np.int64)
+    related = np.zeros(len(mother), dtype=bool)
+    both = (mother >= 0) & (father >= 0)
+    couples, inverse = np.unique(mother[both] * len(mother) + father[both], return_inverse=True)
+    if len(couples):
+        kin = np.asarray(pg.pair_kinship(*np.divmod(couples, len(mother))))
+        related[both] = kin[inverse] >= RELATED_PARENTS_KINSHIP
+    if n_related := int(related.sum()):
+        logger.info("mAv/pAv: %d people of related parents get no aunts or uncles", n_related)
+    return {"mother": np.where(related, -1, mother), "father": np.where(related, -1, father)}
+
+
+def _needs_parent_rows(rels: Iterable[str]) -> bool:
+    return any(_EPI_REGISTRY[code].via_parent for code in rels)
 
 
 def _born_at_year(df: pl.DataFrame, depths: np.ndarray, base_year: int) -> pl.Series:
@@ -228,9 +311,10 @@ def build_epimight_skeleton(
     born_at_year = _born_at_year(df, depths, base_year)
 
     # One engine pass over every constituent code; sum() folds a kind's codes.
-    pair_codes = tuple(dict.fromkeys(pc for code in rels for pc in _EPI_REGISTRY[code].pair_codes))
+    pair_codes = tuple(dict.fromkeys(pc for code in rels for pc in _EPI_REGISTRY[code].count_codes))
     with relationship_progress("relatives_per_person") as progress:
         counts = pg.relatives_per_person(categories=pair_codes, progress=progress)
+    parent_rows = _lineage_parent_rows(pg) if _needs_parent_rows(rels) else {}
 
     # Reused placeholder columns — every block shares the same null columns.
     na_i8 = pl.Series("failure_status", [None] * n, dtype=pl.Int8)
@@ -243,7 +327,11 @@ def build_epimight_skeleton(
     # frame instead would set the process's peak memory.
     blocks: list[pl.DataFrame] = []
     for code in sorted(rels):
-        relatives = counts.sum(_EPI_REGISTRY[code].pair_codes).astype(np.int32)
+        rel = _EPI_REGISTRY[code]
+        relatives = counts.sum(rel.count_codes).astype(np.int32)
+        if rel.via_parent:
+            rows = parent_rows[rel.via_parent]
+            relatives = np.where(rows >= 0, relatives[rows.clip(min=0)], 0).astype(np.int32)
         blocks.append(
             pl.DataFrame(
                 {
@@ -285,7 +373,7 @@ def iter_relative_pairs(
 
     One row per relative pair per relationship code, with columns
     ``id1, id2, relationship_kind, kinship``. For directional kinds (``PO``,
-    ``Av``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
+    ``MO``, ``FO``, ``Av``, ``mAv``, ``pAv``, ``1G``) ``id1`` is the younger member and ``id2`` the older relative;
     symmetric kinds are canonicalized so ``id1 < id2``.
 
     ``kinship`` is the **nominal** coefficient looked up by ``relationship_kind``
@@ -307,13 +395,15 @@ def iter_relative_pairs(
     rels = validate_relationship_codes(rels)
     ids = df["id"].to_numpy()
     kinds = sorted(dict.fromkeys(rels))
+    # Before the pair list exists, so the couples' kinship call does not add to its peak.
+    parent_rows = _lineage_parent_rows(pg) if _needs_parent_rows(kinds) else {}
     # Only the categories these kinds read: the engine still resolves the closer
     # categories a selected one depends on, so each pair keeps its closest code.
     # The "memory" assembly lowers the --pairs peak by 18% at 20M rows for 5%
     # more wall time.
     with relationship_progress("relationship_pairs") as progress:
         all_pairs = pg.relationship_pairs(
-            categories=dict.fromkeys(pc for code in kinds for pc in _EPI_REGISTRY[code].pair_codes),
+            categories=dict.fromkeys(pc for code in kinds for pc in _EPI_REGISTRY[code].count_codes),
             execution="memory",
             progress=progress,
         )
@@ -321,7 +411,7 @@ def iter_relative_pairs(
 
     for code in kinds:
         rel = _EPI_REGISTRY[code]
-        idx1, idx2 = _relationship_rows(all_pairs, code)
+        idx1, idx2 = _relationship_rows(all_pairs, code, parent_rows)
         id1, id2 = ids[idx1], ids[idx2]
         if not rel.directional:
             # Symmetric: canonicalize so the smaller id comes first. pair_kinship

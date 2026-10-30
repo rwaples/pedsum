@@ -10,6 +10,14 @@
   and `1C` 291 to 294, and the by-degree, burden and `epimight-input`
   per-person counts move with them. The total number of related pairs is
   unchanged.
+- **`epimight-input --rels` accepts `MO`, `FO`, `mAv` and `pAv`**, the
+  relationship kinds fitACE's `multimight` branch adds. All four are directional (counted on the child),
+  opt-in, and unfit by EPIMIGHT 2.1. `MO` and `FO` are the mother-offspring
+  and father-offspring halves of `PO`. `mAv` and `pAv` split `Av` by the
+  proband's mother or father: each is that parent's full-sib count, so a
+  parent's MZ co-twin is left out, and it is 0 when the parents are related
+  (kinship ≥ 1/16, or sibs or parent and child by recorded id). `--pairs`
+  lists the matching child and parent's-sib pairs.
 
 ## 0.15.0 — 2026-10-19 — effective-size command, memory limit, string IDs, multiple births
 

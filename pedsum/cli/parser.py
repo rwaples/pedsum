@@ -551,7 +551,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=",".join(EPIMIGHT_RELATIONSHIP_ORDER),
         metavar="CODES",
         help="comma-separated EPIMIGHT relationship codes to emit, in order (default: %(default)s). "
-        "MZ is opt-in: it holds the co-twins --zygosity-col links, whom FS then leaves out.",
+        "MZ is opt-in: it holds the co-twins --zygosity-col links, whom FS then leaves out. "
+        "MO and FO (PO split by the parent's sex) and mAv and pAv (the full sibs of the "
+        "proband's mother or father; 0 when the parents are related) are opt-in. "
+        "EPIMIGHT 2.1 cannot fit MZ, MO, FO, mAv or pAv.",
     )
     p_epi.add_argument(
         "--disorder",
