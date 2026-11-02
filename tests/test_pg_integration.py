@@ -3,7 +3,7 @@
 These pin behaviors that could silently regress when the pedigree-graph
 pin is later bumped:
 
-- ``df["ped_depth"]`` after PG construction matches ``pg.depth``.
+- pedsum's own ``ped_depth`` column (``structural_depth``) matches ``pg.depth``.
 - ``descendant_path_counts`` numerically matches the pre-refactor pedsum
   implementation (path-count snapshot on the bundled example).
 - ``distinct_ancestor_counts`` matches the same snapshot.
@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 
 from pedsum.base import SEX_MALE
 from pedsum.pairs import build_pedigree_graph
@@ -40,12 +39,11 @@ _SNAPSHOT = {
 def _build_pg_and_df():
     df, _labels = load_and_validate(EXAMPLE, ValidationConfig())
     pg = build_pedigree_graph(df)
-    df = df.with_columns(pl.Series("ped_depth", np.asarray(pg.depth, dtype=np.int32)))
     return pg, df
 
 
 def test_ped_depth_matches_pg_depth():
-    """``df['ped_depth']`` after construction equals ``pg.depth``."""
+    """The ``ped_depth`` column ``load_and_validate`` computes equals ``pg.depth``."""
     pg, df = _build_pg_and_df()
     np.testing.assert_array_equal(df["ped_depth"].to_numpy(), pg.depth)
     assert int(df["ped_depth"].max()) == _SNAPSHOT["ped_depth_max"]
