@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 — 2026-11-02 — path-count relationships, MO/FO/mAv/pAv
+
+Minor rather than patch because relationship counts move: pedigree-graph
+0.14 labels full and half relatives by path count.
 
 - Requires pedigree-graph 0.14 (`>=0.14,<0.15`), whose full and half
   relationship categories are decided by path count (its ADR 0018). On
