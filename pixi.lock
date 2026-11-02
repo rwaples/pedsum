@@ -52,9 +52,9 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/6b/89/2a844506d49651e9aa1af6ef95b6bd8031cb1d5a4375edec6155037e04cf/scipy-1.18.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/7c/e4/ad0aee3a1572704186ca64a260f67fd2fff4d1206d9bbf73caf71a98ce7c/pg_phenotype-0.6.1-cp313-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/84/3d/8e4ed8810c055ad4d7b816851f9af752fa557310542edf71477bb61a9973/hypothesis-6.170.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/88/f9/16491d7ed2a919954993e48aa941b200f38040928474c9e85ea9e64222c3/pyyaml-6.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/8f/d7/68ac26a63f15ad3eae3bad14dca39a9c79e61a420b3186d9445677a38dc7/pg_phenotype-0.6.0-cp313-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl
@@ -407,7 +407,7 @@ packages:
   - tqdm>=4.66,<5
   - pedigree-graph>=0.14,<0.15
   - numba>=0.68,<1
-  - pg-phenotype>=0.6,<0.7
+  - pg-phenotype>=0.6.1,<0.7
   - pytest>=9,<10 ; extra == 'test'
   - pytest-xdist>=3.8,<4 ; extra == 'test'
   - hypothesis>=6,<7 ; extra == 'test'
@@ -589,6 +589,22 @@ packages:
   requires_dist:
   - colorama>=0.4.6 ; extra == 'windows-terminal'
   requires_python: '>=3.9'
+- pypi: https://files.pythonhosted.org/packages/7c/e4/ad0aee3a1572704186ca64a260f67fd2fff4d1206d9bbf73caf71a98ce7c/pg_phenotype-0.6.1-cp313-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+  name: pg-phenotype
+  version: 0.6.1
+  sha256: 65aec80ad7f29f60de3bac8cea1df0512aa3b933dfe1144b4b662386822595af
+  requires_dist:
+  - numpy>=2.2,<3
+  - scipy>=1.14,<2 ; extra == 'test'
+  - pedigree-graph>=0.14,<0.15 ; extra == 'test'
+  - pytest>=9,<10 ; extra == 'test'
+  - pytest-xdist>=3.8,<4 ; extra == 'test'
+  - ruff>=0.17,<0.18 ; extra == 'test'
+  - hypothesis>=6,<7 ; extra == 'test'
+  - pandas>=3.0,<4 ; extra == 'test'
+  - polars>=1.43.2,<2 ; extra == 'test'
+  - ty==0.0.89 ; extra == 'typecheck'
+  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/84/3d/8e4ed8810c055ad4d7b816851f9af752fa557310542edf71477bb61a9973/hypothesis-6.170.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   name: hypothesis
   version: 6.170.0
@@ -636,22 +652,6 @@ packages:
   version: 6.0.3
   sha256: c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5
   requires_python: '>=3.8'
-- pypi: https://files.pythonhosted.org/packages/8f/d7/68ac26a63f15ad3eae3bad14dca39a9c79e61a420b3186d9445677a38dc7/pg_phenotype-0.6.0-cp313-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-  name: pg-phenotype
-  version: 0.6.0
-  sha256: 52cb3fc7bc21d014cf38dc040a6e4eaf17ffd1e1b72620df75a51e1bd977ed79
-  requires_dist:
-  - numpy>=2.2,<3
-  - scipy>=1.14,<2 ; extra == 'test'
-  - pedigree-graph>=0.14,<0.15 ; extra == 'test'
-  - pytest>=9,<10 ; extra == 'test'
-  - pytest-xdist>=3.8,<4 ; extra == 'test'
-  - ruff>=0.17,<0.18 ; extra == 'test'
-  - hypothesis>=6,<7 ; extra == 'test'
-  - pandas>=3.0,<4 ; extra == 'test'
-  - polars>=1.43.2,<2 ; extra == 'test'
-  - ty==0.0.89 ; extra == 'typecheck'
-  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl
   name: tqdm
   version: 4.70.1

@@ -10,8 +10,9 @@
   and `1C` 291 to 294, and the by-degree, burden and `epimight-input`
   per-person counts move with them. The total number of related pairs is
   unchanged.
-- Requires pg-phenotype 0.6 (`>=0.6,<0.7`), built on the same
-  pedigree-graph core, for `assortative-mating`.
+- Requires pg-phenotype 0.6.1 (`>=0.6.1,<0.7`), built on the same
+  pedigree-graph core, for `assortative-mating`. 0.6.1 makes its results
+  and error classes picklable.
 - **`epimight-input --rels` accepts `MO`, `FO`, `mAv` and `pAv`**, the
   relationship kinds fitACE's `multimight` branch adds. All four are directional (counted on the child),
   opt-in, and unfit by EPIMIGHT 2.1. `MO` and `FO` are the mother-offspring
