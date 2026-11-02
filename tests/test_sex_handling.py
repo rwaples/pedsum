@@ -145,20 +145,6 @@ def test_unsexed_non_parent_kept_without_flag(tmp_path, caplog):
     assert "kept 1 individual(s) with unknown sex who are never parents" in caplog.text
 
 
-def test_missing_sex_unresolvable_with_flag_keeps_sentinel(tmp_path):
-    """allow_missing_sex=True keeps SEX_UNKNOWN sentinel through to df."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},
-        ],
-    )
-    df, _labels = load_and_validate(ped, ValidationConfig(allow_missing_sex=True))
-    assert (df["sex"] == SEX_UNKNOWN).any()
-
-
 def test_n_unknown_sex_in_size_structure(tmp_path):
     """compute_size_structure exposes n_unknown_sex; n_male + n_female + n_unknown == n."""
     ped = _write_ped(

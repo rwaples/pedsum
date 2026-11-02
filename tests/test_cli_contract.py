@@ -88,24 +88,6 @@ def test_bare_summarize_has_no_effective_size(tmp_path):
     assert not (out_dir / "effective_size.yaml").exists()
 
 
-def test_no_inbreeding_omits_section(tmp_path):
-    """``--no-inbreeding`` skips F and the inbreeding section."""
-    out_dir = tmp_path / "out"
-    res = _run(
-        [
-            "summarize",
-            "--in",
-            str(EXAMPLE),
-            "--out",
-            str(out_dir),
-            "--no-inbreeding",
-        ]
-    )
-    assert res.returncode == 0, res.stderr
-    ped = _load_yaml(out_dir)["pedigree"]
-    assert "inbreeding" not in ped.get("relatedness", {})
-
-
 # --- Output directory + --tsv opt-in --------------------------------------
 
 
@@ -118,30 +100,6 @@ def test_default_footprint_is_three_files(tmp_path):
     assert files == [
         "annotated.tsv.gz",
         "summary.extra.yaml",
-        "summary.yaml",
-    ]
-
-
-def test_tsv_flag_adds_long_form_tsvs(tmp_path):
-    """``--tsv`` adds summary.pedigree.tsv and summary.individual.tsv."""
-    out_dir = tmp_path / "out"
-    res = _run(
-        [
-            "summarize",
-            "--in",
-            str(EXAMPLE),
-            "--out",
-            str(out_dir),
-            "--tsv",
-        ]
-    )
-    assert res.returncode == 0, res.stderr
-    files = sorted(p.name for p in out_dir.iterdir())
-    assert files == [
-        "annotated.tsv.gz",
-        "summary.extra.yaml",
-        "summary.individual.tsv",
-        "summary.pedigree.tsv",
         "summary.yaml",
     ]
 

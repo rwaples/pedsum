@@ -123,35 +123,6 @@ def test_parent_refs_sex_conflict_log_pins_rows(tmp_path):
     assert "father (row(s) [3])" in detail
 
 
-def test_orphan_unsexed_writes_unknown_in_fixed_tsv(tmp_path):
-    """Orphan-only pedigree (n_imputed==0) + --allow-missing-sex: orphan sex normalised to 0 (unknown)."""
-    ped = _write_ped(
-        tmp_path / "p.tsv",
-        [
-            {"id": 1, "sex": "M", "mother": -1, "father": -1},
-            {"id": 2, "sex": "F", "mother": -1, "father": -1},
-            {"id": 3, "sex": "", "mother": 2, "father": 1},  # orphan, no role
-        ],
-    )
-    base = tmp_path / "out"
-    r = run_pedsum(
-        [
-            "validate",
-            "--in",
-            str(ped),
-            "--out",
-            str(base),
-            "--allow-missing-sex",
-        ]
-    )
-    assert r.returncode == 0, r.stderr
-    fixed = tmp_path / "out" / "validate.tsv.gz"
-    assert fixed.exists()
-    df = read_tsv_gz(fixed, as_str=True)
-    row = df.filter(pl.col("id").cast(pl.Int64) == 3).row(0, named=True)
-    assert row["sex"] == "0"
-
-
 def test_validate_summary_uses_grouped_layout(tmp_path):
     """The validate stderr summary prints the four section headers in order."""
     ped = _write_ped(

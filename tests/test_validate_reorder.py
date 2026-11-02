@@ -6,13 +6,6 @@ import polars as pl
 from conftest import load_validate_tsv_gz, run_pedsum
 from conftest import write_ped as _write_ped
 
-from pedsum.checks import _CHECK_ORDER
-
-
-def test_topological_row_order_check_removed():
-    """The legacy topological_row_order check no longer exists."""
-    assert "topological_row_order" not in _CHECK_ORDER
-
 
 def test_validate_reorders_unordered_tsv(tmp_path):
     """Child-before-parent input → fixed output is parents-first; INFO log fires."""

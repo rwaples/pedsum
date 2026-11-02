@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import yaml
 from conftest import EXAMPLE, write_ped
 from conftest import load_summary_extra_yaml as _load_extra
 from conftest import load_summary_yaml as _load_yaml
@@ -69,20 +68,10 @@ def test_flag_adds_the_section(tmp_path):
     res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--sex-concordance"])
     assert res.returncode == 0, res.stderr
     section = _load_yaml(out_dir)["pedigree"]["demography"][_SECTION]
+    assert None not in section  # a bare ``null:`` key would parse as None
     assert section["null_model"]["method"] == "fixed_margin_exchangeability"
     assert section["null_model"]["headline_eligibility"] == "sex_source_input"
     assert all(name in section for name in GROUPINGS)
-
-
-def test_null_model_key_is_not_a_bare_null(tmp_path):
-    """The block is ``null_model:``; a bare ``null:`` would parse as a None key."""
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir), "--sex-concordance"])
-    assert res.returncode == 0, res.stderr
-    raw = yaml.safe_load((out_dir / "summary.yaml").read_text())
-    section = raw["pedigree"]["demography"][_SECTION]
-    assert None not in section
-    assert "null_model" in section
 
 
 def test_permutations_flag_implies_enable(tmp_path):

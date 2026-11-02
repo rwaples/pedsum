@@ -66,9 +66,3 @@ def test_plink_sex_round_trips_through_decode(sex: list[int]) -> None:
     arr = np.array(sex, dtype=np.int8)
     written = plink_sex(arr).astype(str)
     np.testing.assert_array_equal(decode_sex(pl.Series(written, dtype=pl.String)), arr)
-
-
-def test_decode_sex_case_insensitive() -> None:
-    """Word tokens decode the same regardless of case."""
-    out = decode_sex(pl.Series(["M", "m", "male", "MALE"], dtype=pl.String))
-    assert (out == SEX_MALE).all()

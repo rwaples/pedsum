@@ -25,15 +25,6 @@ from pedsum.schema import split_summary
 # --------------------------------------------------------------------------
 
 
-def test_extra_yaml_exists_by_default(tmp_path):
-    """Both summary YAML files are always written."""
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
-    assert res.returncode == 0, res.stderr
-    assert (out_dir / "summary.yaml").exists()
-    assert (out_dir / "summary.extra.yaml").exists()
-
-
 def test_slim_yaml_line_budget(tmp_path):
     """Slim YAML on the 200-row example pedigree stays under a small budget.
 

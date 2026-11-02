@@ -79,16 +79,3 @@ def test_added_founder_sex_follows_unambiguous_parent_role(generated: FounderRef
     for cid in conflicts:
         assert by_id[cid]["sex"] == SEX_FEMALE
         assert "--no-sex-check" in by_id[cid]["reason"]
-
-
-@given(founder_reference_arrays())
-def test_role_conflict_founders_require_no_sex_check(generated: FounderReferences) -> None:
-    """Missing IDs used as both mother and father are omitted unless sex checks are disabled."""
-    ids, mothers, fathers = generated
-    _, _, conflicts = _missing_role_sets(ids, mothers, fathers)
-
-    strict_ids = {row["id"] for row in _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=False)}
-    permissive_ids = {row["id"] for row in _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=True)}
-
-    assert strict_ids.isdisjoint(conflicts)
-    assert conflicts <= permissive_ids

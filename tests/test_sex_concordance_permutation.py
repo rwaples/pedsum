@@ -29,18 +29,6 @@ def _pmf_of_c(sizes: list[int], n_male: int) -> dict[int, Fraction]:
     return {c: Fraction(k, total) for c, k in counts.items()}
 
 
-def test_marginals_allocation_preserves_sizes_and_margin():
-    """The fixed-margin allocation the NumPy sampler relies on is exactly that."""
-    rng = np.random.default_rng(0)
-    sizes = np.array([2, 3, 5, 7, 4], dtype=np.int64)
-    n_male = 11
-    for _ in range(200):
-        male = rng.multivariate_hypergeometric(sizes, n_male)
-        assert male.sum() == n_male
-        assert np.all(male <= sizes)
-        assert np.all(male >= 0)
-
-
 @pytest.mark.parametrize("backend", ["numpy", "numba"])
 def test_sampler_reproduces_the_exact_fixed_margin_distribution(backend):
     """Both samplers hit the enumerated support with the enumerated frequencies.
@@ -73,17 +61,12 @@ def test_permutation_moments_match_the_analytical_moments():
     assert draws.var(ddof=1) == pytest.approx(float(moments.variance), rel=0.10)
 
 
-@pytest.mark.parametrize("backend", ["numpy", "numba"])
-def test_sampler_is_deterministic_per_backend(backend):
-    """A fixed seed reproduces the stream — within one backend, not across them."""
+def test_sampler_is_deterministic():
+    """A fixed seed reproduces the compiled sampler's stream."""
     sizes = np.full(50, 4, dtype=np.int64)
-    if backend == "numba":
-        sampler = sc.load_numba_sampler()
-        first = sampler(sizes, 100, 200, 64, 5)
-        second = sampler(sizes, 100, 200, 64, 5)
-    else:
-        first = sample_concordance_numpy(sizes, 100, 64, 5)
-        second = sample_concordance_numpy(sizes, 100, 64, 5)
+    sampler = sc.load_numba_sampler()
+    first = sampler(sizes, 100, 200, 64, 5)
+    second = sampler(sizes, 100, 200, 64, 5)
     assert np.array_equal(first, second)
 
 

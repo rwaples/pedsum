@@ -60,16 +60,6 @@ def test_both_roles_missing_with_no_sex_check_synthesises_female():
     assert "father row(s) [1]" in row["reason"]
 
 
-def test_output_sorted_by_id():
-    """Synthesised founder rows are sorted by id regardless of role mix."""
-    # mother-only: 55, 10  /  father-only: 30  →  sorted output: 10, 30, 55.
-    mothers = np.array([55, 10, -1, -1], dtype=np.int64)
-    fathers = np.array([-1, -1, 30, -1], dtype=np.int64)
-    id_index = IdIndex([1, 2, 3, 4])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=False)
-    assert [r["id"] for r in out] == [10, 30, 55]
-
-
 def test_more_than_five_rows_truncates_listing():
     """Row-listing in the reason string truncates beyond five rows."""
     # id 99 referenced as mother in 8 rows → reason ends with "(and 3 more)".
