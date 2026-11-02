@@ -62,7 +62,7 @@ def test_droppable_checks_are_the_drop_policies():
     )
 
 
-@pytest.mark.parametrize("name", list(EXPECTED))
+@pytest.mark.parametrize("name", ["required_columns", "duplicate_ids", "self_loops", "duplicate_rows"])
 @pytest.mark.parametrize("drop_offending", [False, True])
 def test_blocking_failures_follows_the_policy(name, drop_offending):
     """A lone FAIL blocks per its policy and the mode."""

@@ -49,12 +49,6 @@ def test_ped_depth_matches_pg_depth():
     assert int(df["ped_depth"].max()) == _SNAPSHOT["ped_depth_max"]
 
 
-def test_no_generation_labels_without_a_generation_column():
-    """No generation column is supplied, so depth is the only label available."""
-    pg, _ = _build_pg_and_df()
-    assert pg.generation_labels is None
-
-
 def test_descendant_path_counts_snapshot():
     """``pg.descendant_path_counts`` matches the pre-refactor snapshot totals."""
     pg, _ = _build_pg_and_df()

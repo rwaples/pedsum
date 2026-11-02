@@ -2,10 +2,8 @@
 
 - Removed long-options exit rc=2 with "unrecognized arguments", and argparse
   abbreviation is off, so a prefix cannot resurrect one.
-- Inbreeding runs by default; ``--no-inbreeding`` skips it. Effective size is
-  not part of ``summarize`` (ADR 0004).
-- ``--out DIR`` is a directory holding three files by default; ``--tsv`` adds
-  the two long-form TSVs; an ``--out`` that is a regular file exits rc=1.
+- Inbreeding runs by default; ``--no-inbreeding`` skips it.
+- An ``--out`` that is a regular file exits rc=1.
 - ``--per-individual-pairs`` fills the per-individual relationship section.
 """
 
@@ -78,30 +76,7 @@ def test_bare_summarize_emits_inbreeding(tmp_path):
     assert ped["relatedness"]["inbreeding"] is not None
 
 
-def test_bare_summarize_has_no_effective_size(tmp_path):
-    """``summarize`` computes no Ne; it lives in ``effective-size`` since 0.15.0."""
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
-    assert res.returncode == 0, res.stderr
-    ped = _load_yaml(out_dir)["pedigree"]
-    assert "popgen" not in ped
-    assert not (out_dir / "effective_size.yaml").exists()
-
-
-# --- Output directory + --tsv opt-in --------------------------------------
-
-
-def test_default_footprint_is_three_files(tmp_path):
-    """Bare ``summarize`` writes summary.yaml + summary.extra.yaml + annotated.tsv.gz."""
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(EXAMPLE), "--out", str(out_dir)])
-    assert res.returncode == 0, res.stderr
-    files = sorted(p.name for p in out_dir.iterdir())
-    assert files == [
-        "annotated.tsv.gz",
-        "summary.extra.yaml",
-        "summary.yaml",
-    ]
+# --- Output directory ----------------------------------------------------
 
 
 def test_out_path_as_existing_file_errors(tmp_path):

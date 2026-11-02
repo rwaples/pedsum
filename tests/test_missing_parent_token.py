@@ -159,17 +159,6 @@ def test_parent_token_range_names_the_flag():
     assert passed.status == "PASS"
 
 
-def test_parent_refs_present_hint_names_the_flag():
-    """The missing-row Finding for ID 0 names the flag, not 'convert to -1'."""
-    rows = [
-        {"id": 1, "sex": "F", "mother": -1, "father": -1},
-        {"id": 2, "sex": "M", "mother": 1, "father": 0},
-    ]
-    detail = run_check("parent_refs_present_father", rows).findings[0].detail
-    assert "pass --missing-parent-token 0" in detail
-    assert "convert to -1" not in detail
-
-
 def test_token_is_stripped():
     """A token passed with surrounding whitespace matches the stripped cells."""
     from pedsum.cli.parser import parse_args

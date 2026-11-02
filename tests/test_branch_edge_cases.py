@@ -142,6 +142,7 @@ class TestCheckEdgeCases:
         findings = check([-1, -1, -1], [0, 99, 99], "father")
         assert [f.id for f in findings] == [0, 99]
         assert "pass --missing-parent-token 0" in findings[0].detail
+        assert "convert to -1" not in findings[0].detail
 
     def test_empty_pedigree_check(self) -> None:
         """Empty-pedigree checking fires only for n == 0."""
