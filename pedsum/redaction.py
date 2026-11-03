@@ -40,7 +40,7 @@ def redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_ke
     in ``keep``. Otherwise null only the ``small_keys`` whose own value is
     below ``min_cell`` (via :func:`null_below`).
     """
-    if int(row.get("n", 0)) < min_cell:
+    if int(row.get("n") or 0) < min_cell:
         for k in list(row):
             if k not in keep:
                 row[k] = None
