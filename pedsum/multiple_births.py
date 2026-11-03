@@ -93,7 +93,7 @@ def redact_multiple_births(section: dict, min_cell: int, n_total: int) -> None:
     if section["n_pairs"] is None:
         section["full_sib_pair_fraction"] = None
     weinberg = section["weinberg"]
-    if any(0 < weinberg[k] < min_cell for k in ("same_sex", "opposite_sex")):
+    if any(0 < (weinberg[k] or 0) < min_cell for k in ("same_sex", "opposite_sex")):
         for k in ("same_sex", "opposite_sex", "mz_pairs_estimate", "dz_pairs_estimate", "mz_fraction_estimate"):
             weinberg[k] = None
     null_below(weinberg, ("n_twin_pairs",), min_cell)

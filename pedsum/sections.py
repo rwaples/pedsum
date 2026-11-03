@@ -836,7 +836,7 @@ def build_individual_df(
 def redact_size_structure(sizes: dict, min_cell: int, n_total: int) -> None:
     """Drop small components from ``next_components``; null small depth, ``sex_source`` and largest-component counts."""
     sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
-    sizes["depth_counts"] = [(g if g >= min_cell else None) for g in sizes.get("depth_counts", [])]
+    sizes["depth_counts"] = [(g if g is not None and g >= min_cell else None) for g in sizes.get("depth_counts", [])]
     null_below(sizes, ("largest_component",), min_cell)
     if sizes.get("sex_source") is not None:
         null_below(sizes["sex_source"], tuple(sizes["sex_source"]), min_cell)
@@ -916,7 +916,7 @@ def redact_depth_summary(depth_summary: list, min_cell: int, n_total: int) -> No
 
 def redact_inbreeding(inb: dict, min_cell: int, n_total: int) -> None:
     """Null the F statistics when few individuals are inbred, and histogram buckets of few individuals."""
-    if 0 < int(inb.get("n_inbred", 0)) < min_cell:
+    if 0 < int(inb.get("n_inbred") or 0) < min_cell:
         inb["n_inbred"] = None
         inb["frac_inbred"] = None
         inb["mean_F"] = None
