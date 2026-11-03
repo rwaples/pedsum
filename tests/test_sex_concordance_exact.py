@@ -13,7 +13,8 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from conftest import property_budget
+from hypothesis import given
 from hypothesis import strategies as st
 from sex_concordance_helpers import offspring_frame, uniform_groups
 
@@ -171,7 +172,7 @@ def test_single_sex_skips_with_its_own_reason():
     assert out["sibship"]["skip_reason"] == "single_sex"
 
 
-@settings(deadline=None, max_examples=40)
+@property_budget(40)
 @given(
     sizes=st.lists(st.integers(min_value=2, max_value=6), min_size=2, max_size=8),
     seed=st.integers(min_value=0, max_value=10_000),

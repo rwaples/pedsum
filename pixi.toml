@@ -36,3 +36,10 @@ pedsum = { path = ".", editable = true, extras = ["test", "typecheck"] }
 description = "Full pytest suite on 8 xdist workers, one numba/BLAS/polars thread each"
 cmd = "pytest -n 8 --dist worksteal"
 env = { NUMBA_NUM_THREADS = "1", OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1", POLARS_MAX_THREADS = "1" }
+
+# Release depth: the whole suite with every Hypothesis budget ten times its
+# ordinary size (tests/conftest.py property_budget and profiles).
+[tasks.test-thorough]
+description = "Full pytest suite at the thorough Hypothesis profile (10x every budget), for a release"
+cmd = "pytest -n 8 --dist worksteal"
+env = { HYPOTHESIS_PROFILE = "thorough", NUMBA_NUM_THREADS = "1", OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1", POLARS_MAX_THREADS = "1" }

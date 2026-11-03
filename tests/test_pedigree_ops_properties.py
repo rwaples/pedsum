@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.pedigree_ops import IdIndex, group_mating_pairs, rows_of_parents, structural_depth
@@ -43,7 +43,6 @@ def _depth_by_id(order: list[int], mothers: np.ndarray, fathers: np.ndarray) -> 
     return {id_: int(depth[row]) for row, id_ in enumerate(order)}
 
 
-@settings(deadline=None)
 @given(ped=_pedigrees(), data=st.data())
 def test_depth_row_order_invariant_and_monotone(ped: tuple, data: st.DataObject) -> None:
     """Depth is invariant to row order and idempotent; founders are 0; children outrank parents."""
@@ -71,7 +70,6 @@ def test_depth_marks_cycle_and_descendants() -> None:
     np.testing.assert_array_equal(structural_depth(mothers, fathers), [-1, -1, 0, -1])
 
 
-@settings(deadline=None)
 @given(ped=_pedigrees(), data=st.data())
 def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> None:
     """Pairs, sizes, and parent rows agree with ``np.unique(axis=0)``, in any row order."""
@@ -96,7 +94,6 @@ def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> 
     np.testing.assert_array_equal(mating.father_rows[mating.pair], f_rows[mating.children])
 
 
-@settings(deadline=None)
 @given(ped=_pedigrees())
 def test_parent_rows_mask_and_index(ped: tuple) -> None:
     """The present-mask matches ``!= -1``; resolved rows are in range and map back to the parent id."""

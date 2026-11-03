@@ -9,7 +9,7 @@ example-driven suite never produces.
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.schema import (
@@ -73,7 +73,6 @@ def _rel_pairs(draw: st.DrawFn) -> dict:
     return out
 
 
-@settings(deadline=None)
 @given(sex=_sex_dicts())
 def test_split_sex_summary_partitions_keys(sex: dict) -> None:
     """Per stratum, scalar keys go to slim and the rest to extra, with no overlap."""
@@ -107,7 +106,6 @@ def _concordance_dicts(draw: st.DrawFn) -> dict:
     return out
 
 
-@settings(deadline=None)
 @given(conc=_concordance_dicts())
 def test_split_offspring_sex_concordance_partitions_keys(conc: dict) -> None:
     """Per grouping, slim keys go to slim and the rest to extra; null_model stays slim."""
@@ -127,7 +125,6 @@ def test_split_offspring_sex_concordance_partitions_keys(conc: dict) -> None:
         assert extra_keys & slim_keyset == set()
 
 
-@settings(deadline=None)
 @given(dists=_dist_dicts())
 def test_split_individual_distributions_partitions_with_fmax_drop(dists: dict) -> None:
     """Per column, slim keeps mean/median for headline cols; extra holds the rest, less F.max."""
@@ -150,7 +147,6 @@ def test_split_individual_distributions_partitions_with_fmax_drop(dists: dict) -
             assert extra_keys == keys
 
 
-@settings(deadline=None)
 @given(
     rp=_rel_pairs(),
     size=st.dictionaries(st.sampled_from(["n", "n_components", "x"]), _SCALARS, min_size=1),

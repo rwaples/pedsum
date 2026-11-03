@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.sections import _effective_count_from_weights, numeric_distribution
@@ -40,7 +40,6 @@ def _assert_distribution_invariants(d: Distribution, n: int) -> None:
     assert 0 <= d.nz <= n
 
 
-@settings(deadline=None)
 @given(vals=st.lists(_FINITE_FLOATS, max_size=50))
 def test_numeric_distribution_float(vals: list[float]) -> None:
     """Float distributions are ordered, bounded, and invariant to input order."""
@@ -53,7 +52,6 @@ def test_numeric_distribution_float(vals: list[float]) -> None:
         assert reversed_d.as_dict()[key] == pytest.approx(value)
 
 
-@settings(deadline=None)
 @given(vals=st.lists(st.integers(min_value=-10_000, max_value=10_000), max_size=50))
 def test_numeric_distribution_int(vals: list[int]) -> None:
     """Integer distributions keep the quantile ordering despite truncating casts."""
@@ -61,7 +59,6 @@ def test_numeric_distribution_int(vals: list[int]) -> None:
     _assert_distribution_invariants(numeric_distribution(arr), len(vals))
 
 
-@settings(deadline=None)
 @given(weights=st.lists(_NONNEG_FLOATS, max_size=50))
 def test_effective_count_bounds(weights: list[float]) -> None:
     """Ne is in ``[0, n_positive]`` and is exactly 0 when no weight is positive."""
@@ -74,7 +71,6 @@ def test_effective_count_bounds(weights: list[float]) -> None:
         assert ne == 0.0
 
 
-@settings(deadline=None)
 @given(k=st.integers(min_value=1, max_value=50), weight=st.floats(min_value=1e-3, max_value=1e3))
 def test_effective_count_equal_weights(k: int, weight: float) -> None:
     """Equal positive weights give an effective count equal to the number of weights."""
@@ -82,7 +78,6 @@ def test_effective_count_equal_weights(k: int, weight: float) -> None:
     assert _effective_count_from_weights(arr) == pytest.approx(k)
 
 
-@settings(deadline=None)
 @given(k=st.integers(min_value=1, max_value=20), positive=st.floats(min_value=1e-3, max_value=1e6))
 def test_effective_count_single_dominant(k: int, positive: float) -> None:
     """One positive weight among zeros gives an effective count of exactly 1."""

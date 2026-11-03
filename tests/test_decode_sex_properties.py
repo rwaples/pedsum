@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
@@ -40,7 +40,6 @@ def _sex_series(draw: st.DrawFn) -> tuple[list[str], list[int]]:
     return tokens, expected
 
 
-@settings(deadline=None)
 @given(case=_sex_series())
 def test_decode_sex_round_trip(case: tuple) -> None:
     """Decoding valid tokens recovers the original sexes; output is int8 in {-1, 0, 1}."""
@@ -51,7 +50,6 @@ def test_decode_sex_round_trip(case: tuple) -> None:
     np.testing.assert_array_equal(out, np.array(expected, dtype=np.int8))
 
 
-@settings(deadline=None)
 @given(tokens=st.lists(st.sampled_from(_MISSING_TOKENS), max_size=20))
 def test_missing_tokens_decode_to_unknown(tokens: list[str]) -> None:
     """Every missing token, PLINK's 0 among them, decodes to ``SEX_UNKNOWN``."""
@@ -59,7 +57,6 @@ def test_missing_tokens_decode_to_unknown(tokens: list[str]) -> None:
     assert (out == SEX_UNKNOWN).all()
 
 
-@settings(deadline=None)
 @given(sex=st.lists(st.sampled_from([SEX_FEMALE, SEX_MALE, SEX_UNKNOWN]), max_size=30))
 def test_plink_sex_round_trips_through_decode(sex: list[int]) -> None:
     """What pedsum writes decodes back to the same internal codes."""

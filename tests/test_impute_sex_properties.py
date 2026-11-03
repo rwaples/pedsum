@@ -9,7 +9,7 @@ override-off leaves asserted sexes alone) over random role/sex combinations.
 from __future__ import annotations
 
 import numpy as np
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
@@ -32,7 +32,6 @@ def _impute_inputs(draw: st.DrawFn) -> tuple[np.ndarray, np.ndarray, np.ndarray,
     return ids, mothers, fathers, sex, override
 
 
-@settings(deadline=None)
 @given(data=_impute_inputs())
 def test_impute_partition_and_invariants(data: tuple) -> None:
     """sex_source partitions rows; unresolved iff still unknown; input/override rules hold."""

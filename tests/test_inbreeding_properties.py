@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from pedsum.base import INBRED_TOL
@@ -19,7 +19,6 @@ from pedsum.sections import build_inbreeding_summary
 _F_VALUES = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
 
 
-@settings(deadline=None)
 @given(values=st.lists(_F_VALUES, max_size=60))
 @example(values=[5e-10])
 @example(values=[5e-10, 0.03, 0.2, 0.9, 0.0])

@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
-from conftest import run_pedsum, write_ped
-from hypothesis import assume, given, settings
+from conftest import property_budget, run_pedsum, write_ped
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from pedsum.assortative_mating import (
@@ -293,7 +293,7 @@ def test_determinism_per_seed(binary):
     assert first["ci"] != other["ci"]
 
 
-@settings(deadline=None, max_examples=25)
+@property_budget(25)
 @given(
     n_pairs=st.integers(2, 25),
     remate_every=st.integers(1, 4),
