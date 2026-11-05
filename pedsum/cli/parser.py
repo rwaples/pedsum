@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import partial
 from pathlib import Path
 from typing import NoReturn
 
@@ -14,6 +15,11 @@ from pedsum.base import (
     TRAIT_KINDS,
     VERSION,
 )
+from pedsum.cli.assortative_mating import run_assortative_mating
+from pedsum.cli.effective_size import run_effective_size
+from pedsum.cli.epimight_input import run_epimight_input
+from pedsum.cli.summarize import run_summarize
+from pedsum.cli.validate import run_validate
 from pedsum.epimight import (
     BASE_YEAR,
     EPIMIGHT_RELATIONSHIP_ORDER,
@@ -738,6 +744,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_memory_args(p_am)
     _add_logging_args(p_am)
 
+    # Each subcommand's runner, and its usage checks after parsing.
+    p_sum.set_defaults(run=run_summarize, check=partial(_check_summarize, p_sum, parser))
+    p_val.set_defaults(run=run_validate, check=partial(_check_validate, p_val, parser))
+    p_epi.set_defaults(run=run_epimight_input, check=partial(_check_zygosity, parser))
+    p_es.set_defaults(run=run_effective_size, check=partial(_check_effective_size, parser))
+    p_am.set_defaults(run=run_assortative_mating, check=partial(_check_assortative_mating, p_am, parser))
+
     args = parser.parse_args(argv)
     if args.subcommand is None:
         parser.print_help(sys.stderr)
@@ -746,29 +759,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
-    if (
-        args.subcommand == "validate"
-        and args.break_cycles
-        and args.birth_year_col is None
-        and args.birth_date_col is None
-    ):
+    args.check(args)
+    return args
+
+
+def _check_zygosity(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """``--zygosity-col`` reads its marks within the multiple-birth sets, so it needs their column."""
+    if getattr(args, "zygosity_col", None) is not None and args.multiple_birth_col is None:
+        parser.error("--zygosity-col needs --multiple-birth-col: zygosity is read within multiple-birth sets")
+
+
+def _check_validate(p_val: argparse.ArgumentParser, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Usage errors (exit 2) of ``validate``; its own flags before ``--zygosity-col``."""
+    if args.break_cycles and args.birth_year_col is None and args.birth_date_col is None:
         p_val.error(
             "--break-cycles needs --birth-year-col or --birth-date-col: it clears links to a parent born after the child"
         )
-    if args.subcommand == "validate" and args.twin_max_days is not None and args.birth_date_col is None:
+    if args.twin_max_days is not None and args.birth_date_col is None:
         p_val.error("--twin-max-days needs --birth-date-col: twins are full sibs born at most N days apart")
-    if args.subcommand == "validate" and args.twin_max_days is not None and args.multiple_birth_col is not None:
+    if args.twin_max_days is not None and args.multiple_birth_col is not None:
         p_val.error("--twin-max-days and --multiple-birth-col both define the multiple-birth sets; pass one")
-    if getattr(args, "zygosity_col", None) is not None and args.multiple_birth_col is None:
-        parser.error("--zygosity-col needs --multiple-birth-col: zygosity is read within multiple-birth sets")
-    if args.subcommand == "summarize" and args.per_individual_pairs and args.max_degree < 5:
+    _check_zygosity(parser, args)
+
+
+def _check_summarize(p_sum: argparse.ArgumentParser, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Usage errors (exit 2) of ``summarize``; ``--zygosity-col`` first."""
+    _check_zygosity(parser, args)
+    if args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
-    if args.subcommand == "assortative-mating":
-        _check_assortative_mating_args(p_am, args)
-    if args.subcommand == "effective-size":
-        selected = set(args.estimators or ALL_EFFECTIVE_SIZE_ESTIMATORS)
-        args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
-    return args
+
+
+def _check_effective_size(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """``--zygosity-col``, then put the chosen estimators in their canonical order."""
+    _check_zygosity(parser, args)
+    selected = set(args.estimators or ALL_EFFECTIVE_SIZE_ESTIMATORS)
+    args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
+
+
+def _check_assortative_mating(
+    p_am: argparse.ArgumentParser, parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """``--zygosity-col``, then the ``assortative-mating`` usage errors."""
+    _check_zygosity(parser, args)
+    _check_assortative_mating_args(p_am, args)
 
 
 def _check_assortative_mating_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

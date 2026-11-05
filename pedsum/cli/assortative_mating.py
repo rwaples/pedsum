@@ -23,6 +23,8 @@ from pedsum.report import (
 if TYPE_CHECKING:
     import argparse
 
+    from pedsum.memory import MemoryWatchdog
+
 
 def _parse_cpu_list(text: str) -> set[int]:
     """CPU numbers of a sysfs list such as ``0,6`` or ``0-3,8``."""
@@ -79,7 +81,7 @@ def _set_assortative_threads(threads: int) -> None:
         logger.debug("pg-phenotype thread budget already committed; --threads=%s ignored", threads)
 
 
-def run_assortative_mating(args: argparse.Namespace, cmd: str) -> int:
+def run_assortative_mating(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``assortative-mating``: type the trait columns and write ``assortative_mating.yaml``."""
     from pedsum.assortative_mating import classify_trait, compute_assortative_mating
 

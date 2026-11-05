@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     import polars as pl
 
     from pedsum.fixed_pedigree import FixedPedigree
+    from pedsum.memory import MemoryWatchdog
     from pedsum.reduce import ReductionResult
 
 
@@ -70,7 +71,7 @@ def _remove_stale_validate_outputs(out_dir: Path) -> None:
             logger.info("removed %s from a previous run", path)
 
 
-def run_validate(args: argparse.Namespace, cmd: str) -> int:
+def run_validate(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``validate``: run every Check, write ``validate.log``, then BLOCK or write ``validate.tsv.gz``."""
     commit_thread_budget(args)
     if _input_is_an_output(args.in_path, args.out_dir):

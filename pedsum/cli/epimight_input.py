@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Iterator
 
+    from pedsum.memory import MemoryWatchdog
+
 
 def _write_epimight_table(frame: pl.DataFrame, out_dir: Path, stem: str, *, parquet: bool) -> None:
     """Write ``frame`` to ``<out_dir>/<stem>.tsv`` (and ``.parquet`` if requested)."""
@@ -75,7 +77,7 @@ def _write_relative_pairs(frames: Iterator[pl.DataFrame], out_dir: Path, *, parq
         logger.info("wrote %s", parquet_path)
 
 
-def run_epimight_input(args: argparse.Namespace) -> int:
+def run_epimight_input(args: argparse.Namespace, _cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``epimight-input``: emit the EPIMIGHT long-form skeleton from a pedigree."""
     commit_thread_budget(args)
     if prepare_out_dir(args.out_dir) != 0:

@@ -47,8 +47,10 @@ from pedsum.validate import ValidationConfig
 if TYPE_CHECKING:
     import argparse
 
+    from pedsum.memory import MemoryWatchdog
 
-def run_summarize(args: argparse.Namespace, cmd: str) -> int:
+
+def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs."""
     if prepare_out_dir(args.out_dir) != 0:
         return 1
