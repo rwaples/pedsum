@@ -176,6 +176,13 @@ def compute_mating_pair_summary(pair_sizes: np.ndarray) -> dict | None:
     }
 
 
+def _reproduction_counts(n_offspring: np.ndarray) -> dict:
+    """Individuals with offspring (reproductive) and without (terminal), from each one's offspring count."""
+    n = len(n_offspring)
+    n_reproductive = int((n_offspring > 0).sum())
+    return {"n_reproductive": n_reproductive, "frac_reproductive": n_reproductive / n, "n_terminal": n - n_reproductive}
+
+
 def _offspring_dist(counts: np.ndarray, n: int) -> dict:
     if n == 0:
         return dict.fromkeys(("0", "1", "2", "3", "4+"), 0.0)
@@ -330,9 +337,7 @@ def compute_aggregate_sections(
         }
 
     n_offspring_arr = idf["n_offspring"].to_numpy()
-    reproductive = n_offspring_arr > 0
-    n_reproductive = int(reproductive.sum())
-    n_terminal = int((~reproductive).sum())
+    counts = _reproduction_counts(n_offspring_arr)
     founders = idf["is_founder"].to_numpy().astype(bool)
     descendant_paths_arr = idf["n_descendant_paths"].to_numpy()
     descendant_path_counts = descendant_paths_arr[founders]
@@ -361,10 +366,8 @@ def compute_aggregate_sections(
     # GLOSSARY.md naming convention: <noun>_count for summary stats;
     # <noun>_count_hist for binned PMF; _male / _female stratify either.
     reproduction = {
-        "n_reproductive": n_reproductive,
-        "frac_reproductive": n_reproductive / n,
-        "n_terminal": n_terminal,
-        "frac_terminal": n_terminal / n,
+        **counts,
+        "frac_terminal": counts["n_terminal"] / n,
         "frac_with_full_sib": frac_with_full_sib,
         "offspring_count": numeric_distribution(n_offspring_arr),
         "offspring_count_hist": _offspring_dist(n_offspring_arr, n),
@@ -425,13 +428,10 @@ def compute_aggregate_sections(
         if n_sub == 0:
             continue
         sub_off = n_offspring_arr[mask]
-        sx_reproductive = sub_off > 0
         row = {
             "n": n_sub,
             "n_founders": int(is_founder_arr[mask].sum()),
-            "n_reproductive": int(sx_reproductive.sum()),
-            "frac_reproductive": float(sx_reproductive.sum()) / n_sub,
-            "n_terminal": int((~sx_reproductive).sum()),
+            **_reproduction_counts(sub_off),
             "offspring_count": numeric_distribution(sub_off),
             "mate_count": numeric_distribution(n_mates_arr[mask]),
             "depth": numeric_distribution(depth_col[mask]),
@@ -448,16 +448,13 @@ def compute_aggregate_sections(
         mask = depth_col == depth
         n_sub = int(mask.sum())
         sub_off = n_offspring_arr[mask]
-        d_reproductive = sub_off > 0
         row = {
             "depth": int(depth),
             "n": n_sub,
             "n_male": int((sex_arr[mask] == SEX_MALE).sum()),
             "n_female": int((sex_arr[mask] == SEX_FEMALE).sum()),
             "n_founders": int(is_founder_arr[mask].sum()),
-            "n_reproductive": int(d_reproductive.sum()),
-            "frac_reproductive": float(d_reproductive.sum()) / n_sub,
-            "n_terminal": int((~d_reproductive).sum()),
+            **_reproduction_counts(sub_off),
             "offspring_count": numeric_distribution(sub_off),
             "offspring_count_hist": _offspring_dist(sub_off, n_sub),
             "mate_count": numeric_distribution(n_mates_arr[mask]),
