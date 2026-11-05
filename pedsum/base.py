@@ -57,6 +57,11 @@ class ParentRole(StrEnum):
         return "F" if self is ParentRole.MOTHER else "M"
 
     @property
+    def sex_name(self) -> str:
+        """``expected_sex`` as a word."""
+        return "female" if self is ParentRole.MOTHER else "male"
+
+    @property
     def other(self) -> ParentRole:
         """The other parent role."""
         return ParentRole.FATHER if self is ParentRole.MOTHER else ParentRole.MOTHER

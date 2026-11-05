@@ -204,11 +204,11 @@ class ValidationConfig:
 
     def column(self, role: ParentRole) -> str:
         """The input column holding the ``role`` parent."""
-        return self.mother_col if role is ParentRole.MOTHER else self.father_col
+        return self.mother_col if role == ParentRole.MOTHER else self.father_col
 
     def max_children(self, role: ParentRole) -> int:
         """The most children one ``role`` parent may have; 0 is off."""
-        return self.max_children_mother if role is ParentRole.MOTHER else self.max_children_father
+        return self.max_children_mother if role == ParentRole.MOTHER else self.max_children_father
 
     @property
     def by_max(self) -> int:
@@ -254,7 +254,9 @@ class ValidationContext:
     multiple_birth: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     cleared_multiple_birth: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     # Set by mz_links: each row's MZ co-twin ID code (-1 none), and which
-    # rows' zygosity cells it cleared.
+    # rows' zygosity cells it cleared. co_twin holds IDs, not rows: keep_rows
+    # slicing it after mz_links would leave a kept twin naming a dropped ID.
+    # keep_rows runs only from duplicate_rows, before mz_links.
     co_twin: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     cleared_zygosity: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     # The parent links cycle_breaks cleared, as (id, role, parent, reason)
@@ -281,12 +283,13 @@ class ValidationContext:
     def clear_parents(self, role: ParentRole, rows: np.ndarray) -> None:
         """Make the ``role`` parent of ``rows`` missing, in the parsed arrays and the raw frame.
 
-        Like :meth:`keep_rows`, runs before the derived lookups are read.
+        Drops the lookups built from the parent columns. The id lookups stay:
+        the ids and their row positions do not change.
         """
         column = self.config.column(role)
         parents = self.parents(role).copy()
         parents[rows] = -1
-        if role is ParentRole.MOTHER:
+        if role == ParentRole.MOTHER:
             self.mothers = parents
         else:
             self.fathers = parents
@@ -367,13 +370,13 @@ class ValidationContext:
 
     def parents(self, role: ParentRole) -> np.ndarray:
         """The parsed ``role`` parent column."""
-        parents = self.mothers if role is ParentRole.MOTHER else self.fathers
+        parents = self.mothers if role == ParentRole.MOTHER else self.fathers
         assert parents is not None
         return parents
 
     def refs(self, role: ParentRole) -> ParentRefs:
         """The distinct ``role`` parent ids and their rows."""
-        return self.mother_refs if role is ParentRole.MOTHER else self.father_refs
+        return self.mother_refs if role == ParentRole.MOTHER else self.father_refs
 
     def parent_rows(self) -> tuple[np.ndarray, np.ndarray]:
         """Each parsed row's (mother row, father row), -1 when missing or not in the pedigree."""

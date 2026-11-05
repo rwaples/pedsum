@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import yaml
 from conftest import load_validate_tsv_gz, run_check, run_pedsum
 
 from pedsum.validate import ValidationConfig, validate_pedigree
@@ -211,3 +212,11 @@ def test_library_callers_get_the_named_columns_required(tmp_path):
     ped = _write(tmp_path / "p.tsv", CYCLE.replace("\tby\n", "\tyear\n", 1))
     _, results, _, _ = validate_pedigree(ped, BREAK)
     assert {r.name: r.status for r in results}["required_columns"] == "FAIL"
+
+
+def test_cleared_links_are_plain_strings(tmp_path):
+    """The cleared links hold plain strings, so a YAML report can carry them."""
+    _, _, _, ctx = validate_pedigree(_write(tmp_path / "p.tsv", CYCLE), BREAK)
+    assert ctx.cleared_links == [("7", "mother", "6", "in a cycle, mother born 1990 after the child (born 1980)")]
+    assert all(type(v) is str for link in ctx.cleared_links for v in link)
+    assert yaml.safe_load(yaml.safe_dump(ctx.cleared_links)) == [list(link) for link in ctx.cleared_links]

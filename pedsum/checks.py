@@ -434,7 +434,7 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
             findings.append(
                 Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={child}: cleared {role} id={parent}, {reason}")
             )
-            ctx.cleared_links.append((child, role, parent, reason))
+            ctx.cleared_links.append((child, role.value, parent, reason))
         if (own | late).any():
             ctx.clear_parents(role, np.flatnonzero(own | late))
     return _verdict(findings)
@@ -565,7 +565,6 @@ def _sex_role_findings(
     names the row(s) that reference the id in this role so the log pins the
     offending lines.
     """
-    expected = "female" if role is ParentRole.MOTHER else "male"
     bad = sex[own_rows] != role.expected_sex
     return [
         Finding(
@@ -573,7 +572,7 @@ def _sex_role_findings(
             row=int(own_row),
             detail=(
                 f"id={label(pid)} used as {role} in {rows_phrase(input_rows(np.where(parents == pid)[0]))} "
-                f"but sex != {expected}"
+                f"but sex != {role.sex_name}"
             ),
         )
         for pid, own_row in zip(ids[bad], input_rows(own_rows[bad]), strict=True)

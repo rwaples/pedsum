@@ -108,3 +108,13 @@ def test_parent_role():
         ("mother", SEX_FEMALE, "F", ParentRole.FATHER),
         ("father", SEX_MALE, "M", ParentRole.MOTHER),
     ]
+
+
+def test_a_plain_string_role_picks_its_column():
+    """A caller passing "mother" rather than ParentRole.MOTHER clears the mother, as in 0.16.1."""
+    ctx = _ctx()
+    ctx.clear_parents("mother", np.array([2]))
+    assert ctx.mothers[2] == -1
+    assert ctx.fathers[2] == 1
+    assert ctx.df_raw["mother"][2] is None
+    assert ctx.df_raw["father"][2] == "1"

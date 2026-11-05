@@ -5,6 +5,12 @@
 - `founder_summary.skip_reason` names its cell limit
   `max_founder_ancestor_cells` (was `max_lineage_cells`), the glossary's term
   for the founder-ancestor sets it bounds.
+- Library API: `pedsum.pedigree_ops.rows_of_parents` returns the row array
+  alone (it returned `(rows, present_mask)`); `compute_founder_summary`'s
+  `max_lineage_cells` argument is now `max_founder_ancestor_cells`; the
+  `pedsum.cli` runners (`run_summarize`, `run_validate`, `run_epimight_input`,
+  `run_effective_size`, `run_assortative_mating`) all take
+  `(args, cmd, watchdog)`.
 
 ## 0.16.1 — 2026-11-05 — idempotent --safe-attempt redaction
 
