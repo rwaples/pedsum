@@ -40,13 +40,12 @@ import polars as pl
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, SexSource, logger
 from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
-from pedsum.pedigree_ops import unique_ints
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pedsum.ids import IdLabels
-    from pedsum.pedigree_ops import IdIndex
+    from pedsum.pedigree_ops import ParentRefs
     from pedsum.validate import ValidationContext
 
 
@@ -149,7 +148,7 @@ def fix_pedigree(
         assert ctx.birth_date is not None, "--twin-max-days needs the parsed birth dates"
         sets = multiple_birth_sets(mothers, fathers, ctx.birth_date, max_days)
     founders = (
-        _build_added_founders(mothers, fathers, ctx.id_index, ctx.config.no_sex_check, ctx.rows)
+        _build_added_founders(mothers, fathers, ctx.mother_refs, ctx.father_refs, ctx.config.no_sex_check, ctx.rows)
         if synthesize_founders
         else []
     )
@@ -398,15 +397,14 @@ def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
 def _build_added_founders(
     mothers: np.ndarray,
     fathers: np.ndarray,
-    id_index: IdIndex,
+    mother_refs: ParentRefs,
+    father_refs: ParentRefs,
     no_sex_check: bool,
     input_rows: Callable[[np.ndarray], np.ndarray] = lambda rows: rows,
 ) -> list[dict]:
     """Synthesize founder rows for missing parent IDs, sorted by ID; ``input_rows`` maps rows for the reasons."""
-    moms_ref = unique_ints(mothers[mothers != -1])
-    dads_ref = unique_ints(fathers[fathers != -1])
-    moms_missing = set(moms_ref[id_index.get_indexer(moms_ref) == -1].tolist())
-    dads_missing = set(dads_ref[id_index.get_indexer(dads_ref) == -1].tolist())
+    moms_missing = set(mother_refs.missing.tolist())
+    dads_missing = set(father_refs.missing.tolist())
     conflicts = moms_missing & dads_missing
     moms_only = moms_missing - conflicts
     dads_only = dads_missing - conflicts

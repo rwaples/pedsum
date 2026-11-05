@@ -11,7 +11,7 @@ import numpy as np
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.fixed_pedigree import _build_added_founders
-from pedsum.pedigree_ops import IdIndex
+from pedsum.pedigree_ops import IdIndex, ParentRefs
 
 
 def test_mother_only_missing_synthesises_female():
@@ -19,7 +19,9 @@ def test_mother_only_missing_synthesises_female():
     mothers = np.array([99, -1, -1], dtype=np.int64)
     fathers = np.array([-1, -1, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=False)
+    out = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), no_sex_check=False
+    )
     assert out == [{"id": 99, "sex": SEX_FEMALE, "reason": "referenced as mother in row(s) [0]"}]
 
 
@@ -28,7 +30,9 @@ def test_father_only_missing_synthesises_male():
     mothers = np.array([-1, -1, -1], dtype=np.int64)
     fathers = np.array([88, -1, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=False)
+    out = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), no_sex_check=False
+    )
     assert out == [{"id": 88, "sex": SEX_MALE, "reason": "referenced as father in row(s) [0]"}]
 
 
@@ -41,7 +45,9 @@ def test_both_roles_missing_blocked_without_no_sex_check():
     mothers = np.array([99, -1, -1], dtype=np.int64)
     fathers = np.array([-1, 99, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=False)
+    out = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), no_sex_check=False
+    )
     assert out == []
 
 
@@ -50,7 +56,9 @@ def test_both_roles_missing_with_no_sex_check_synthesises_female():
     mothers = np.array([99, -1, -1], dtype=np.int64)
     fathers = np.array([-1, 99, -1], dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=True)
+    out = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), no_sex_check=True
+    )
     assert len(out) == 1
     row = out[0]
     assert row["id"] == 99
@@ -66,7 +74,9 @@ def test_more_than_five_rows_truncates_listing():
     mothers = np.array([99] * 8, dtype=np.int64)
     fathers = np.full(8, -1, dtype=np.int64)
     id_index = IdIndex([1, 2, 3])
-    out = _build_added_founders(mothers, fathers, id_index, no_sex_check=False)
+    out = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, id_index), ParentRefs.of(fathers, id_index), no_sex_check=False
+    )
     assert len(out) == 1
     assert out[0]["reason"].endswith("(and 3 more)")
     # First five rows are listed.

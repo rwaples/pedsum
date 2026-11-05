@@ -72,6 +72,11 @@ class ParentRefs:
     rows: np.ndarray
     n_children: np.ndarray  # rows naming each id in this column
 
+    @property
+    def missing(self) -> np.ndarray:
+        """The referenced ids with no row of their own, sorted."""
+        return self.ids[self.rows == -1]
+
     @classmethod
     def of(cls, parents: np.ndarray, id_index: IdIndex) -> ParentRefs:
         """Collect the references in ``parents`` (``-1`` is no parent) and look up their rows."""

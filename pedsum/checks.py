@@ -461,8 +461,8 @@ def _parent_refs_sex_conflict(ctx: ValidationContext) -> CheckResult:
     if ctx.config.no_sex_check:
         return CheckResult(CheckStatus.SKIP, note="bypassed via --no-sex-check")
     _, mothers, fathers = ctx.require_id_parents()
-    moms_missing = ctx.mother_refs.ids[ctx.mother_refs.rows == -1]
-    dads_missing = ctx.father_refs.ids[ctx.father_refs.rows == -1]
+    moms_missing = ctx.mother_refs.missing
+    dads_missing = ctx.father_refs.missing
     return _verdict(
         [
             Finding(

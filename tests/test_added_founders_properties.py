@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 
 from pedsum.base import SEX_FEMALE, SEX_MALE
 from pedsum.fixed_pedigree import _build_added_founders
-from pedsum.pedigree_ops import IdIndex
+from pedsum.pedigree_ops import IdIndex, ParentRefs
 
 FounderReferences = tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -56,7 +56,13 @@ def test_added_founder_ids_are_missing_parent_references(
     if no_sex_check:
         expected |= conflicts
 
-    founders = _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=no_sex_check)
+    founders = _build_added_founders(
+        mothers,
+        fathers,
+        ParentRefs.of(mothers, IdIndex(ids)),
+        ParentRefs.of(fathers, IdIndex(ids)),
+        no_sex_check=no_sex_check,
+    )
     added_ids = [row["id"] for row in founders]
 
     assert added_ids == sorted(expected)
@@ -69,7 +75,9 @@ def test_added_founder_sex_follows_unambiguous_parent_role(generated: FounderRef
     """Mother-only missing IDs become F and father-only missing IDs become M."""
     ids, mothers, fathers = generated
     moms_only, dads_only, conflicts = _missing_role_sets(ids, mothers, fathers)
-    founders = _build_added_founders(mothers, fathers, IdIndex(ids), no_sex_check=True)
+    founders = _build_added_founders(
+        mothers, fathers, ParentRefs.of(mothers, IdIndex(ids)), ParentRefs.of(fathers, IdIndex(ids)), no_sex_check=True
+    )
     by_id = {row["id"]: row for row in founders}
 
     for mid in moms_only:
