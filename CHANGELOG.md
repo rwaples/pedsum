@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.1 — 2026-11-05 — idempotent --safe-attempt redaction
+
+- **`--safe-attempt` redaction accepts its own output.** Redacting an
+  already redacted payload raised `TypeError`: four rules (`size_structure`
+  depth counts, `inbreeding`, `multiple_births` Weinberg counts and
+  `redact_small_group`) compared or converted a count they had already
+  nulled. Each now treats a null as already redacted, and a Hypothesis
+  property checks that redacting twice equals redacting once.
+
 ## 0.16.0 — 2026-11-02 — path-count relationships, MO/FO/mAv/pAv
 
 Minor rather than patch because relationship counts move: pedigree-graph
