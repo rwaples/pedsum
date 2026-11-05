@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
+from pedsum.base import PARENT_ROLES, SEX_UNKNOWN, ParentRole, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import (
     ZYGOSITY_MZ,
@@ -278,12 +278,10 @@ def _duplicate_ids(ctx: ValidationContext) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
-def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
+def _parent_token_range(ctx: ValidationContext, role: ParentRole) -> CheckResult:
     """One Finding per row whose ``role`` value is below -1."""
-    parents = ctx.mothers if role == "mother" else ctx.fathers
-    assert parents is not None
     assert ctx.id_labels is not None
-    values = ctx.id_labels.int_values(parents)
+    values = ctx.id_labels.int_values(ctx.parents(role))
     return _verdict(
         [
             Finding(
@@ -298,9 +296,9 @@ def _parent_token_range(ctx: ValidationContext, role: str) -> CheckResult:
     )
 
 
-def _parent_refs_present(ctx: ValidationContext, role: str) -> CheckResult:
+def _parent_refs_present(ctx: ValidationContext, role: ParentRole) -> CheckResult:
     """One Finding per ``role`` ID that has no row of its own."""
-    refs = ctx.mother_refs if role == "mother" else ctx.father_refs
+    refs = ctx.refs(role)
     no_row = refs.rows == -1
     missing, counts = refs.ids[no_row], refs.n_children[no_row]
     findings = []
@@ -323,15 +321,14 @@ def _parent_child_count(ctx: ValidationContext) -> CheckResult:
     real mother; 0 turns a role off.
     """
     config = ctx.config
-    if not config.max_children_mother and not config.max_children_father:
+    if not any(config.max_children(role) for role in PARENT_ROLES):
         return CheckResult(CheckStatus.SKIP, note="no --max-children-mother or --max-children-father")
     findings = []
-    for role, refs, limit in (
-        ("mother", ctx.mother_refs, config.max_children_mother),
-        ("father", ctx.father_refs, config.max_children_father),
-    ):
+    for role in PARENT_ROLES:
+        limit = config.max_children(role)
         if not limit:
             continue
+        refs = ctx.refs(role)
         for k in np.flatnonzero(refs.n_children > limit):
             pid, row, name = int(refs.ids[k]), int(refs.rows[k]), ctx.label(refs.ids[k])
             # A missing-parent token cannot also be an id with a row.
@@ -360,15 +357,14 @@ def _zero_parent_present(ctx: ValidationContext) -> CheckResult:
     PLINK and most R cleaners write a missing parent as ``0``; pedsum reads it
     as an ID unless ``--missing-parent-token 0`` says otherwise (ADR 0006).
     """
-    _, mothers, fathers = ctx.require_id_parents()
     assert ctx.id_labels is not None
     zero = ctx.id_labels.code_of("0")
     if zero is None or ctx.id_index.get_indexer([zero])[0] != -1:
         return _verdict([])
     roles = [
         f"{role} in {rows_phrase(ctx.rows(rows))}"
-        for role, parents in (("mother", mothers), ("father", fathers))
-        if len(rows := np.flatnonzero(parents == zero))
+        for role in PARENT_ROLES
+        if len(rows := np.flatnonzero(ctx.parents(role) == zero))
     ]
     if not roles:
         return _verdict([])
@@ -409,13 +405,16 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
             return CheckResult(CheckStatus.SKIP, note=f"{flag} {column!r} did not parse")
     if birth_year is None and birth_date is None:
         return CheckResult(CheckStatus.SKIP, note="no --birth-year-col or --birth-date-col")
-    ids, mothers, fathers = ctx.require_id_parents()
+    ids, _, _ = ctx.require_id_parents()
     years = _birth_years(birth_year, birth_date)
+    # Both roles' rows before the mother pass clears any link, so the father
+    # pass sees the same rows.
     m_row, f_row = ctx.parent_rows()
     component = cycle_components(m_row, f_row)
     rows = np.arange(len(ids))
     findings: list[Finding] = []
-    for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
+    for role, parent_rows in zip(PARENT_ROLES, (m_row, f_row), strict=True):
+        parents = ctx.parents(role)
         own = parents == ids
         known = parent_rows >= 0
         prow = np.where(known, parent_rows, 0)
@@ -539,25 +538,24 @@ def _parents_distinct(ctx: ValidationContext) -> CheckResult:
 
 def _self_loops(ctx: ValidationContext) -> CheckResult:
     """One Finding per row listed as its own mother, then per row listed as its own father."""
-    ids, mothers, fathers = ctx.require_id_parents()
+    ids, _, _ = ctx.require_id_parents()
     return _verdict(
         [
             Finding(
                 id=int(ids[i]), row=ctx.row(i), detail=f"row {ctx.row(i)}: id={ctx.label(ids[i])} listed as own {role}"
             )
-            for role, parents in (("mother", mothers), ("father", fathers))
-            for i in np.where(parents == ids)[0]
+            for role in PARENT_ROLES
+            for i in np.where(ctx.parents(role) == ids)[0]
         ]
     )
 
 
 def _sex_role_findings(
-    role: str,
+    role: ParentRole,
     parents: np.ndarray,
     ids: np.ndarray,
     own_rows: np.ndarray,
     sex: np.ndarray,
-    expected_sex: int,
     label: Label,
     input_rows: Callable[[np.ndarray], np.ndarray],
 ) -> list[Finding]:
@@ -567,8 +565,8 @@ def _sex_role_findings(
     names the row(s) that reference the id in this role so the log pins the
     offending lines.
     """
-    expected = "female" if expected_sex == SEX_FEMALE else "male"
-    bad = sex[own_rows] != expected_sex
+    expected = "female" if role is ParentRole.MOTHER else "male"
+    bad = sex[own_rows] != role.expected_sex
     return [
         Finding(
             id=int(pid),
@@ -593,13 +591,15 @@ def _sex_role_override(ctx: ValidationContext) -> CheckResult:
     if not ctx.config.override_asserted_sex:
         return CheckResult(CheckStatus.SKIP, note="off (--no-override-asserted-sex)")
     imp = ctx.imputation
-    ids, mothers, fathers = ctx.require_id_parents()
+    ids, _, _ = ctx.require_id_parents()
     assert ctx.sex is not None
     findings = []
     overridden = np.flatnonzero(imp.overridden_mask)
-    for role, parents, recorded, now in (("mother", mothers, "M", "F"), ("father", fathers, "F", "M")):
-        own = overridden[ctx.sex[overridden] == (SEX_MALE if role == "mother" else SEX_FEMALE)]
-        for i, naming in zip(own, _rows_naming(parents, ids[own]), strict=True):
+    for role in PARENT_ROLES:
+        # An overridden row's asserted sex is the other role's.
+        own = overridden[ctx.sex[overridden] == role.other.expected_sex]
+        recorded, now = role.other.sex_letter, role.sex_letter
+        for i, naming in zip(own, _rows_naming(ctx.parents(role), ids[own]), strict=True):
             findings.append(
                 Finding(
                     id=int(ids[i]),
@@ -634,17 +634,14 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
     unknown are left to ``sex_role_ambiguity``.
     """
     imp = ctx.imputation
-    _, mothers, fathers = ctx.require_id_parents()
     findings: list[Finding] = []
-    for role, parents, refs, expected_sex in (
-        ("mother", mothers, ctx.mother_refs, SEX_FEMALE),
-        ("father", fathers, ctx.father_refs, SEX_MALE),
-    ):
+    for role in PARENT_ROLES:
+        refs = ctx.refs(role)
         present = refs.rows != -1
         keep = present.copy()
         keep[present] = ~imp.original_unknown_mask[refs.rows[present]]
         findings += _sex_role_findings(
-            role, parents, refs.ids[keep], refs.rows[keep], imp.imputed_sex, expected_sex, ctx.label, ctx.rows
+            role, ctx.parents(role), refs.ids[keep], refs.rows[keep], imp.imputed_sex, ctx.label, ctx.rows
         )
     return _verdict(findings)
 
@@ -718,10 +715,10 @@ def _parent_ages(
     child. ``shown(row)`` names a row's birth year or date in the detail.
     """
     min_age = ctx.config.min_parent_age
-    ids, mothers, fathers = ctx.require_id_parents()
+    ids, _, _ = ctx.require_id_parents()
     findings: list[Finding] = []
-    m_row, f_row = ctx.parent_rows()
-    for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
+    for role, parent_rows in zip(PARENT_ROLES, ctx.parent_rows(), strict=True):
+        parents = ctx.parents(role)
         child_rows = np.flatnonzero(parent_rows != -1)
         child_rows = child_rows[checked(child_rows, parent_rows[child_rows])]
         ages = age(child_rows, parent_rows[child_rows])
@@ -1087,14 +1084,14 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "parent_token_range_mother",
         ("id_dtype",),
-        partial(_parent_token_range, role="mother"),
+        partial(_parent_token_range, role=ParentRole.MOTHER),
         "mother IDs in valid range",
         FailPolicy.BLOCK,
     ),
     Check(
         "parent_token_range_father",
         ("id_dtype",),
-        partial(_parent_token_range, role="father"),
+        partial(_parent_token_range, role=ParentRole.FATHER),
         "father IDs in valid range",
         FailPolicy.BLOCK,
     ),
@@ -1121,14 +1118,14 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "parent_refs_present_mother",
         _IDS,
-        partial(_parent_refs_present, role="mother"),
+        partial(_parent_refs_present, role=ParentRole.MOTHER),
         "mother IDs present in pedigree",
         FailPolicy.AUTOFIX,
     ),
     Check(
         "parent_refs_present_father",
         _IDS,
-        partial(_parent_refs_present, role="father"),
+        partial(_parent_refs_present, role=ParentRole.FATHER),
         "father IDs present in pedigree",
         FailPolicy.AUTOFIX,
     ),

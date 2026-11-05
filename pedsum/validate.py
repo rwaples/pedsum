@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, SexSource, logger
+from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, ParentRole, PedigreeError, SexSource, logger
 from pedsum.checks import CHECKS, CheckResult, CheckStatus, summarize_findings
 from pedsum.fixed_pedigree import fix_pedigree
 from pedsum.parse import (
@@ -202,6 +202,14 @@ class ValidationConfig:
             max_children_father=getattr(args, "max_children_father", 0),
         )
 
+    def column(self, role: ParentRole) -> str:
+        """The input column holding the ``role`` parent."""
+        return self.mother_col if role is ParentRole.MOTHER else self.father_col
+
+    def max_children(self, role: ParentRole) -> int:
+        """The most children one ``role`` parent may have; 0 is off."""
+        return self.max_children_mother if role is ParentRole.MOTHER else self.max_children_father
+
     @property
     def by_max(self) -> int:
         """Resolved birth-year upper bound (default: current calendar year + 1)."""
@@ -270,16 +278,15 @@ class ValidationContext:
         """Rows ``idx`` of the parsed arrays as their rows in the input."""
         return idx if self.input_rows is None else self.input_rows[idx]
 
-    def clear_parents(self, role: str, rows: np.ndarray) -> None:
+    def clear_parents(self, role: ParentRole, rows: np.ndarray) -> None:
         """Make the ``role`` parent of ``rows`` missing, in the parsed arrays and the raw frame.
 
         Like :meth:`keep_rows`, runs before the derived lookups are read.
         """
-        column = self.config.mother_col if role == "mother" else self.config.father_col
-        _, mothers, fathers = self.require_id_parents()
-        parents = (mothers if role == "mother" else fathers).copy()
+        column = self.config.column(role)
+        parents = self.parents(role).copy()
         parents[rows] = -1
-        if role == "mother":
+        if role is ParentRole.MOTHER:
             self.mothers = parents
         else:
             self.fathers = parents
@@ -357,6 +364,16 @@ class ValidationContext:
             self.father_refs.ids,
             override_asserted_sex=self.config.override_asserted_sex,
         )
+
+    def parents(self, role: ParentRole) -> np.ndarray:
+        """The parsed ``role`` parent column."""
+        parents = self.mothers if role is ParentRole.MOTHER else self.fathers
+        assert parents is not None
+        return parents
+
+    def refs(self, role: ParentRole) -> ParentRefs:
+        """The distinct ``role`` parent ids and their rows."""
+        return self.mother_refs if role is ParentRole.MOTHER else self.father_refs
 
     def parent_rows(self) -> tuple[np.ndarray, np.ndarray]:
         """Each parsed row's (mother row, father row), -1 when missing or not in the pedigree."""

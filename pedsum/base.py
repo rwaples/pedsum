@@ -40,5 +40,31 @@ class SexSource(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class ParentRole(StrEnum):
+    """A parent column's role; its value is the role's name in Findings and the cleared-links manifest."""
+
+    MOTHER = "mother"
+    FATHER = "father"
+
+    @property
+    def expected_sex(self) -> int:
+        """The sex code a parent in this role has."""
+        return SEX_FEMALE if self is ParentRole.MOTHER else SEX_MALE
+
+    @property
+    def sex_letter(self) -> str:
+        """``expected_sex`` as the input writes it."""
+        return "F" if self is ParentRole.MOTHER else "M"
+
+    @property
+    def other(self) -> ParentRole:
+        """The other parent role."""
+        return ParentRole.FATHER if self is ParentRole.MOTHER else ParentRole.MOTHER
+
+
+#: Both parent roles, mother first: the order every per-role Check reports in.
+PARENT_ROLES = (ParentRole.MOTHER, ParentRole.FATHER)
+
+
 class PedigreeError(Exception):
     """Raised on any input validation failure."""
