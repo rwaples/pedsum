@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `founder_summary.skip_reason` names its cell limit
+  `max_founder_ancestor_cells` (was `max_lineage_cells`), the glossary's term
+  for the founder-ancestor sets it bounds.
+
 ## 0.16.1 — 2026-11-05 — idempotent --safe-attempt redaction
 
 - **`--safe-attempt` redaction accepts its own output.** Redacting an

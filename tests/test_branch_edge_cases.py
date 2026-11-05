@@ -489,9 +489,9 @@ class TestSectionEdgeCases:
                 "is_founder": [True, True, False],
             }
         )
-        skipped, skipped_counts = compute_founder_summary(idf, *parent_rows(idf), max_lineage_cells=1)
+        skipped, skipped_counts = compute_founder_summary(idf, *parent_rows(idf), max_founder_ancestor_cells=1)
         assert skipped["computed"] is False
-        assert "exceeds" in skipped["skip_reason"]
+        assert "exceeds max_founder_ancestor_cells=1" in skipped["skip_reason"]
         np.testing.assert_array_equal(skipped_counts, np.zeros(3, dtype=np.int32))
 
         summary, n_anc = compute_founder_summary(idf, *parent_rows(idf))

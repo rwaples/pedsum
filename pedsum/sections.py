@@ -52,9 +52,9 @@ def compute_size_structure(
     n_female = int((sex == SEX_FEMALE).sum())
     n_unknown = int((sex == SEX_UNKNOWN).sum())
 
-    gen = df["ped_depth"].to_numpy()
-    max_depth = int(gen.max()) if n > 0 else 0
-    gen_counts = np.bincount(gen).tolist() if n > 0 else []
+    depth = df["ped_depth"].to_numpy()
+    max_depth = int(depth.max()) if n > 0 else 0
+    depth_counts = np.bincount(depth).tolist() if n > 0 else []
 
     children_csr = build_children_csr(mother_rows, father_rows)
     if children_csr is not None:
@@ -83,9 +83,9 @@ def compute_size_structure(
         "n_with_father_only": int((~has_mom & has_dad).sum()),
         "n_half_founders": int((has_mom ^ has_dad).sum()),
         "max_depth": max_depth,
-        "mean_depth": float(gen.mean()) if n else 0.0,
-        "median_depth": float(np.median(gen)) if n else 0.0,
-        "depth_counts": gen_counts,
+        "mean_depth": float(depth.mean()) if n else 0.0,
+        "median_depth": float(np.median(depth)) if n else 0.0,
+        "depth_counts": depth_counts,
         "n_components": int(n_components),
         "largest_component": int(sorted_sizes[0]) if len(sorted_sizes) else 0,
         "largest_component_frac": (int(sorted_sizes[0]) / n) if len(sorted_sizes) and n else 0.0,
@@ -213,7 +213,7 @@ def compute_founder_summary(
     idf: pl.DataFrame,
     mother_rows: np.ndarray,
     father_rows: np.ndarray,
-    max_lineage_cells: int = 5_000_000,
+    max_founder_ancestor_cells: int = 5_000_000,
 ) -> tuple[dict, np.ndarray]:
     """Founder-contribution-by-depth using unique **Founder Ancestor** sets.
 
@@ -235,11 +235,11 @@ def compute_founder_summary(
     zeros = np.zeros(n, dtype=np.int32)
     if n == 0 or n_founders == 0:
         return {"computed": True, "by_depth": [], "bottleneck": None}, zeros
-    if n * n_founders > max_lineage_cells:
+    if n * n_founders > max_founder_ancestor_cells:
         skip = {
             "computed": False,
             "skip_reason": (
-                f"n_individuals * n_founders = {n * n_founders} exceeds max_lineage_cells={max_lineage_cells}"
+                f"n_individuals * n_founders = {n * n_founders} exceeds max_founder_ancestor_cells={max_founder_ancestor_cells}"
             ),
         }
         return skip, zeros
@@ -273,10 +273,10 @@ def compute_founder_summary(
         rows = np.where(depth_arr == depth)[0]
         active: set[int] = set()
         counts = np.zeros(n_founders, dtype=np.int64)
-        line_counts = np.zeros(len(rows), dtype=np.int32)
+        founder_ancestor_counts = np.zeros(len(rows), dtype=np.int32)
         for pos, row in enumerate(rows):
             fs = founder_sets[int(row)]
-            line_counts[pos] = len(fs)
+            founder_ancestor_counts[pos] = len(fs)
             if not fs:
                 continue
             active.update(fs)
@@ -289,7 +289,7 @@ def compute_founder_summary(
                 "active_founders": len(active),
                 "active_founder_frac": len(active) / n_founders,
                 "effective_founders_by_descendants": _effective_count_from_weights(active_counts),
-                "founder_ancestors": numeric_distribution(line_counts),
+                "founder_ancestors": numeric_distribution(founder_ancestor_counts),
             }
         )
 
@@ -745,7 +745,7 @@ def build_individual_df(
     mothers = df["mother"].to_numpy()
     fathers = df["father"].to_numpy()
     sex = df["sex"].to_numpy()
-    gen = df["ped_depth"].to_numpy()
+    depth = df["ped_depth"].to_numpy()
 
     has_mom = mother_rows >= 0
     has_dad = father_rows >= 0
@@ -806,7 +806,7 @@ def build_individual_df(
         "sex_source": sex_source.astype(str),
         "mother": mothers,
         "father": fathers,
-        "ped_depth": gen.astype(np.int32),
+        "ped_depth": depth.astype(np.int32),
         "is_founder": is_founder,
         "F": None if F is None else F.astype(np.float64),
         "n_full_sibs": fs_count,
