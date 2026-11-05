@@ -33,14 +33,16 @@ def null_below(d: dict, keys: Iterable[str], min_cell: int) -> None:
             d[k] = None
 
 
-def redact_small_group(row: dict, keep: tuple[str, ...], min_cell: int, small_keys: Iterable[str]) -> None:
-    """Small-cell redaction for a grouped row keyed by ``n``.
+def redact_small_group(
+    row: dict, keep: tuple[str, ...], min_cell: int, small_keys: Iterable[str], *, size_key: str = "n"
+) -> None:
+    """Small-cell redaction for a grouped row whose size is ``size_key``.
 
-    If the group's ``n`` is below ``min_cell``, null every key except those
-    in ``keep``. Otherwise null only the ``small_keys`` whose own value is
-    below ``min_cell`` (via :func:`null_below`).
+    If the group's size is below ``min_cell`` (zero included), null every key
+    except those in ``keep``. Otherwise null only the ``small_keys`` whose
+    own value is below ``min_cell`` (via :func:`null_below`).
     """
-    if int(row.get("n") or 0) < min_cell:
+    if int(row.get(size_key) or 0) < min_cell:
         for k in list(row):
             if k not in keep:
                 row[k] = None

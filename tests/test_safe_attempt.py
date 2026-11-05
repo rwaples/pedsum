@@ -15,7 +15,7 @@ from conftest import run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.report import apply_safe_attempt
-from pedsum.sections import numeric_distribution
+from pedsum.sections import numeric_distribution, redact_mating_pairs
 
 
 def test_safe_attempt_summarize_outputs(tmp_path):
@@ -120,3 +120,17 @@ def test_apply_safe_attempt_headline_branches():
     assert "max" not in kinship
     assert n_children["nz"] is None  # 2 < 5
     assert kinship["nz"] == 7  # 7 ≥ 5
+
+
+def test_redact_mating_pairs_by_pair_count():
+    """No pairs keeps the counts but a small multi-child count; few pairs null all but n_pairs (values from 0.16.1)."""
+    cases = [
+        (0, 2, 1.0, {"n_pairs": 0, "n_pairs_with_multiple_children": None, "mean_children_per_pair": 1.0}),
+        (3, 2, 1.5, {"n_pairs": 3, "n_pairs_with_multiple_children": None, "mean_children_per_pair": None}),
+        (7, 2, 1.2, {"n_pairs": 7, "n_pairs_with_multiple_children": None, "mean_children_per_pair": 1.2}),
+        (7, 6, 1.2, {"n_pairs": 7, "n_pairs_with_multiple_children": 6, "mean_children_per_pair": 1.2}),
+    ]
+    for n_pairs, n_multi, mean, expected in cases:
+        mating = {"n_pairs": n_pairs, "n_pairs_with_multiple_children": n_multi, "mean_children_per_pair": mean}
+        redact_mating_pairs(mating, 5, 100)
+        assert mating == expected

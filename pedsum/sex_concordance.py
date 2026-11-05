@@ -52,7 +52,7 @@ import numpy as np
 
 from pedsum.base import SEX_MALE, SexSource, logger
 from pedsum.progress import timed
-from pedsum.redaction import null_below
+from pedsum.redaction import null_below, redact_small_group
 from pedsum.sections import numeric_distribution
 
 if TYPE_CHECKING:
@@ -831,12 +831,7 @@ def _redact_grouping(block: dict, min_cell: int) -> None:
             perms["p_holm"] = None
 
     for row in block.get("by_group_size") or []:
-        if int(row.get("n_groups", 0)) < min_cell:
-            for key in list(row):
-                if key not in ("group_size", "n_groups"):
-                    row[key] = None
-        else:
-            null_below(row, ("n_offspring",), min_cell)
+        redact_small_group(row, ("group_size", "n_groups"), min_cell, ("n_offspring",), size_key="n_groups")
 
     null_below(block, _COUNT_KEYS, min_cell)
     by_source = block.get("eligible_by_sex_source")

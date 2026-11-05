@@ -847,11 +847,10 @@ def redact_sibship_size(sibships: dict, min_cell: int, n_total: int) -> None:
 
 def redact_mating_pairs(mating: dict, min_cell: int, n_total: int) -> None:
     """Null everything but ``n_pairs`` when there are few Mating Pairs, else a small multi-child count."""
-    if 0 < int(mating.get("n_pairs", 0)) < min_cell:
-        for k in list(mating):
-            if k != "n_pairs":
-                mating[k] = None
-    null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
+    if int(mating.get("n_pairs") or 0) > 0:
+        redact_small_group(mating, ("n_pairs",), min_cell, ("n_pairs_with_multiple_children",), size_key="n_pairs")
+    else:
+        null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
 
 
 def redact_relationship_summary(summary: dict, min_cell: int, n_total: int) -> None:
