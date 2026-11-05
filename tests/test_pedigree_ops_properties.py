@@ -77,8 +77,8 @@ def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> 
     order = data.draw(st.permutations(ids))
     df = pl.DataFrame({"id": ids, "mother": mothers, "father": fathers})[order]
     id_index = IdIndex(df["id"].to_numpy())
-    m_rows, _ = rows_of_parents(df["mother"].to_numpy(), id_index)
-    f_rows, _ = rows_of_parents(df["father"].to_numpy(), id_index)
+    m_rows = rows_of_parents(df["mother"].to_numpy(), id_index)
+    f_rows = rows_of_parents(df["father"].to_numpy(), id_index)
     mating = group_mating_pairs(df, m_rows, f_rows)
 
     both = np.flatnonzero((m_rows >= 0) & (f_rows >= 0))
@@ -96,13 +96,13 @@ def test_mating_pairs_match_unique_grouping(ped: tuple, data: st.DataObject) -> 
 
 @given(ped=_pedigrees())
 def test_parent_rows_mask_and_index(ped: tuple) -> None:
-    """The present-mask matches ``!= -1``; resolved rows are in range and map back to the parent id."""
+    """A missing parent maps to -1; resolved rows are in range and map back to the parent id."""
     ids, mothers, fathers = ped
     id_index = IdIndex(ids)
     n = len(ids)
     for parents in (mothers, fathers):
-        rows, mask = rows_of_parents(parents, id_index)
-        assert (mask == (parents != -1)).all()
+        rows = rows_of_parents(parents, id_index)
+        mask = parents != -1
         assert (rows[~mask] == -1).all()
         present = rows[mask]
         assert ((present >= 0) & (present < n)).all()

@@ -15,7 +15,7 @@ import polars as pl
 from pedsum.base import PedigreeError, logger
 from pedsum.checks import DROPPABLE_CHECKS, CheckStatus, blocking_failures
 from pedsum.fixed_pedigree import fix_pedigree, next_free_id, render_fixed_pedigree
-from pedsum.pedigree_ops import cycle_components, rows_of_parents
+from pedsum.pedigree_ops import cycle_components
 from pedsum.validate import ValidationContext, run_checks, validate_pedigree
 
 if TYPE_CHECKING:
@@ -52,10 +52,8 @@ def _cycle_member_ids(ctx: ValidationContext) -> set[int]:
     cleared) and re-validate the next round. Self-loops are size-1 SCCs here and
     are handled by the `self_loops` check.
     """
-    ids, mothers, fathers = ctx.require_id_parents()
-    m_row, _ = rows_of_parents(mothers, ctx.id_index)
-    f_row, _ = rows_of_parents(fathers, ctx.id_index)
-    return {int(i) for i in ids[cycle_components(m_row, f_row) >= 0]}
+    ids, _, _ = ctx.require_id_parents()
+    return {int(i) for i in ids[cycle_components(*ctx.parent_rows()) >= 0]}
 
 
 def _round_drop_ids(findings: list[Finding], ctx: ValidationContext) -> set[int]:

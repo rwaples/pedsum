@@ -29,7 +29,7 @@ from pedsum.parse import (
     decode_sex,
     format_id_sample,
 )
-from pedsum.pedigree_ops import cycle_components, rows_of_parents
+from pedsum.pedigree_ops import cycle_components
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -411,8 +411,7 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
         return CheckResult(CheckStatus.SKIP, note="no --birth-year-col or --birth-date-col")
     ids, mothers, fathers = ctx.require_id_parents()
     years = _birth_years(birth_year, birth_date)
-    m_row, _ = rows_of_parents(mothers, ctx.id_index)
-    f_row, _ = rows_of_parents(fathers, ctx.id_index)
+    m_row, f_row = ctx.parent_rows()
     component = cycle_components(m_row, f_row)
     rows = np.arange(len(ids))
     findings: list[Finding] = []
@@ -721,9 +720,9 @@ def _parent_ages(
     min_age = ctx.config.min_parent_age
     ids, mothers, fathers = ctx.require_id_parents()
     findings: list[Finding] = []
-    for role, parents in (("mother", mothers), ("father", fathers)):
-        parent_rows = ctx.id_index.get_indexer(parents)
-        child_rows = np.flatnonzero((parents != -1) & (parent_rows != -1))
+    m_row, f_row = ctx.parent_rows()
+    for role, parents, parent_rows in (("mother", mothers, m_row), ("father", fathers, f_row)):
+        child_rows = np.flatnonzero(parent_rows != -1)
         child_rows = child_rows[checked(child_rows, parent_rows[child_rows])]
         ages = age(child_rows, parent_rows[child_rows])
         for i in np.flatnonzero(ages < min_age):

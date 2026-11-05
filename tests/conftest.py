@@ -139,9 +139,7 @@ def load_summary_tsv(out_dir: Path) -> list[list[str]]:
 def parent_rows(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     """Each row's (mother row, father row), ``-1`` when unknown, as summarize reads them off the graph."""
     id_index = IdIndex(df["id"].to_numpy())
-    mother_rows, _ = rows_of_parents(df["mother"].to_numpy(), id_index)
-    father_rows, _ = rows_of_parents(df["father"].to_numpy(), id_index)
-    return mother_rows, father_rows
+    return rows_of_parents(df["mother"].to_numpy(), id_index), rows_of_parents(df["father"].to_numpy(), id_index)
 
 
 def read_tsv_gz(path: Path, *, as_str: bool = False) -> pl.DataFrame:

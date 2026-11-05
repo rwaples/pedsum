@@ -84,13 +84,13 @@ class ParentRefs:
         return cls(ids, id_index.get_indexer(ids), np.diff(np.append(starts, ordered.size)))
 
 
-def rows_of_parents(parents: np.ndarray, id_index: IdIndex) -> tuple[np.ndarray, np.ndarray]:
-    """Map parent IDs to row indices; -1 for missing. Returns (row_index, present_mask)."""
+def rows_of_parents(parents: np.ndarray, id_index: IdIndex) -> np.ndarray:
+    """Map parent IDs to row indices; -1 for a missing parent or one not in the pedigree."""
     out = np.full(len(parents), -1, dtype=np.int64)
     mask = parents != -1
     if mask.any():
         out[mask] = id_index.get_indexer(parents[mask])
-    return out, mask
+    return out
 
 
 @dataclass(frozen=True)

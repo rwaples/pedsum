@@ -343,11 +343,7 @@ class ValidationContext:
     @cached_property
     def depth(self) -> np.ndarray:
         """Topological depth per parsed row, -1 in or below a cycle; built once."""
-        assert self.mothers is not None
-        assert self.fathers is not None
-        m_row, _ = rows_of_parents(self.mothers, self.id_index)
-        f_row, _ = rows_of_parents(self.fathers, self.id_index)
-        return structural_depth(m_row, f_row)
+        return structural_depth(*self.parent_rows())
 
     @cached_property
     def imputation(self) -> _SexImputation:
@@ -361,6 +357,11 @@ class ValidationContext:
             self.father_refs.ids,
             override_asserted_sex=self.config.override_asserted_sex,
         )
+
+    def parent_rows(self) -> tuple[np.ndarray, np.ndarray]:
+        """Each parsed row's (mother row, father row), -1 when missing or not in the pedigree."""
+        _, mothers, fathers = self.require_id_parents()
+        return rows_of_parents(mothers, self.id_index), rows_of_parents(fathers, self.id_index)
 
     def require_id_parents(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the parsed ``(ids, mothers, fathers)``.
