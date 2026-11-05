@@ -10,7 +10,7 @@ validation config and context and sex imputation; `pedsum.reduce` decides what
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from functools import cached_property
 from typing import TYPE_CHECKING
 
@@ -208,6 +208,11 @@ class ValidationConfig:
         return self.birth_year_max if self.birth_year_max is not None else birth_year_default_max()
 
 
+# Marks a ValidationContext array with one entry per parsed row, which
+# keep_rows slices with the rows.
+_ROW_ALIGNED_FIELD = {"row_aligned": True}
+
+
 @dataclass
 class ValidationContext:
     """Mutable state threaded through every Check (``pedsum.checks``).
@@ -228,22 +233,22 @@ class ValidationContext:
     # mode and string-mode codes stay fixed while rows are dropped.
     fixed_labels: IdLabels | None = None
     # Populated by the parse Checks.
-    ids: np.ndarray | None = None
-    mothers: np.ndarray | None = None
-    fathers: np.ndarray | None = None
+    ids: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    mothers: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    fathers: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     id_labels: IdLabels | None = None
-    sex: np.ndarray | None = None
-    birth_year: np.ndarray | None = None
-    birth_date: np.ndarray | None = None  # datetime64[D], NaT unknown
-    zygosity: np.ndarray | None = None  # int8 ZYGOSITY_* codes
+    sex: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    birth_year: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    birth_date: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)  # datetime64[D], NaT unknown
+    zygosity: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)  # int8 ZYGOSITY_* codes
     # Set by multiple_birth_sets: each row's set code (-1 none) after the
     # members it clears, and which rows' set cells it cleared.
-    multiple_birth: np.ndarray | None = None
-    cleared_multiple_birth: np.ndarray | None = None
+    multiple_birth: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    cleared_multiple_birth: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     # Set by mz_links: each row's MZ co-twin ID code (-1 none), and which
     # rows' zygosity cells it cleared.
-    co_twin: np.ndarray | None = None
-    cleared_zygosity: np.ndarray | None = None
+    co_twin: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
+    cleared_zygosity: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     # The parent links cycle_breaks cleared, as (id, role, parent, reason)
     # with IDs as the input wrote them: validate's cleared-links manifest.
     cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -283,24 +288,28 @@ class ValidationContext:
         self.df_raw = self.df_raw.with_columns(
             pl.when(pl.Series(cleared)).then(None).otherwise(pl.col(column)).alias(column)
         )
-        for name in ("mother_refs", "father_refs", "depth", "imputation"):
-            self.__dict__.pop(name, None)
+        for name in _CACHES:
+            if name not in _ID_CACHES:
+                self.__dict__.pop(name, None)
 
-    def keep_rows(self, keep: np.ndarray) -> None:
+    def keep_rows(self, keep: np.ndarray, *, sorted_ids: np.ndarray | None = None) -> None:
         """Keep only the rows where ``keep`` is True, in the raw frame and every parsed array.
 
         Runs before any Check reads the derived lookups (``id_index``, the parent
         refs, ``depth``, ``imputation``); any already built is dropped.
+        ``sorted_ids``, the kept ids already sorted, seeds that cache.
         """
         self.df_raw = self.df_raw.filter(pl.Series(keep))
-        for name in ("ids", "mothers", "fathers", "sex", "birth_year", "birth_date", "zygosity"):
+        for name in _ROW_ALIGNED:
             values = getattr(self, name)
             if values is not None:
                 setattr(self, name, values[keep])
         kept = np.flatnonzero(keep)
         self.input_rows = kept if self.input_rows is None else self.input_rows[kept]
-        for name in ("sorted_ids", "id_index", "mother_refs", "father_refs", "depth", "imputation"):
+        for name in _CACHES:
             self.__dict__.pop(name, None)
+        if sorted_ids is not None:
+            self.__dict__["sorted_ids"] = sorted_ids
 
     @property
     def label(self) -> Callable[[int], str]:
@@ -364,6 +373,13 @@ class ValidationContext:
         assert self.mothers is not None
         assert self.fathers is not None
         return self.ids, self.mothers, self.fathers
+
+
+# The array fields keep_rows slices, and the derived lookups it drops.
+_ROW_ALIGNED = tuple(f.name for f in fields(ValidationContext) if f.metadata.get("row_aligned"))
+_CACHES = tuple(n for n, v in vars(ValidationContext).items() if isinstance(v, cached_property))
+# The lookups built from the ids alone, which clear_parents keeps.
+_ID_CACHES = ("sorted_ids", "id_index")
 
 
 # ---------------------------------------------------------------------------

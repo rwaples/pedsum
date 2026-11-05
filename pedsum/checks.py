@@ -258,9 +258,8 @@ def _duplicate_rows(ctx: ValidationContext) -> CheckResult:
     ]
     keep = np.ones(len(ids), dtype=bool)
     keep[rows[copies]] = False
-    ctx.keep_rows(keep)
     # The kept ids, still sorted: duplicate_ids reads them without sorting again.
-    ctx.__dict__["sorted_ids"] = ids[order][keep[order]]
+    ctx.keep_rows(keep, sorted_ids=ids[order][keep[order]])
     return _verdict(findings)
 
 
