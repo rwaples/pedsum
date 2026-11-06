@@ -101,6 +101,9 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
             # A later round can clear a link the first could not reach (e.g.
             # behind a dropped duplicate id); the manifest is ctx0's.
             ctx0.cleared_links.extend(ctx.cleared_links)
+        # The round's own repairs (cleared links, collapsed copies) carry into
+        # the next round's frame, so no later round clears them again.
+        df_cur = ctx.df_raw
         droppable = [f for f in findings if f.check in DROPPABLE_CHECKS and f.id is not None]
         drop_ids = _round_drop_ids(droppable, ctx)
         if not drop_ids:

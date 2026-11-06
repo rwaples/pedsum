@@ -111,8 +111,12 @@ def test_both_parents_of_one_row_is_left_to_parents_distinct():
 
 
 def test_a_repair_after_a_dropped_duplicate_is_in_the_manifest(tmp_path):
-    """A duplicate id gates the role checks in round 1; the round-2 repair still reaches the manifest."""
-    text = TEXT + "d\tM\t-1\t-1\nd\tF\t-1\t-1\n"
+    """A duplicate id gates the role checks in round 1; the round-2 repair reaches the manifest once.
+
+    The self-loop row ``sl``, dropped in round 2, forces a round 3, which must
+    not clear (and list) the round-2 links again.
+    """
+    text = TEXT + "d\tM\t-1\t-1\nd\tF\t-1\t-1\nsl\tM\tsl\t-1\n"
     r, out = _validate(tmp_path, text, "--break-role-conflicts", "--drop-offending")
     assert r.returncode == 1, r.stderr
     assert [link[:3] for link in _cleared(out)] == [("c2", "father", "fx"), ("c3", "father", "fx")]

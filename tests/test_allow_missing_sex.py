@@ -52,7 +52,7 @@ def test_graph_commands_refuse_an_unsexed_parent_in_both_roles(tmp_path, command
     res = _run([command, "--in", str(ped), "--out", str(tmp_path / "out"), "--allow-missing-sex", *extra])
     assert res.returncode == 1, res.stderr
     assert "id u7 is the mother of id c3 and the father of id c4" in res.stderr
-    assert "validate --drop-offending drops it" in res.stderr
+    assert "Rerun validate without them" in res.stderr
     assert "Traceback" not in res.stderr
 
 

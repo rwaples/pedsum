@@ -383,7 +383,11 @@ def _log_sex_imputation(imp, *, allow_missing_sex: bool) -> None:
         )
     n_ambiguous = int(imp.ambiguous_mask.sum())
     if allow_missing_sex and n_ambiguous > 0:
-        logger.info("kept %d row(s) with sex_role_ambiguity (--allow-missing-sex)", n_ambiguous)
+        logger.warning(
+            "kept %d unsexed individual(s) used as both mother and father (--allow-missing-sex); "
+            "summarize, effective-size and epimight-input refuse them",
+            n_ambiguous,
+        )
     # Never a parent, so no role to sex them from (ADR 0006): kept with sex 0.
     n_unsexed = n_unresolved - n_ambiguous
     if n_unsexed > 0:

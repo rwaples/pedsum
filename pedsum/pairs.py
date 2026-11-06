@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pedigree_graph import RELATIONSHIPS, PedigreeGraph, PedigreeValidationError
 
-from pedsum.base import SEX_UNKNOWN, PedigreeError
+from pedsum.base import PedigreeError
 from pedsum.pedigree_ops import IdIndex
 from pedsum.redaction import null_below
 
@@ -109,7 +109,7 @@ def build_pedigree_graph(df: pl.DataFrame, labels: IdLabels | None = None) -> Pe
 
 
 def _both_roles_message(df: pl.DataFrame, fields: Mapping[str, object], labels: IdLabels | None) -> str:
-    """Name the first id in both parent roles, by its input ID, and the repair for it.
+    """Name the first id in both parent roles, by its input ID, and how validate deals with it.
 
     The graph's ids are ``df``'s rows, so the error's ids and rows index ``df``.
     """
@@ -121,19 +121,11 @@ def _both_roles_message(df: pl.DataFrame, fields: Mapping[str, object], labels: 
         assert isinstance(row, int)
         return label(ids[row])
 
-    parent = fields["parent_id"]
-    assert isinstance(parent, int)
-    if df["sex"][parent] == SEX_UNKNOWN:
-        repair = "validate --drop-offending drops it"
-    else:
-        repair = (
-            "validate --break-role-conflicts clears the links its recorded sex contradicts, "
-            "and validate --drop-offending drops it"
-        )
     return (
         f"id {name('parent_id')} is the mother of id {name('mother_of_id')} and the father of id "
         f"{name('father_of_id')} ({fields['parent_count']} id(s) in both parent roles), which pedigree-graph "
-        f"refuses; {repair}"
+        "refuses; validate keeps it only under --allow-missing-sex or --no-sex-check. Rerun validate without "
+        "them: such an id BLOCKs there, and --drop-offending drops it"
     )
 
 

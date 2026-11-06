@@ -558,7 +558,7 @@ def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels
 
 
 def write_cleared_links(cleared: list[tuple[str, str, str, str]], out_path: Path) -> None:
-    """Tab-separated manifest of the parent links ``validate --break-cycles`` cleared.
+    """Tab-separated manifest of the parent links ``--break-cycles`` and ``--break-role-conflicts`` cleared.
 
     One row per link: the child's id, the parent ``role``, the ``parent`` id
     and the ``reason``. Written even when nothing was cleared (header only).

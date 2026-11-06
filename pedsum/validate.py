@@ -264,7 +264,8 @@ class ValidationContext:
     # keep_rows runs only from duplicate_rows, before mz_links.
     co_twin: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
     cleared_zygosity: np.ndarray | None = field(default=None, metadata=_ROW_ALIGNED_FIELD)
-    # The parent links cycle_breaks cleared, as (id, role, parent, reason)
+    # The parent links cycle_breaks and role_conflict_breaks cleared, in every
+    # --drop-offending round, as (id, role, parent, reason)
     # with IDs as the input wrote them: validate's cleared-links manifest.
     cleared_links: list[tuple[str, str, str, str]] = field(default_factory=list)
     # Rows read from the input, before duplicate_rows collapsed any copies.
