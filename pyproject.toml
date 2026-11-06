@@ -24,8 +24,9 @@ dependencies = [
     # Minor-capped like simACE's: upstream pair-extraction or kinship changes
     # can move results without moving the API.  Resolved from PyPI; pixi.toml
     # documents the editable-checkout override for ad-hoc work.  The floor is
-    # 0.14 because the golden counts use its path-count full/half labels.
-    "pedigree-graph>=0.14,<0.15",
+    # 0.15 because its Ne_V and Ne_H include segregation and it refuses an id
+    # in both parent roles (pedsum's goldens and refusal messages follow both).
+    "pedigree-graph>=0.15,<0.16",
     # The sex-concordance permutation sampler is numba-compiled (one production
     # path).  0.68 is the version surveyed for cp314 wheels; numba pins numpy
     # (<2.6 for 0.68), tighter than the numpy floor above.

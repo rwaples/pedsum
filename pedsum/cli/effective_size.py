@@ -12,9 +12,8 @@ from pedsum.base import (
     PedigreeError,
     logger,
 )
-from pedsum.cli.common import commit_thread_budget, load_or_fail
+from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail
 from pedsum.memory import GiB
-from pedsum.pairs import build_pedigree_graph
 from pedsum.parse import read_reference_mask
 from pedsum.progress import timed
 from pedsum.report import (
@@ -103,8 +102,9 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
         if "ne_individual_delta_f" not in requested:
             logger.warning("--reference-col only affects ne_individual_delta_f, which was not requested")
 
-    with timed("built PedigreeGraph"):
-        pg = build_pedigree_graph(df)
+    pg = build_graph_or_fail(df, labels)
+    if isinstance(pg, int):
+        return pg
     n_total = len(df)
     with timed(f"effective size ({', '.join(requested)})"):
         computed = compute_effective_size(pg, requested)

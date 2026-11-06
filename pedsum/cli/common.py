@@ -12,6 +12,7 @@ from pedsum.base import (
     PedigreeError,
     logger,
 )
+from pedsum.pairs import build_pedigree_graph
 from pedsum.progress import timed
 from pedsum.report import (
     write_validate_log,
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     import argparse
 
     import polars as pl
+    from pedigree_graph import PedigreeGraph
 
     from pedsum.ids import IdLabels
 
@@ -97,3 +99,13 @@ def load_or_fail(args: argparse.Namespace) -> tuple[pl.DataFrame, IdLabels] | in
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)
         return 2
+
+
+def build_graph_or_fail(df: pl.DataFrame, labels: IdLabels) -> PedigreeGraph | int:
+    """Build the ``PedigreeGraph`` of a validated pedigree, or log why not and return 1."""
+    try:
+        with timed("built PedigreeGraph"):
+            return build_pedigree_graph(df, labels)
+    except PedigreeError as e:
+        logger.error("%s", e)
+        return 1

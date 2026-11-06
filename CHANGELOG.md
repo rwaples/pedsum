@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Requires pedigree-graph 0.15** (`>=0.15,<0.16`; `environment.yml`,
+  which still named `<0.13` and pg-phenotype `<0.4`, now matches
+  `pyproject.toml`). Its Ne_V and Ne_H include Mendelian segregation
+  (pedigree-graph #36, Hill 1979 eq. 9 / Caballero 1994 eqs. 17-18), so
+  `ne_variance_family_size` and `ne_hill_overlapping` values change; on the
+  `effective_size_clean` golden Ne_V moves 102.3261 → 57.6128 and Ne_H
+  276.1435 → 288.0639. Equal family sizes now give `ne` = 2N, not "no
+  estimate".
+- **No-estimate `code`s are pedigree-graph's `no_estimate_code`** (pedsum
+  restated them by elimination). Ne_V's `no_family_size_variance` becomes
+  `single_sex_offspring`; Ne_H reports Ne_V's code where it wrote
+  `no_estimable_transition`, and `single_sex_offspring` or
+  `no_eligible_cohorts` where it wrote `no_estimable_cohort`; Ne_LTC's
+  `no_founder_contributions` is gone. Ne_sr keeps `no_depth_with_both_sexes`.
+- **summarize, effective-size and epimight-input refuse an id in both
+  parent roles** (pedigree-graph #58 refuses to build such a graph). They
+  exit 1 naming the id and its repair instead of a traceback. validate
+  still keeps such an id under `--allow-missing-sex` (unsexed) or
+  `--no-sex-check` (a missing parent), for other tools.
 - `founder_summary.skip_reason` names its cell limit
   `max_founder_ancestor_cells` (was `max_lineage_cells`), the glossary's term
   for the founder-ancestor sets it bounds.

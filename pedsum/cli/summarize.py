@@ -12,9 +12,9 @@ from pedsum.base import (
     SexSource,
     logger,
 )
-from pedsum.cli.common import commit_thread_budget, load_or_fail
+from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail
 from pedsum.multiple_births import compute_multiple_births
-from pedsum.pairs import augment_pair_counts, build_pedigree_graph
+from pedsum.pairs import augment_pair_counts
 from pedsum.parse import read_header
 from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
@@ -68,8 +68,9 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
     # Build the PedigreeGraph once and reuse for every primitive that
     # needs it (relationship pairs, F, lineage counts). Its graph rows are
     # df's rows, so its parent rows index df directly.
-    with timed("built PedigreeGraph"):
-        pg = build_pedigree_graph(df)
+    pg = build_graph_or_fail(df, labels)
+    if isinstance(pg, int):
+        return pg
     mother_rows, father_rows = pg.mother_rows, pg.father_rows
     n_indiv = len(df)
     max_depth = int(df["ped_depth"].to_numpy().max()) if n_indiv else 0

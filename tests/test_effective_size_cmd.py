@@ -371,7 +371,8 @@ def _row(id_, sex, mother=-1, father=-1, **extra):
 #: Tiny pedigrees whose estimators run and find no estimate, one per kind.
 #: ``trio``: depths 0 and 1 only. ``outbred``: three depths, every F = 0,
 #: mean kinship falling, and every parent with two offspring. ``two_males``:
-#: two founders and nothing else. ``late_inbred``: depth 2 is inbred, depth 3
+#: two founders and nothing else. ``daughters_only``: two couples, each with
+#: one daughter, so the parents had no sons. ``late_inbred``: depth 2 is inbred, depth 3
 #: (the default reference) is not.
 _NO_ESTIMATE_PEDIGREES = {
     "trio": [_row(1, "M"), _row(2, "F"), _row(3, "F", 2, 1)],
@@ -390,6 +391,11 @@ _NO_ESTIMATE_PEDIGREES = {
         _row(10, "F", 6, 4),
     ],
     "two_males": [_row(1, "M"), _row(2, "M")],
+    "daughters_only": [
+        *(_row(i, s) for i, s in ((1, "M"), (2, "F"), (3, "M"), (4, "F"))),
+        _row(5, "F", 2, 1),
+        _row(6, "F", 4, 3),
+    ],
     "late_inbred": [
         _row(1, "M"),
         _row(2, "F"),
@@ -426,9 +432,10 @@ _UNIFORM_SEX = pytest.mark.filterwarnings(r"ignore:.*pg\.sex is uniform:RuntimeW
         ("trio", "ne_individual_delta_f", "reference_not_inbred"),
         ("two_males", "ne_individual_delta_f", "empty_reference"),
         ("trio", "ne_variance_family_size", "too_few_parents"),
-        ("outbred", "ne_variance_family_size", "no_family_size_variance"),
+        ("daughters_only", "ne_variance_family_size", "single_sex_offspring"),
+        ("daughters_only", "ne_hill_overlapping", "single_sex_offspring"),
         ("two_males", "ne_sex_ratio", "no_depth_with_both_sexes"),
-        ("trio", "ne_hill_overlapping", "no_estimable_transition"),
+        ("trio", "ne_hill_overlapping", "too_few_parents"),
         ("trio_birth_year", "ne_hill_overlapping", "no_eligible_cohorts"),
     ],
 )
@@ -439,6 +446,13 @@ def test_no_estimate_carries_its_code(tmp_path, pedigree, estimator, code):
     record = records[estimator]
     assert (record["ne"], record["reason"], record["code"]) == (None, "no_estimate", code)
     assert "fields" not in record
+
+
+@_UNIFORM_SEX
+def test_equal_family_sizes_give_twice_the_parents(tmp_path):
+    """Every parent has two offspring: Ne_V is 2N, here the 4 depth-0 parents (pedigree-graph 0.15)."""
+    _, records = _run_tiny(tmp_path, "outbred")
+    assert records["ne_variance_family_size"]["ne"] == 2 * 4
 
 
 @_UNIFORM_SEX

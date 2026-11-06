@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from pedigree_graph import RELATIONSHIPS, PedigreeGraph
+from pedigree_graph import RELATIONSHIPS, PedigreeGraph, PedigreeValidationError
 
+from pedsum.base import SEX_UNKNOWN, PedigreeError
 from pedsum.pedigree_ops import IdIndex
 from pedsum.redaction import null_below
 
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     import polars as pl
+
+    from pedsum.ids import IdLabels
 
 
 def augment_pair_counts(named: Mapping[str, int | None]) -> dict:
@@ -44,7 +47,7 @@ def augment_pair_counts(named: Mapping[str, int | None]) -> dict:
     return out
 
 
-def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
+def build_pedigree_graph(df: pl.DataFrame, labels: IdLabels | None = None) -> PedigreeGraph:
     """Compact arbitrary IDs to ``0..n-1`` and build a full ``PedigreeGraph``.
 
     Threads ``sex`` through to ``PedigreeGraph.from_arrays`` so downstream
@@ -74,6 +77,11 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
     sorts rows into topological order and guarantees every non-``-1``
     parent ID appears in ``df['id']``; that lets the remap below skip
     missing-ID handling.
+
+    An id that is a mother of one row and a father of another is refused
+    (pedigree-graph 0.15, ``parent_in_both_roles``); validate keeps one only
+    under ``--allow-missing-sex`` or ``--no-sex-check``. That raises
+    ``PedigreeError`` naming the id through ``labels``.
     """
     ids = df["id"].to_numpy()
     n = len(ids)
@@ -85,13 +93,47 @@ def build_pedigree_graph(df: pl.DataFrame) -> PedigreeGraph:
 
     birth_year = df["birth_year"].to_numpy().astype(np.int32) if "birth_year" in df.columns else None
     twin_ids = _remap(df["twin"].to_numpy()) if "twin" in df.columns else None
-    return PedigreeGraph.from_arrays(
-        ids=new_ids,
-        mother_ids=_remap(df["mother"].to_numpy()),
-        father_ids=_remap(df["father"].to_numpy()),
-        sex=df["sex"].to_numpy().astype(np.int8),
-        birth_year=birth_year,
-        twin_ids=twin_ids,
+    try:
+        return PedigreeGraph.from_arrays(
+            ids=new_ids,
+            mother_ids=_remap(df["mother"].to_numpy()),
+            father_ids=_remap(df["father"].to_numpy()),
+            sex=df["sex"].to_numpy().astype(np.int8),
+            birth_year=birth_year,
+            twin_ids=twin_ids,
+        )
+    except PedigreeValidationError as e:
+        if e.code != "parent_in_both_roles":
+            raise
+        raise PedigreeError(_both_roles_message(df, e.fields, labels)) from e
+
+
+def _both_roles_message(df: pl.DataFrame, fields: Mapping[str, object], labels: IdLabels | None) -> str:
+    """Name the first id in both parent roles, by its input ID, and the repair for it.
+
+    The graph's ids are ``df``'s rows, so the error's ids and rows index ``df``.
+    """
+    ids = df["id"].to_numpy()
+    label = labels.label if labels is not None else str
+
+    def name(key: str) -> str:
+        row = fields[key]
+        assert isinstance(row, int)
+        return label(ids[row])
+
+    parent = fields["parent_id"]
+    assert isinstance(parent, int)
+    if df["sex"][parent] == SEX_UNKNOWN:
+        repair = "validate --drop-offending drops it"
+    else:
+        repair = (
+            "validate --break-role-conflicts clears the links its recorded sex contradicts, "
+            "and validate --drop-offending drops it"
+        )
+    return (
+        f"id {name('parent_id')} is the mother of id {name('mother_of_id')} and the father of id "
+        f"{name('father_of_id')} ({fields['parent_count']} id(s) in both parent roles), which pedigree-graph "
+        f"refuses; {repair}"
     )
 
 

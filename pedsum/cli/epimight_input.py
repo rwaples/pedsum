@@ -11,7 +11,7 @@ import polars as pl
 from pedsum.base import (
     logger,
 )
-from pedsum.cli.common import commit_thread_budget, load_or_fail
+from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail
 from pedsum.epimight import (
     PLACEHOLDER_COLUMNS,
     build_epimight_skeleton,
@@ -20,7 +20,6 @@ from pedsum.epimight import (
     relationship_diagnostics,
     validate_relationship_codes,
 )
-from pedsum.pairs import build_pedigree_graph
 from pedsum.progress import timed
 from pedsum.report import (
     atomic_output,
@@ -93,8 +92,9 @@ def run_epimight_input(args: argparse.Namespace, _cmd: str, _watchdog: MemoryWat
         return loaded
     df, labels = loaded
 
-    with timed("built PedigreeGraph"):
-        pg = build_pedigree_graph(df)
+    pg = build_graph_or_fail(df, labels)
+    if isinstance(pg, int):
+        return pg
 
     # The skeleton counts relatives without a pair list. --pairs extracts the
     # list for its own export, after the skeleton's counts are freed.

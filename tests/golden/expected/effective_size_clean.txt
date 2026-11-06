@@ -81,7 +81,7 @@ effective_size:
     n_depths_used: 4
     no_estimate_code: null
   ne_variance_family_size:
-    ne: 102.3261
+    ne: 57.6128
     parent_depths:
     - 0
     - 1
@@ -89,10 +89,10 @@ effective_size:
     - 3
     - 4
     ne_per_transition:
-    - 112.0
-    - 127.1186
-    - 76.306
-    - 108.8099
+    - 57.3299
+    - 71.1
+    - 60.5577
+    - 46.7109
     - null
     v_mm:
     - 0.6857
@@ -199,7 +199,7 @@ effective_size:
     final_depth: 4
     no_estimate_code: null
   ne_hill_overlapping:
-    ne: 276.1435
+    ne: 288.0639
     generation_interval: 5.0
     collapses_to_ne_v: false
     T_m: 5.0
@@ -210,8 +210,8 @@ effective_size:
     Vk_f: 0.8411
     kbar_m: 1.965
     kbar_f: 2.3075
-    Ne_m: 147.1163
-    Ne_f: 130.075
+    Ne_m: 139.5963
+    Ne_f: 148.7588
     vk_scaled: false
     cohort_window:
       c_min: 2000
@@ -227,20 +227,20 @@ effective_size:
     - 2010
     - 2015
     ne_per_cohort:
-    - 203.2258
-    - 268.0941
-    - 285.414
-    - 429.0243
+    - 286.6494
+    - 355.4999
+    - 302.7887
+    - 233.5547
     Ne_m_per_cohort:
-    - 101.6129
-    - 137.8125
-    - 187.3908
-    - 210.2857
+    - 142.7738
+    - 171.4233
+    - 131.2827
+    - 121.9614
     Ne_f_per_cohort:
-    - 101.6129
-    - 130.4819
-    - 115.2301
-    - 218.9119
+    - 143.8799
+    - 184.5615
+    - 178.7827
+    - 112.016
     Vk_m_per_cohort:
     - 0.9524
     - 1.0476

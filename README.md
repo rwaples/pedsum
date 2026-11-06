@@ -637,13 +637,14 @@ evidence:
 | `ne_individual_delta_f` | `empty_reference` | No reference individual has a known parent (`n_reference: 0`). |
 | | `reference_not_inbred` | The reference individuals have mean ΔF 0, so none is inbred. |
 | `ne_variance_family_size` | `too_few_parents` | No depth has at least 2 males and 2 females, with offspring from each sex. |
-| | `no_family_size_variance` | At each such depth, all males have the same number of offspring, and so do all females, so ΔF is 0. |
+| | `single_sex_offspring` | At each such depth, the parents of one sex had no sons or no daughters. Equal family sizes are not a refusal: they give `ne` = 2N. |
 | `ne_sex_ratio` | `no_depth_with_both_sexes` | No depth holds both a male and a female. |
 | `ne_long_term_contributions` | `no_founders` | The pedigree has no founder. |
-| | `no_founder_contributions` | The last depth carries no founder contribution. |
-| `ne_hill_overlapping` | `no_estimable_transition` | Collapsed to `ne_variance_family_size`, which has no estimate. |
-| | `no_eligible_cohorts` | No birth-year cohort in the window has at least 2 of each sex. |
-| | `no_estimable_cohort` | Eligible cohorts exist, but none gives a finite Ne. |
+| `ne_hill_overlapping` | `too_few_parents`, `single_sex_offspring` | Collapsed to `ne_variance_family_size`, which has no estimate; or, with birth years, a cohort was dropped because its parents of one sex had no sons or no daughters and no cohort gives an estimate. |
+| | `no_eligible_cohorts` | No birth-year cohort in the window has at least 2 of each sex and a positive Ne. |
+
+The `code` is pedigree-graph's `no_estimate_code`, also written in the
+record, with its "cohort" read as a depth.
 
 When `ne_individual_delta_f` has no estimate but its per-depth
 `ne_per_gen` has one, the command logs a warning that names the reference
