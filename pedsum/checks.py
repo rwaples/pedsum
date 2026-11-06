@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import PARENT_ROLES, SEX_UNKNOWN, ParentRole, PedigreeError, logger
+from pedsum.base import PARENT_ROLES, SEX_FEMALE, SEX_UNKNOWN, ParentRole, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import (
     ZYGOSITY_MZ,
@@ -440,6 +440,74 @@ def _cycle_breaks(ctx: ValidationContext) -> CheckResult:
     return _verdict(findings)
 
 
+def _sexed_in_both_roles(ctx: ValidationContext, m_row: np.ndarray, f_row: np.ndarray) -> np.ndarray:
+    """Rows with a recorded sex that some row names as mother and some row as father.
+
+    A row whose mother and father are the same individual is not counted:
+    ``parents_distinct`` owns it, so neither repair nor block here touches it.
+    """
+    assert ctx.sex is not None
+    distinct = m_row != f_row
+    both = np.intersect1d(m_row[distinct & (m_row >= 0)], f_row[distinct & (f_row >= 0)])
+    return both[ctx.sex[both] != SEX_UNKNOWN]
+
+
+def _role_conflict_breaks(ctx: ValidationContext) -> CheckResult:
+    """One Finding per parent link ``--break-role-conflicts`` clears; the links are cleared in ``ctx``.
+
+    An individual with a recorded sex that is a mother of one row and a father
+    of another keeps the links its sex agrees with; each link naming it in the
+    other role is cleared (ADR 0006). An unsexed one has no such evidence and
+    is left to ``sex_role_ambiguity``; a row whose mother and father are the
+    same id is left to ``parents_distinct``.
+    """
+    if not ctx.config.break_role_conflicts:
+        return CheckResult(CheckStatus.SKIP, note="no --break-role-conflicts")
+    ids, _, _ = ctx.require_id_parents()
+    assert ctx.sex is not None
+    # Both roles' rows before the first role is cleared, as in cycle_breaks.
+    m_row, f_row = ctx.parent_rows()
+    both = _sexed_in_both_roles(ctx, m_row, f_row)
+    findings: list[Finding] = []
+    for role, parent_rows in zip(PARENT_ROLES, (m_row, f_row), strict=True):
+        named = np.isin(parent_rows, both) & (m_row != f_row)
+        wrong = named & (ctx.sex[np.where(named, parent_rows, 0)] != role.expected_sex)
+        rows = np.flatnonzero(wrong)
+        for i in rows:
+            child, parent = ctx.label(ids[i]), ctx.label(ids[parent_rows[i]])
+            reason = f"{role} recorded {role.other.sex_letter} and also used as {role.other}"
+            findings.append(
+                Finding(id=int(ids[i]), row=ctx.row(i), detail=f"id={child}: cleared {role} id={parent}, {reason}")
+            )
+            ctx.cleared_links.append((child, role.value, parent, reason))
+        if len(rows):
+            ctx.clear_parents(role, rows)
+    findings.sort(key=lambda f: f.row or 0)
+    return _verdict(findings)
+
+
+def _parent_role_conflict(ctx: ValidationContext) -> CheckResult:
+    """One Finding per individual with a recorded sex used as both mother and father."""
+    ids, _, _ = ctx.require_id_parents()
+    assert ctx.sex is not None
+    m_row, f_row = ctx.parent_rows()
+    findings = []
+    for r in _sexed_in_both_roles(ctx, m_row, f_row):
+        letter = "F" if ctx.sex[r] == SEX_FEMALE else "M"
+        findings.append(
+            Finding(
+                id=int(ids[r]),
+                row=ctx.row(r),
+                detail=(
+                    f"id={ctx.label(ids[r])} recorded {letter}, used as mother in "
+                    f"{rows_phrase(ctx.rows(np.flatnonzero(m_row == r)))} and as father in "
+                    f"{rows_phrase(ctx.rows(np.flatnonzero(f_row == r)))}"
+                ),
+            )
+        )
+    return _verdict(findings)
+
+
 def _both_dated(birth_date: np.ndarray | None, child: np.ndarray, parent: np.ndarray) -> np.ndarray:
     """Edges whose two birth dates are known: compared on the dates; the rest on the birth years."""
     if birth_date is None:
@@ -628,17 +696,19 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
     """IDs used as mother with resolved sex != female, or as father with sex != male.
 
     Always runs: the override clears asserted-vs-role contradictions only for
-    rows used in a SINGLE role; a row asserted M and used as BOTH mother and
-    father stays unoverridable and must still FAIL. Rows whose sex started
-    unknown are left to ``sex_role_ambiguity``.
+    rows used in a SINGLE role, and only by default. Rows whose sex started
+    unknown are left to ``sex_role_ambiguity``, and rows used as both mother
+    and father (other than as both parents of one row) to
+    ``parent_role_conflict``, which BLOCKs because pedigree-graph refuses them.
     """
     imp = ctx.imputation
+    both = _sexed_in_both_roles(ctx, *ctx.parent_rows())
     findings: list[Finding] = []
     for role in PARENT_ROLES:
         refs = ctx.refs(role)
         present = refs.rows != -1
         keep = present.copy()
-        keep[present] = ~imp.original_unknown_mask[refs.rows[present]]
+        keep[present] = ~imp.original_unknown_mask[refs.rows[present]] & ~np.isin(refs.rows[present], both)
         findings += _sex_role_findings(
             role, ctx.parents(role), refs.ids[keep], refs.rows[keep], imp.imputed_sex, ctx.label, ctx.rows
         )
@@ -1115,6 +1185,14 @@ CHECKS: tuple[Check, ...] = (
         FailPolicy.AUTOFIX,
     ),
     Check(
+        # Right after cycle_breaks, for the same reason: it clears parent links.
+        "role_conflict_breaks",
+        (*_IDS, "sex_tokens"),
+        _role_conflict_breaks,
+        "no role-conflict links to clear",
+        FailPolicy.AUTOFIX,
+    ),
+    Check(
         "parent_refs_present_mother",
         _IDS,
         partial(_parent_refs_present, role=ParentRole.MOTHER),
@@ -1154,6 +1232,17 @@ CHECKS: tuple[Check, ...] = (
         block_message=(
             "present individual(s) with unknown sex used as BOTH mother and father "
             "(sex cannot be imputed); pass --allow-missing-sex to tolerate"
+        ),
+    ),
+    Check(
+        "parent_role_conflict",
+        (*_IDS, "sex_tokens"),
+        _parent_role_conflict,
+        "no sexed individual in both roles",
+        FailPolicy.BLOCK_OR_DROP,
+        block_message=(
+            "individual(s) with a recorded sex used as BOTH mother and father; pass "
+            "--break-role-conflicts to clear the links their recorded sex contradicts"
         ),
     ),
     Check(
@@ -1303,12 +1392,14 @@ CHECK_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "parents_distinct",
             "parent_refs_sex_conflict",
             "sex_role_ambiguity",
+            "parent_role_conflict",
         ),
     ),
     (
         "Graph structure",
         (
             "cycle_breaks",
+            "role_conflict_breaks",
             "self_loops",
             "sex_role_override",
             "sex_role_consistency",

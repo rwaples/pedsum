@@ -452,7 +452,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(per-finding TSV) and validate.tsv.gz (the pedigree with any "
         "auto-fixes applied; not written if a block is detected). With "
         "--drop-offending also writes validate.dropped.tsv (the removal manifest), and with "
-        "--break-cycles validate.cleared_links.tsv (the links it cleared)",
+        "--break-cycles or --break-role-conflicts validate.cleared_links.tsv (the links they cleared)",
         birth_year_help="optional column name for birth year (integer or float calendar "
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
@@ -520,6 +520,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "finding and a row of validate.cleared_links.tsv (id, role, parent, reason). A cycle "
         "with no such link still BLOCKs, or loses its members under --drop-offending "
         "(default: off)",
+    )
+    p_val.add_argument(
+        "--break-role-conflicts",
+        action="store_true",
+        help="clear the parent links an individual's recorded sex contradicts when it is used as "
+        "both mother and father: a recorded F keeps its mother links and loses its father links, "
+        "a recorded M the reverse. Individuals stay; each cleared link is a role_conflict_breaks "
+        "finding and a row of validate.cleared_links.tsv. Without it such an individual BLOCKs "
+        "(parent_role_conflict), as pedigree-graph refuses it. An unsexed one, or one that is both "
+        "parents of one row, is never repaired (default: off)",
     )
     p_val.add_argument(
         "--fill-half-founders",

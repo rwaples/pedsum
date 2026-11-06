@@ -30,6 +30,17 @@
   `pedsum.cli` runners (`run_summarize`, `run_validate`, `run_epimight_input`,
   `run_effective_size`, `run_assortative_mating`) all take
   `(args, cmd, watchdog)`.
+- **`validate --break-role-conflicts`** repairs an individual with a
+  recorded sex used as both mother and father: the links its sex
+  contradicts are cleared (`role_conflict_breaks`, `autofix`) and listed in
+  `validate.cleared_links.tsv`. Without it the new `parent_role_conflict`
+  (`block_or_drop`) BLOCKs such an individual, where `sex_role_consistency`
+  (`keep_or_drop`) used to keep it; `sex_role_consistency` keeps the
+  single-role contradictions. An unsexed individual, or a row whose mother
+  and father are the same id, is never repaired. Inputs that ran with exit
+  1 now exit 2.
+- `validate.cleared_links.tsv` lists the links cleared in every
+  `--drop-offending` round; it held only the first round's.
 
 ## 0.16.1 — 2026-11-05 — idempotent --safe-attempt redaction
 

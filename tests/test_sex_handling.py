@@ -206,7 +206,7 @@ def test_summarize_writes_validate_log_on_role_conflict(tmp_path):
     log = out / "validate.log"
     assert log.exists(), f"summarize did not write validate.log\nstderr:\n{r.stderr}"
     text = log.read_text()
-    assert "sex_role_consistency" in text
+    assert "parent_role_conflict" in text
     assert "id=3" in text
     # No summary artifacts are produced when validation fails.
     assert not (out / "summary.yaml").exists()
@@ -318,7 +318,7 @@ def test_no_override_asserted_sex_disables_override(tmp_path):
 
 
 def test_asserted_sex_with_both_roles_still_hard_blocks(tmp_path):
-    """Asserted sex used as BOTH mother and father is unfixable; consistency raises."""
+    """Asserted sex used as BOTH mother and father is unfixable by override; parent_role_conflict raises."""
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
@@ -329,9 +329,9 @@ def test_asserted_sex_with_both_roles_still_hard_blocks(tmp_path):
             {"id": 11, "sex": "M", "mother": 9, "father": 7},  # 7 as father (consistent with M)
         ],
     )
-    # Override can't choose F vs M (topology is ambiguous); the mother-role
-    # contradiction produces a consistency finding and the check hard-blocks.
-    with pytest.raises(PedigreeError, match="sex_role_consistency"):
+    # Override can't choose F vs M (topology is ambiguous), and pedigree-graph
+    # refuses an id in both roles, so the check hard-blocks.
+    with pytest.raises(PedigreeError, match="parent_role_conflict"):
         load_and_validate(ped, ValidationConfig())
 
 

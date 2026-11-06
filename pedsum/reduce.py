@@ -97,6 +97,10 @@ def reduce_pedigree(ctx0: ValidationContext) -> ReductionResult:
         if rnd > n_input_rows + 1:
             raise PedigreeError("drop-offending failed to converge")
         _results, findings = run_checks(ctx)
+        if ctx is not ctx0:
+            # A later round can clear a link the first could not reach (e.g.
+            # behind a dropped duplicate id); the manifest is ctx0's.
+            ctx0.cleared_links.extend(ctx.cleared_links)
         droppable = [f for f in findings if f.check in DROPPABLE_CHECKS and f.id is not None]
         drop_ids = _round_drop_ids(droppable, ctx)
         if not drop_ids:

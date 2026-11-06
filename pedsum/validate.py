@@ -158,6 +158,10 @@ class ValidationConfig:
     # --break-cycles: clear self-links and, within a cycle, links to a parent
     # born after the child (cycle_breaks, ADR 0006).
     break_cycles: bool = False
+    # --break-role-conflicts: clear the links naming a sexed individual in the
+    # role its recorded sex contradicts, when it is used in both roles
+    # (role_conflict_breaks, ADR 0006).
+    break_role_conflicts: bool = False
     # --no-sex-check tolerates parent_refs_sex_conflict (SKIP). It lives here,
     # not as a CLI post-filter, so the tolerance composes wherever run_checks
     # runs: validate, the drop-offending loop, and its self-verify.
@@ -194,6 +198,7 @@ class ValidationConfig:
             override_asserted_sex=not args.no_override_asserted_sex,
             no_sex_check=getattr(args, "no_sex_check", False),
             break_cycles=getattr(args, "break_cycles", False),
+            break_role_conflicts=getattr(args, "break_role_conflicts", False),
             birth_date_col=getattr(args, "birth_date_col", None),
             twin_max_days=getattr(args, "twin_max_days", None),
             multiple_birth_col=getattr(args, "multiple_birth_col", None),

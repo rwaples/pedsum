@@ -188,3 +188,12 @@ difference.
 - `summary.yaml` gains the `sex_source` counts.
 - ADR 0001's 0.9 sentence that a contradicted, used-as-both sex "stays a `sex_role_consistency`
   hard-block" was superseded by ADR 0005 and is marked so.
+- Added with pedigree-graph 0.15, which refuses an id in both parent roles: `--break-role-conflicts`
+  repairs an individual with a recorded sex used as both mother and father by clearing the links its
+  sex contradicts (`role_conflict_breaks`, `autofix`, written to the same manifest), and without it
+  the new `parent_role_conflict` (`block_or_drop`) BLOCKs. As with `--break-cycles`, a link is cleared
+  only on evidence, here the recorded sex: an unsexed individual is never repaired, and a row whose
+  mother and father are the same id is left to `parents_distinct`. `--allow-missing-sex` and
+  `--no-sex-check` still keep such an individual in `validate`, but the commands that build a graph
+  refuse it. That includes the black robin pedigree above, whose two birds used as both mother and
+  father have no sex (pedsum-validate `differences.md`).

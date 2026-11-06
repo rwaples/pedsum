@@ -96,7 +96,7 @@ individuals, …) and writes:
 | `DIR/validate.log` | per-finding TSV (one row per issue): `check`, `id`, `row`, `detail`, and `n_refs`, the number of rows naming a missing parent (`parent_refs_present_*` findings only) |
 | `DIR/validate.tsv.gz` | the pedigree with auto-fixes applied, plus a `sex_source` column and, with `--twin-max-days` or `--multiple-birth-col`, a `multiple_birth_set` column (omitted on hard-block findings) |
 | `DIR/validate.dropped.tsv` | with `--drop-offending`: the removal manifest (`id`, `check`, `round`) |
-| `DIR/validate.cleared_links.tsv` | with `--break-cycles`: the parent links it cleared (`id`, `role`, `parent`, `reason`) |
+| `DIR/validate.cleared_links.tsv` | with `--break-cycles` or `--break-role-conflicts`: the parent links they cleared (`id`, `role`, `parent`, `reason`) |
 
 `validate` first removes any `validate.tsv.gz`, `validate.dropped.tsv` and
 `validate.cleared_links.tsv` an earlier run left in `DIR`, so the files there
@@ -288,6 +288,17 @@ individuals stay; their cleared slot is written blank. Each cleared link is a
 was: it BLOCKs, or under `--drop-offending` its members are removed. pedsum
 does not pick a link to cut without evidence.
 
+**`--break-role-conflicts`** repairs an individual with a recorded sex that
+is a mother of one row and a father of another. Without it such an
+individual BLOCKs (`parent_role_conflict`), since pedigree-graph cannot build
+a graph from it, and `--drop-offending` removes it. With it, the links its
+recorded sex agrees with stay and the others are cleared: a recorded F keeps
+her mother links and loses her father links. Each cleared link is a
+`role_conflict_breaks` finding and a row of `DIR/validate.cleared_links.tsv`.
+An unsexed individual has no such evidence and is never repaired (see
+`--allow-missing-sex`), and neither is a row whose mother and father are the
+same individual (`parents_distinct` BLOCKs it).
+
 The Reduced Pedigree is individual-level data (IDs, parents, and the dropped
 IDs in the manifest), not aggregate statistics — `--safe-attempt` redaction
 applies only to `summarize` output, never to `validate`. Treat
@@ -317,6 +328,7 @@ run against pedsum ebcf00c. A first run against 542ef12 led to the changes in
 | One ID on rows that differ | Blocks. | optiSel keeps the row with the most known parents; the rest refuse. |
 | Cycle, or own parent | Blocks; `--drop-offending` removes the cycle's members. `--break-cycles` first clears a self-link and, in a cycle, each link to a parent born after the child. | optiSel clears both parents of one member per cycle and keeps everyone. nadiv (cycles mixing mother and father links) passes the cycle through, and so does nprcgenekeepr when it has no birth dates (with them, its parent-age check refuses first). The rest refuse; purgeR `ped_sort` and pedigreemm crash. |
 | Recorded sex contradicts the only parent role | Overrides it from the role: a `sex_role_override` finding (exit 1) and `sex_source = imputed_from_role`. | optiSel, nprcgenekeepr and kinship2 `fixParents` overwrite too; visPedigree, pedtools and kinship2 `pedigree()` refuse; nadiv, purgeR and pedigreemm do not check. |
+| Recorded sex, used as both mother and father | Blocks; `--drop-offending` removes the individual. `--break-role-conflicts` clears the links the recorded sex contradicts. | Not yet run against the R cleaners. |
 | No sex, used as a parent | Filled from the role. | optiSel, visPedigree and kinship2 `fixParents` fill it; kinship2 `pedigree()` refuses; the rest leave it unknown. |
 | No sex, never a parent | Kept with sex `0` and a WARNING. | All accept it. |
 | One parent known | Kept as a half-founder; `--fill-half-founders` adds a founder in the empty slot. | kinship2 `fixParents` and nprcgenekeepr add a parent by default; kinship2 `pedigree()` and pedtools refuse; the rest keep it. |
@@ -400,7 +412,9 @@ Flags:
   **Not a safe-harbor guarantee** — review before sharing.
 - `--allow-missing-sex` — tolerate an individual with unknown sex used
   as BOTH mother and father (role-ambiguous), which otherwise
-  hard-blocks; it is written with `sex=0` (unknown). An unsexed
+  hard-blocks; `validate` writes it with `sex=0` (unknown). `summarize`,
+  `effective-size` and `epimight-input` cannot use such an individual
+  (pedigree-graph refuses it) and exit 1 naming it. An unsexed
   individual who is never a parent needs no flag: it is kept with
   `sex=0` and a WARNING. `summarize` runs normally on unsexed rows, F
   included. `effective-size` refuses them only when `ne_sex_ratio`,

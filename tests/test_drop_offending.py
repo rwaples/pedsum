@@ -37,14 +37,14 @@ def _role_conflict_pedigree(path):
 
 
 def test_drop_role_conflict_reduces_and_passes(tmp_path):
-    """A sex_role_consistency offender is dropped and the reduced pedigree passes."""
+    """A parent_role_conflict offender is dropped and the reduced pedigree passes."""
     ped = _role_conflict_pedigree(tmp_path / "p.tsv")
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out), "--drop-offending"])
     assert r.returncode == 1, r.stderr  # exit 1 because something was dropped
     manifest = _read_manifest(out)
     assert manifest["id"].to_list() == [3]
-    assert manifest["check"].to_list() == ["sex_role_consistency"]
+    assert manifest["check"].to_list() == ["parent_role_conflict"]
     assert manifest["round"].to_list() == [1]
     r2 = run_pedsum(["validate", "--in", str(out / "validate.tsv.gz"), "--out", str(tmp_path / "out2")])
     assert r2.returncode == 0, r2.stderr  # reduced pedigree re-validates clean
@@ -232,14 +232,15 @@ def test_drop_large_fraction_warns(tmp_path):
     assert "removed 16.7% of rows" in r.stderr
 
 
-def test_drop_off_by_default_unchanged(tmp_path):
-    """Without the flag, a non-blocking sex_role_consistency FAIL is unchanged (exit 1, kept)."""
+def test_drop_off_by_default_blocks(tmp_path):
+    """Without --drop-offending a sexed id in both parent roles BLOCKs: nothing is written or dropped."""
     ped = _role_conflict_pedigree(tmp_path / "p.tsv")
     out = tmp_path / "out"
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(out)])
-    assert r.returncode == 1, r.stderr
+    assert r.returncode == 2, r.stderr
+    assert "--break-role-conflicts" in r.stderr
     assert not (out / "validate.dropped.tsv").exists()
-    assert "3" in load_validate_tsv_gz(out)["id"].to_list()  # offender NOT dropped
+    assert not (out / "validate.tsv.gz").exists()
 
 
 def _many_offenders_pedigree(path):

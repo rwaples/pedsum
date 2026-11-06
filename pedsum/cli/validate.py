@@ -144,7 +144,7 @@ def run_validate(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) 
         write_pedigree=write_pedigree,
         write_manifest=write_manifest,
     )
-    if args.break_cycles and outcome.fixed is not None:
+    if (args.break_cycles or args.break_role_conflicts) and outcome.fixed is not None:
         cleared_path = out_dir / "validate.cleared_links.tsv"
         write_cleared_links(ctx.cleared_links, cleared_path)
         sys.stderr.write(f"wrote {cleared_path} ({len(ctx.cleared_links)} link(s) cleared)\n")

@@ -69,9 +69,10 @@ def test_validate_sex_role_ambiguity_passes_with_flag(tmp_path):
 def test_sex_role_consistency_log_pins_offending_rows(tmp_path):
     """sex_role_consistency names the lines, not just the id.
 
-    id=3 (row 2, female) is used as a father in rows 4 and 5. The finding now
-    carries the id's own row in the ``row`` column and the referencing rows in
-    the detail, so the log is actionable without grepping the input.
+    id=3 (row 2, female) is used as a father in rows 4 and 5, and with
+    --no-override-asserted-sex its sex is kept. The finding carries the id's own
+    row in the ``row`` column and the referencing rows in the detail, so the
+    log is actionable without grepping the input.
     """
     ped = _write_ped(
         tmp_path / "p.tsv",
@@ -79,13 +80,13 @@ def test_sex_role_consistency_log_pins_offending_rows(tmp_path):
             {"id": 1, "sex": "F", "mother": -1, "father": -1},
             {"id": 2, "sex": "M", "mother": -1, "father": -1},
             {"id": 3, "sex": "F", "mother": -1, "father": -1},  # row 2
-            {"id": 4, "sex": "F", "mother": 3, "father": 2},  # 3 as mother (consistent)
+            {"id": 4, "sex": "F", "mother": 1, "father": 2},
             {"id": 5, "sex": "M", "mother": 1, "father": 3},  # row 4: 3 as father
             {"id": 6, "sex": "M", "mother": 1, "father": 3},  # row 5: 3 as father
         ],
     )
     base = tmp_path / "out"
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base), "--no-override-asserted-sex"])
     assert r.returncode == 1, r.stderr  # FAIL but not a hard block
     log = pl.read_csv(base / "validate.log", separator="\t")
     finding = log.filter(pl.col("check") == "sex_role_consistency")
@@ -155,20 +156,21 @@ def test_parent_refs_present_log_counts_references(tmp_path):
     """validate.log's n_refs counts the rows naming each missing parent; other checks leave it empty.
 
     Father 900 is named in rows 2 and 3, mother 800 in row 4; id=1 (sex F) is
-    also used as a father, so a sex_role_consistency finding shares the log.
+    used only as a father, so with --no-override-asserted-sex a
+    sex_role_consistency finding shares the log.
     """
     ped = _write_ped(
         tmp_path / "p.tsv",
         [
             {"id": 1, "sex": "F", "mother": -1, "father": -1},
             {"id": 2, "sex": "M", "mother": -1, "father": -1},
-            {"id": 5, "sex": "F", "mother": 1, "father": 900},
-            {"id": 6, "sex": "M", "mother": 1, "father": 900},
+            {"id": 5, "sex": "F", "mother": -1, "father": 900},
+            {"id": 6, "sex": "M", "mother": -1, "father": 900},
             {"id": 7, "sex": "M", "mother": 800, "father": 1},
         ],
     )
     base = tmp_path / "out"
-    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base)])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(base), "--no-override-asserted-sex"])
     assert r.returncode == 1, r.stderr
     log = pl.read_csv(base / "validate.log", separator="\t")
     assert log.schema["n_refs"] == pl.Int64

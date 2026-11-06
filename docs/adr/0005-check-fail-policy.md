@@ -59,6 +59,10 @@ argv.
 - **`sex_role_consistency` stays `keep_or_drop`**, also under
   `--no-override-asserted-sex`. The README had said that flag "reverts to
   hard-blocking"; the code never did, and the README is corrected.
+  *Amended for pedigree-graph 0.15:* an individual with a recorded sex used
+  as both mother and father moved to the new `parent_role_conflict`
+  (`block_or_drop`), since pedigree-graph refuses to build such a graph;
+  `sex_role_consistency` keeps the single-role contradictions.
 
 - **One Fixed Pedigree.** `pedsum/fixed_pedigree.py` builds it:
   `fix_pedigree(ctx, fill_half_founders=..., next_id=...)` returns a
