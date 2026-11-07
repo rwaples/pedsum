@@ -449,8 +449,11 @@ def _sexed_in_both_roles(ctx: ValidationContext) -> np.ndarray:
     before any per-child mapping.
     """
     assert ctx.sex is not None
-    candidates = np.intersect1d(ctx.mother_refs.rows, ctx.father_refs.rows)
-    candidates = candidates[candidates >= 0]
+    mother_rows, father_rows = ctx.mother_refs.rows, ctx.father_refs.rows
+    is_mother = np.zeros(len(ctx.sex), dtype=bool)
+    is_mother[mother_rows[mother_rows >= 0]] = True
+    candidates = father_rows[father_rows >= 0]
+    candidates = candidates[is_mother[candidates]]
     if not (ctx.sex[candidates] != SEX_UNKNOWN).any():
         return candidates[:0]
     m_row, f_row = ctx.parent_rows()
@@ -717,7 +720,9 @@ def _sex_role_consistency(ctx: ValidationContext) -> CheckResult:
         refs = ctx.refs(role)
         present = refs.rows != -1
         keep = present.copy()
-        keep[present] = ~imp.original_unknown_mask[refs.rows[present]] & ~np.isin(refs.rows[present], both)
+        keep[present] = ~imp.original_unknown_mask[refs.rows[present]]
+        if len(both):
+            keep[present] &= ~np.isin(refs.rows[present], both)
         findings += _sex_role_findings(
             role, ctx.parents(role), refs.ids[keep], refs.rows[keep], imp.imputed_sex, ctx.label, ctx.rows
         )
