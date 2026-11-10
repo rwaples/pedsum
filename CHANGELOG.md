@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.17.0 — 2026-11-10 — pedigree-graph 0.15, parent-role conflicts
 
 - **Requires pedigree-graph 0.15** (`>=0.15,<0.16`; `environment.yml`,
   which still named `<0.13` and pg-phenotype `<0.4`, now matches
