@@ -59,18 +59,10 @@ supports:
       not_used: 120
 effective_size:
   ne_inbreeding:
-    ne: 29.2251
-    mean_f_per_gen:
-      '0': 0.0
-      '1': 0.0
-      '2': 0.0
-      '3': 0.0163
-      '4': 0.0503
-    ne_per_gen:
-      0-1: null
-      1-2: null
-      2-3: 30.7692
-      3-4: 14.4625
+    ne: null
+    reason: withheld
+    mean_f_per_gen: null
+    ne_per_gen: null
   ne_coancestry:
     ne: 64.3912
     mean_theta_per_gen:
@@ -104,12 +96,7 @@ effective_size:
     ne: 59.097
     standard_error: 11.116
     ne_unrelated_founders: 42.4275
-    ne_per_gen:
-      '0': null
-      '1': null
-      '2': null
-      '3': 90.657
-      '4': 37.3982
+    ne_per_gen: null
     reference_column: ref
   ne_long_term_contributions:
     ne: null
@@ -119,16 +106,8 @@ effective_size:
     collapses_to_ne_v: true
     vk_scaled: false
   ne_group_coancestry:
-    ne: 54.5251
-    mean_group_coancestry_per_gen:
-      '0': 0.0167
-      '1': 0.025
-      '2': 0.0323
-      '3': 0.0411
-      '4': 0.0515
-    ne_per_gen:
-      0-1: 59.0
-      1-2: 66.7808
-      2-3: 55.2971
-      3-4: 45.9515
+    ne: null
+    reason: withheld
+    mean_group_coancestry_per_gen: null
+    ne_per_gen: null
 

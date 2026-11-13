@@ -11,7 +11,7 @@ The counts are of two kinds. A *support* is a count the ordinary output
 reports and a reader needs (individuals per depth and sex, the Hill
 cohorts); it is released, protected at the minimum cell. A *gate* is a
 count nothing reports (parents per depth, inbred individuals per depth and
-F bin); it only decides whether an estimate is released, and is never written.
+F value); it only decides whether an estimate is released, and is never written.
 
 What the list leaves out, and why:
 
@@ -36,15 +36,13 @@ withheld entry.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
-from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE
-from pedsum.cli.effective_size import SEX_DEPENDENT_ESTIMATORS
+from pedsum.base import INBRED_TOL, SEX_DEPENDENT_ESTIMATORS, SEX_FEMALE, SEX_MALE
 from pedsum.disclosure import (
     Contingency,
     Count,
@@ -57,7 +55,7 @@ from pedsum.disclosure import (
     shared_total,
 )
 from pedsum.safe_summary import family_ids
-from pedsum.sections import F_HIST_EDGES, equivalent_complete_generations
+from pedsum.sections import equivalent_complete_generations
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
@@ -141,9 +139,10 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
             (_NE, _CODE, _Field("mean_f_per_gen", "depths"), _Field("ne_per_gen", _TRANSITIONS)),
             (_DEPTH, _INBRED, _INBRED_F),
             "Mean F per depth and the Ne values computed from that series, released whole and only when every "
-            "depth holds at least the minimum cell of individuals and its inbred, in each bin of the F "
-            "histogram, are none or at least the minimum cell, so no mean is a sum over a few inbred "
-            "individuals or gives the split of a depth's inbred between two F values.",
+            "depth holds at least the minimum cell of individuals and every distinct F value above zero at a "
+            "depth is held by at least the minimum cell of its individuals, so no mean is a sum over a few "
+            "inbred individuals or gives the split of a depth's inbred between two F values. The scalar Ne is "
+            "gated with the series: with one inbred depth it is a function of that depth's mean F.",
         ),
     ),
     "ne_coancestry": (
@@ -197,8 +196,8 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
             (_Field("ne_per_gen", "depths"),),
             (_USED, _INBRED, _INBRED_F),
             "Ne per depth from the mean individual increase in inbreeding, released whole and only when at "
-            "every depth the individuals used and the inbred among them, in each bin of the F histogram, are "
-            "none or at least the minimum cell.",
+            "every depth the individuals used are none or at least the minimum cell and every distinct F "
+            "value above zero is held by at least the minimum cell of the depth's individuals.",
         ),
     ),
     "ne_hill_overlapping": (
@@ -312,16 +311,22 @@ def _by_depth(depth: np.ndarray, mask: np.ndarray | None, k: int) -> dict[str, i
 
 
 def _inbred_gates(F: np.ndarray, depth: np.ndarray, k: int) -> dict[str, Any]:
-    """The inbred individuals of each depth, and the same individuals by the bin of ``summarize``'s F histogram.
+    """The inbred individuals of each depth, and the same individuals by the distinct F value they hold.
 
     A depth's mean F times its size is the sum of its F values. When the
     depth's inbred hold two F values, that sum gives how many hold each, so
-    the mean is released only when no bin of a depth is small.
+    the mean is released only when no F value of a depth is held by a few.
+    Sorted F values no further apart than ``INBRED_TOL`` are one value.
     """
-    by_bin = {f"<{hi:g}": _by_depth(depth, (lo < F) & (hi >= F), k) for lo, hi in pairwise(F_HIST_EDGES)}
+    rows = np.flatnonzero(F > INBRED_TOL)
+    rows = rows[np.argsort(F[rows], kind="stable")]
+    value = np.cumsum(np.diff(F[rows].astype(np.float64)) > INBRED_TOL, dtype=np.int64)
+    value = np.concatenate(([0], value))[: len(rows)]
+    n_values = int(value.max(initial=0)) + 1
+    table = np.bincount(depth[rows] * n_values + value, minlength=k * n_values).reshape(k, n_values)
     return {
         "inbred_by_depth": _by_depth(depth, F > INBRED_TOL, k),
-        "inbred_f_by_depth": {str(d): {label: counts[str(d)] for label, counts in by_bin.items()} for d in range(k)},
+        "inbred_f_by_depth": {str(d): {f"value_{j}": int(table[d, j]) for j in range(n_values)} for d in range(k)},
     }
 
 
@@ -543,7 +548,7 @@ def _rules() -> tuple[Rule, ...]:
     rules.append(
         Contingency(
             _INBRED_F,
-            f"Inbred individuals by depth and by the bin of the F histogram their F falls in. {_GATE}",
+            f"Inbred individuals by depth and by the distinct F value they hold. {_GATE}",
         )
     )
     rules += [

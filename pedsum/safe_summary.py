@@ -318,17 +318,13 @@ def build_source(
         F = idf["F"].to_numpy()
         inbred = F > INBRED_TOL
         inbred_cols = _yes_no(inbred, "inbred", "not_inbred")
-        F_inbred = F[inbred]
         relatedness["inbreeding"] = {
             "inbred": _split(inbred, "inbred", "not_inbred"),
             "F_hist": {"0": int((~inbred).sum())}
             | {f"<{hi:g}": int(((lo < F) & (hi >= F)).sum()) for lo, hi in pairwise(F_HIST_EDGES)},
-            "mean_F_inbred": float(F_inbred.mean()) if len(F_inbred) else None,
-            "sd_F_inbred": float(F_inbred.std(ddof=1)) if len(F_inbred) > 1 else None,
         }
         sex_summary["inbred"] = _cross(by_sex, inbred_cols)
         depth_summary["inbred"] = _cross(by_depth, inbred_cols)
-        depth_summary["mean_F"] = _mean_by(by_depth, F)
 
     # A parent-offspring pair is one recorded parent link, which the parents-known table already counts.
     codes = [code for code in RELATIONSHIPS if code not in _PARENT_CODES and code in pairs.counts]
@@ -343,7 +339,7 @@ def build_source(
     if sex_concordance is not None:
         concordance = _concordance_source(sex_concordance)
         demography["offspring_sex_concordance"] = concordance
-        gates["offspring_sex_concordance"] = _concordance_gates(concordance, size_structure["parents_known"])
+        gates["offspring_sex_concordance"] = _concordance_gates(concordance, size_structure)
     if "multiple_birth" in df.columns:
         demography["multiple_births"] = _multiple_births_source(df)
 
@@ -403,27 +399,31 @@ def _concordance_source(section: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _concordance_gates(concordance: Mapping[str, Any], parents_known: Mapping[str, int]) -> dict[str, Any]:
-    """What each grouping's eligible counts differ by from the counts they are nested with, and the support that gives.
+def _concordance_gates(concordance: Mapping[str, Any], size_structure: Mapping[str, Any]) -> dict[str, Any]:
+    """What each grouping's eligible offspring differ by from the sets they are nested in, and the support that gives.
 
     A grouping's eligible offspring are among the individuals with its
-    parent recorded, and include the eligible offspring of the full
-    sibships. Each difference is a count a reader gets by subtraction, so
-    the smallest nonzero one is the support of the grouping's counts.
+    parent recorded and among the individuals of their sex, and include
+    the eligible offspring of the full sibships. Each difference is a
+    count a reader gets by subtraction, so the smallest nonzero one is the
+    support of the grouping's counts. Group counts are not differenced:
+    one mother's two sibships are one maternal group, so the groups of
+    one grouping are not a subset of another's.
     """
+    parents_known, sex_table = size_structure["parents_known"], size_structure["sex"]
     narrow = concordance[_NARROWEST]
     out: dict[str, Any] = {}
     for name, parent_cols in GROUPINGS:
         block = concordance[name]
         by_sex = block["eligible_by_sex"]
         gate: dict[str, Any] = {
-            "not_eligible": sum(parents_known[cell] for cell in _SCOPE[parent_cols]) - sum(by_sex.values())
+            "not_eligible": sum(parents_known[cell] for cell in _SCOPE[parent_cols]) - sum(by_sex.values()),
+            "outside_by_sex": {sex: sex_table[sex] - by_sex[sex] for sex in by_sex},
         }
-        differences = [gate["not_eligible"]]
+        differences = [gate["not_eligible"], *gate["outside_by_sex"].values()]
         if name != _NARROWEST:
             gate["beyond_sibship_by_sex"] = {sex: by_sex[sex] - narrow["eligible_by_sex"][sex] for sex in by_sex}
             differences += gate["beyond_sibship_by_sex"].values()
-            differences.append(abs(block["n_groups_eligible"] - narrow["n_groups_eligible"]))
         smallest = min((d for d in differences if d > 0), default=None)
         gate["groups_support"] = block["n_groups_eligible"] if smallest is None else smallest
         gate["by_sex_support"] = {sex: count if smallest is None else smallest for sex, count in by_sex.items()}
@@ -530,18 +530,6 @@ def _rules() -> tuple[Rule, ...]:
             ordered=True,
             requires=(_DEPTH_INBRED,),
         ),
-        Derived(
-            (*_INBREEDING, "mean_F_inbred"),
-            "Mean F over the inbred individuals, released only when at least the minimum cell are inbred and "
-            "the F buckets needed no merging: the mean would split a merged bucket, and a mean over all "
-            "individuals would be the sum of a few values when few are inbred.",
-            sources=(_INBRED, _F_HIST),
-        ),
-        Derived(
-            (*_INBREEDING, "sd_F_inbred"),
-            "Sd of F over the inbred individuals, on the same condition as their mean.",
-            sources=(_INBRED, _F_HIST),
-        ),
     ]
     for name, what in (("reproductive", "whether they have offspring"), ("inbred", "whether F exceeds zero")):
         rules.append(
@@ -565,14 +553,6 @@ def _rules() -> tuple[Rule, ...]:
             )
         )
     rules += [
-        Derived(
-            (*_BY_DEPTH, "mean_F"),
-            "Mean F per depth, released whole and only when at every depth the inbred are none or at least "
-            "the minimum cell, and only with the inbred count and unmerged F buckets: a depth's mean times "
-            "its size is its F sum, which over the only inbred depth is the withheld mean F of the inbred "
-            "and splits a merged bucket.",
-            sources=(_DEPTH_INBRED, _INBRED, _F_HIST),
-        ),
         Derived(
             (*_BY_DEPTH, "mean_distinct_ancestors"),
             "Mean ancestor count per depth, released whole and only when the depth, parents-known and "
@@ -600,8 +580,9 @@ def _rules() -> tuple[Rule, ...]:
             Count(
                 groups,
                 "Offspring groups the test uses, each a distinct family, withheld when 1 to 4, and when the "
-                "grouping differs from the full sibships or from the individuals with its parent recorded by "
-                "1 to 4 groups or offspring of a sex: the groupings are nested, so that difference is a count.",
+                "grouping's offspring differ from those of the full sibships, from the individuals with its "
+                "parent recorded or from the individuals of a sex by 1 to 4: the offspring are nested in each "
+                "of those sets, so that difference is a count.",
                 support=(*gate, "groups_support"),
             ),
             Table(
@@ -614,6 +595,11 @@ def _rules() -> tuple[Rule, ...]:
             Count(
                 (*gate, "not_eligible"),
                 "Gate, never written: the individuals with the grouping's parent recorded whom the test does not use.",
+            ),
+            Table(
+                (*gate, "outside_by_sex"),
+                "Gate, never written: the individuals of each sex who are not offspring the grouping uses.",
+                ordered=False,
             ),
         ]
         if name != _NARROWEST:
@@ -777,6 +763,14 @@ def summarize_spec(source: Mapping[str, Any]) -> ReleaseSpec:
                     "The offspring a grouping uses are among the individuals with its parent recorded.",
                 )
             )
+            links += [
+                Link(
+                    (_SEX, sex),
+                    ((by_sex, sex), ((*gate, "outside_by_sex"), sex)),
+                    "The offspring a grouping uses of a sex are among the individuals of that sex.",
+                )
+                for sex in ("male", "female")
+            ]
             if name != _NARROWEST:
                 links += [
                     Link(
@@ -801,7 +795,6 @@ def summarize_spec(source: Mapping[str, Any]) -> ReleaseSpec:
 _EXTRA: tuple[Path, ...] = (
     _SEX_SOURCE,
     _F_HIST,
-    (*_INBREEDING, "sd_F_inbred"),
     _BY_DEPTH,
     _TWIN_DECADES,
     *((*_CONCORDANCE, name, "eligible_by_sex") for name, _ in GROUPINGS),

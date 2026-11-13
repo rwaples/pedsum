@@ -25,10 +25,12 @@
   --safe-attempt`** are new. Before, only `summarize` had the flag.
 - `effective-size --safe-attempt` withholds mean F per depth, and the
   per-depth estimates over F (`ne_inbreeding`, `ne_group_coancestry`, the
-  `ne_per_gen` of `ne_individual_delta_f`), unless each depth's inbred
-  individuals are none or at least the minimum cell in every bin of the F
-  histogram. A depth's mean F times its size is its F sum, which gave how
-  many of its inbred held each of two F values. Inbred means
+  `ne_per_gen` of `ne_individual_delta_f`), unless every distinct F value
+  above zero at a depth is held by at least the minimum cell of that
+  depth's individuals. A depth's mean F times its size is its F sum, which
+  gave how many of its inbred held each of two F values. The scalar `ne`
+  of `ne_inbreeding` goes with the series: with one inbred depth it is a
+  function of that depth's mean F. Inbred means
   `F > 1e-9`, as in `summarize`. `supports.birth_cohort_by_sex` is
   written as `null` when the Hill estimator keeps no cohort.
 - `assortative-mating --safe-attempt` withholds the counts that give the
@@ -42,8 +44,11 @@
   Mate Networks.
 - `summarize --safe-attempt` withholds a sex-concordance grouping whose
   eligible counts differ from the full sibships' or from the parents-known
-  counts by 1 to `--min-cell` − 1, and withholds mean F per depth unless
-  the inbred count and the F buckets are intact. A contingency cell that
+  counts, or from the sex table's count of a sex, by 1 to `--min-cell` − 1
+  individuals. It releases no mean or sd of F: `mean_F` per depth,
+  `mean_F_inbred` and `sd_F_inbred` are not in a safe report, because a
+  mean beside a count gives how many individuals hold each F value. A
+  contingency cell that
   is nonzero with a support of 0 now withholds its table, as it does a
   1-D table and a scalar count.
 - **`--min-cell N`** sets the minimum cell (default 5, at least 3). Safe

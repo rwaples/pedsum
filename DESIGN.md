@@ -298,23 +298,41 @@ ancestor and descendant-path counts are weighted sums of the
 depth-by-recorded-parents row of depth 1 (in a two-depth pedigree, for the
 founders' descendant paths), so they name that table as a source.
 
-**Nested populations (review F1, F2).** The mean F of a depth times the
-depth's size is its F sum, so the per-depth mean F also names the inbred
-table and the F histogram as sources. The eligible offspring of the three
+**Nested populations (review F1, F2; D18).** `summarize` releases no mean
+or sd of F, per depth or over the inbred. F takes few distinct values, so
+a mean beside a count gives how many individuals hold each value, and two
+values can share a histogram bucket. The eligible offspring of the three
 sex-concordance groupings are nested: a full sibship's are eligible in
 both single-parent groupings, and each grouping's are among the
-individuals with its parent recorded. The differences are gate tables
+individuals with its parent recorded and among the individuals of their
+sex in the `sex` table. The differences are gate tables
 under `gates` in the source, which have rules and `Link`s so the oracle
 sees them, and which `safe_outputs` writes to no file. The smallest
 nonzero difference is the `support` of the grouping's group count and
 by-sex table, so a difference of 1 to min_cell - 1 withholds both, the
-by-sex total included. The difference in group counts has no `Link`: one
-mother's two sibships are one maternal group, so it is not a sum of cells.
+by-sex total included. Group counts are not differenced: one mother's two
+sibships are one maternal group, so the groups of one grouping are not a
+subset of another's and their difference counts no set.
+
+**F estimates of `effective-size` (review V1).** A depth's mean F times
+its size is its F sum, and with two F values at the depth that sum gives
+how many individuals hold each. The gate `inbred_f_by_depth` therefore
+counts individuals by depth and by distinct F value (sorted values no
+further apart than `INBRED_TOL` are one value), and mean F per depth,
+`ne_group_coancestry` and the per-depth delta-F Ne are released only when
+every value at every depth is held by none or at least min_cell. Bins of
+the F histogram are not enough: two values share a bin. The scalar `ne`
+of `ne_inbreeding` stays in the gated group on purpose: with one inbred
+depth it is a function of that depth's mean F, so releasing it on counts
+alone gives the mean back. Most real pedigrees fail this gate.
 
 **Logs (D8).** `cli.main` runs a safe command inside
 `safe_log.scrubbing()`, which installs a log record factory, so every
 handler, including tqdm's redirect and pytest's capture, sees scrubbed
-records only. On exit it puts back the factory and the
+records only. A Rust panic is outside it: `cli.main` catches PyO3's
+`PanicException`, but Rust's panic hook has by then written the message
+and location to stderr unscrubbed, one more reason the log is never
+transferred. On exit it puts back the factory and the
 `warnings.showwarning` it found; an ordinary run changes neither. An
 argument of a `pedigree_summary` record prints when its type says it
 carries no ID and nothing drawn from the data rows: a `Public` string or

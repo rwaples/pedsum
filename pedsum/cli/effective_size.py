@@ -8,6 +8,7 @@ import numpy as np
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
+    SEX_DEPENDENT_ESTIMATORS,
     SEX_UNKNOWN,
     PedigreeError,
     logger,
@@ -33,11 +34,6 @@ if TYPE_CHECKING:
     from pedigree_graph import PedigreeGraph
 
     from pedsum.memory import MemoryWatchdog
-
-#: Estimators that need every row's sex resolved (pedigree-graph raises
-#: ``MissingMetadataError`` for them otherwise). The others run on a pedigree
-#: with unknown sex, so ``effective-size`` refuses only when one is selected.
-SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping"})
 
 
 def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:

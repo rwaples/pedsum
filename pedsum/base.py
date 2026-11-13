@@ -22,6 +22,11 @@ SEX_UNKNOWN = -1
 
 INBRED_TOL = 1e-9
 
+#: Estimators that need every row's sex resolved (pedigree-graph raises
+#: ``MissingMetadataError`` for them otherwise). The others run on a pedigree
+#: with unknown sex, so ``effective-size`` refuses only when one is selected.
+SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping"})
+
 TraitKind = Literal["continuous", "binary", "ordinal"]
 TRAIT_KINDS: tuple[TraitKind, ...] = ("continuous", "binary", "ordinal")
 

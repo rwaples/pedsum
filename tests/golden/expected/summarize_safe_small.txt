@@ -12,7 +12,6 @@ pedigree:
       F_hist:
         status: blanked
         total: 15
-      sd_F_inbred: null
   strata:
     depth_summary:
       sex:
@@ -27,7 +26,6 @@ pedigree:
       parents_recorded:
         status: blanked
         total: 15
-      mean_F: null
       mean_distinct_ancestors: null
       mean_descendant_paths: null
   demography:
@@ -89,8 +87,6 @@ inbreeding	inbred	status	blanked
 inbreeding	inbred	total	15
 inbreeding	F_hist	status	blanked
 inbreeding	F_hist	total	15
-inbreeding	mean_F_inbred		
-inbreeding	sd_F_inbred		
 sex_summary	reproductive	status	blanked
 sex_summary	reproductive	total	15
 sex_summary	inbred	status	blanked
@@ -103,7 +99,6 @@ depth_summary	inbred	status	blanked
 depth_summary	inbred	total	15
 depth_summary	parents_recorded	status	blanked
 depth_summary	parents_recorded	total	15
-depth_summary	mean_F		
 depth_summary	mean_distinct_ancestors		
 depth_summary	mean_descendant_paths		
 
@@ -164,7 +159,6 @@ pedigree:
       inbred:
         status: blanked
         total: 15
-      mean_F_inbred: null
   strata:
     sex_summary:
       reproductive:

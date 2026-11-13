@@ -12,7 +12,6 @@ pedigree:
       F_hist:
         status: blanked
         total: 200
-      sd_F_inbred: null
   strata:
     depth_summary:
       sex:
@@ -69,7 +68,6 @@ pedigree:
             mother_only: 0
             father_only: 0
             none: 0
-      mean_F: null
       mean_distinct_ancestors:
         '0': 0.0
         '1': 2.0
@@ -210,8 +208,6 @@ inbreeding	inbred	status	blanked
 inbreeding	inbred	total	200
 inbreeding	F_hist	status	blanked
 inbreeding	F_hist	total	200
-inbreeding	mean_F_inbred		
-inbreeding	sd_F_inbred		
 sex_summary	reproductive	status	blanked
 sex_summary	reproductive	total	200
 sex_summary	inbred	status	blanked
@@ -254,7 +250,6 @@ depth_summary	parents_recorded	cells.4.both	30
 depth_summary	parents_recorded	cells.4.mother_only	0
 depth_summary	parents_recorded	cells.4.father_only	0
 depth_summary	parents_recorded	cells.4.none	0
-depth_summary	mean_F		
 depth_summary	mean_distinct_ancestors	0	0.0
 depth_summary	mean_distinct_ancestors	1	2.0
 depth_summary	mean_distinct_ancestors	2	6.0
@@ -388,7 +383,6 @@ pedigree:
       inbred:
         status: blanked
         total: 200
-      mean_F_inbred: null
   strata:
     sex_summary:
       reproductive:

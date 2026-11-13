@@ -298,7 +298,7 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
         (parents, (*by_depth, "reproductive")),
         (parents, DEPTH_PARENTS),
         (DEPTH, DEPTH_PARENTS),
-        *((parents, (*concordance, name, "eligible_by_sex")) for name in GROUPINGS),
+        *((table, (*concordance, name, "eligible_by_sex")) for table in (parents, sex) for name in GROUPINGS),
         *(
             ((*concordance, name, "eligible_by_sex"), (*concordance, GROUPINGS[0], "eligible_by_sex"))
             for name in GROUPINGS[1:]
@@ -858,7 +858,7 @@ def test_s1_inbred_total_is_not_released_beside_a_blanked_depth_table(tmp_path):
     written = load(tmp_path / "out")
     assert _extra(written)["strata"]["depth_summary"]["inbred"] == {"status": "blanked", "total": 26}
     inbreeding = _pedigree(written)["relatedness"]["inbreeding"]
-    assert inbreeding == {"inbred": {"status": "blanked", "total": 26}, "mean_F_inbred": None}
+    assert inbreeding == {"inbred": {"status": "blanked", "total": 26}}
     assert _extra(written)["relatedness"]["inbreeding"]["F_hist"] == {"status": "blanked", "total": 26}
 
     outbred = (DEPTH_INBRED, ("2", "not_inbred"))
@@ -933,10 +933,7 @@ def test_s3_the_key_set_does_not_depend_on_the_data(tmp_path):
         assert source is not None
         inbreeding = source["pedigree"]["relatedness"]["inbreeding"]
         assert inbreeding["inbred"]["inbred"] == n_inbred
-        assert (inbreeding["mean_F_inbred"] is None) == (n_inbred == 0)
-        assert (inbreeding["sd_F_inbred"] is None) == (n_inbred < 2)
         key_sets.append(_leaf_paths(out_dir, summarize_spec(source)))
-        assert ("summary.extra.yaml", "pedigree", "relatedness", "inbreeding", "sd_F_inbred") in key_sets[-1]
     assert key_sets[0] == key_sets[1] == key_sets[2]
 
 
@@ -949,28 +946,6 @@ def test_s3_weinberg_is_null_not_absent_without_twin_pairs(safe):
     births["weinberg"]["mz_fraction_estimate"] = None
     released = safe_outputs(edited, DEFAULT_MIN_CELL).slim["pedigree"]["demography"]["multiple_births"]
     assert released["weinberg"] == {"mz_fraction_estimate": None}
-
-
-def test_s4_f_moments_are_not_released_beside_a_merged_f_histogram(safe):
-    """Three at F = 0.25 and three at 0.0625 merge into one bucket; their mean (0.1562) would split it again."""
-    source, _ = safe
-    edited = copy.deepcopy(source)
-    inbreeding = edited["pedigree"]["relatedness"]["inbreeding"]
-    n = sum(inbreeding["inbred"].values())
-    inbreeding["inbred"] = {"inbred": 6, "not_inbred": n - 6}
-    inbreeding["F_hist"] = {"0": n - 6, "<0.0625": 3, "<0.125": 0, "<0.25": 3, "<1": 0}
-    inbreeding["mean_F_inbred"], inbreeding["sd_F_inbred"] = 0.15625, 0.1027
-    edited["pedigree"]["strata"]["depth_summary"]["inbred"] = {
-        "0": {"inbred": 0, "not_inbred": n - 6},
-        "2": {"inbred": 6, "not_inbred": 0},
-    }
-    outputs = safe_outputs(edited, DEFAULT_MIN_CELL)
-    released = outputs.slim["pedigree"]["relatedness"]["inbreeding"]
-    extra = outputs.extra["pedigree"]["relatedness"]["inbreeding"]
-    assert released["inbred"]["bins"] == {"inbred": 6, "not_inbred": n - 6}
-    assert extra["F_hist"]["status"] != "intact"
-    assert released["mean_F_inbred"] is None
-    assert extra["sd_F_inbred"] is None
 
 
 @pytest.mark.parametrize("value", ["2", "0", "-1", "3.5", "x"])
@@ -1021,27 +996,25 @@ def test_safe_meta_names_paths_by_base_name_only(tmp_path):
         )
 
 
-def test_f1_depth_mean_f_is_not_released_beside_a_merged_f_histogram(safe):
-    """Ten at F = 0.125 and two at 0.25, all at depth 2: the depth's mean F times its size is the withheld F sum."""
-    source, _ = safe
-    edited = copy.deepcopy(source)
-    inbreeding = edited["pedigree"]["relatedness"]["inbreeding"]
-    n = sum(inbreeding["inbred"].values())
-    inbreeding["inbred"] = {"inbred": 12, "not_inbred": n - 12}
-    inbreeding["F_hist"] = {"0": n - 12, "<0.0625": 0, "<0.125": 10, "<0.25": 2, "<1": 0}
-    inbreeding["mean_F_inbred"], inbreeding["sd_F_inbred"] = 0.1458, 0.0487
-    depth_summary = edited["pedigree"]["strata"]["depth_summary"]
-    depth_summary["inbred"] = {
-        "0": {"inbred": 0, "not_inbred": n - 20},
-        "2": {"inbred": 12, "not_inbred": 8},
-    }
-    depth_summary["mean_F"] = {"0": 0.0, "2": 0.0875}
-    outputs = safe_outputs(edited, DEFAULT_MIN_CELL)
-    assert outputs.extra["pedigree"]["relatedness"]["inbreeding"]["F_hist"]["status"] == "merged"
-    assert outputs.slim["pedigree"]["relatedness"]["inbreeding"]["mean_F_inbred"] is None
-    released = outputs.extra["pedigree"]["strata"]["depth_summary"]
-    assert released["inbred"]["cells"]["2"] == {"inbred": 12, "not_inbred": 8}
-    assert released["mean_F"] is None
+def test_r1_no_mean_or_sd_of_f_is_released(tmp_path):
+    """Ten at F = 0.125 and two at 0.25 share depth 2 with five outbred: a mean F beside the 12 would give the two."""
+    rows = [_person(i, sex) for i, sex in zip(range(1, 6), "MFFMF", strict=True)]
+    rows += [_person(6, "M", 2, 1), _person(7, "F", 3, 1)]
+    rows += [_person(8, "M", 5, 4), _person(9, "F", 5, 4), _person(10, "M", 5, 4)]
+    rows += [_person(11 + k, "MF"[k % 2], 7, 6) for k in range(10)]
+    rows += [_person(21 + k, "MF"[k % 2], 9, 8) for k in range(2)]
+    rows += [_person(40, "M"), _person(41, "F"), _person(43, "F"), _person(42, "M", 41, 40)]
+    rows += [_person(44 + k, "MF"[k % 2], 43, 42) for k in range(5)]
+    rows += [_person(50 + k, "MF"[k % 2], 45, 44) for k in range(5)]
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out")
+    assert source is not None
+    assert at(source, DEPTH_INBRED)["2"] == {"inbred": 12, "not_inbred": 5}
+
+    written = load(tmp_path / "out")
+    assert _extra(written)["strata"]["depth_summary"]["inbred"]["cells"]["2"] == {"inbred": 12, "not_inbred": 5}
+    keys = {key for payload in (source, *written.values()) for path, _ in leaves(payload) for key in path}
+    assert not keys & {"mean_F", "mean_F_inbred", "sd_F_inbred"}
+    assert not any(word in text(tmp_path / "out") for word in ("mean_F", "sd_F"))
 
 
 def _two_father_families(n: int, start: int) -> list[dict[str, Any]]:
@@ -1125,4 +1098,71 @@ def test_f2_nested_groupings_that_differ_by_nothing_or_enough_are_released(tmp_p
         "paternal_offspring_group": (40, {"male": 60, "female": 60}),
     }
     assert all(block["test"] is not None for block in blocks.values())
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+def _one_father_families(n_fathers: int) -> list[dict[str, Any]]:
+    """Five mothers, each with a son and a daughter, their fathers ``n_fathers`` men in turn."""
+    rows = [_person(1 + k, "M") for k in range(n_fathers)] + [_person(10 + k, "F") for k in range(5)]
+    for k in range(5):
+        father = 1 + k % n_fathers
+        rows += [_person(100 + 2 * k, "M", 10 + k, father), _person(101 + 2 * k, "F", 10 + k, father)]
+    return rows
+
+
+def test_r2_one_man_outside_the_eligible_offspring_withholds_them(tmp_path):
+    """One father of five sibships: the 6 males less the 5 eligible sons would be the father alone."""
+    source = summarize(write_ped(tmp_path / "p.tsv", _one_father_families(1)), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    assert at(source, (*SIZE, "sex")) == {"female": 10, "male": 6, "unknown": 0}
+    gates = at(source, GATES)
+    assert [gates[name]["outside_by_sex"] for name in GROUPINGS] == [{"male": 1, "female": 5}] * 3
+    assert load(tmp_path / "out")["summary.yaml"]["pedigree"]["structure"]["size_structure"]["sex"]["bins"] == {
+        "female": 10,
+        "male": 6,
+        "unknown": 0,
+    }
+    withheld = {"n_groups_eligible": None, "eligible_by_sex": {"status": "blanked", "total": None}, "test": None}
+    assert _concordance_blocks(tmp_path / "out") == dict.fromkeys(GROUPINGS, withheld)
+    assert "outside_by_sex" not in text(tmp_path / "out")
+
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+    alone = pinned_sensitive(source, DEFAULT_MIN_CELL, _without_concordance_support(summarize_spec(source)))
+    assert ((*GATES, "sibship", "outside_by_sex"), "male") in alone
+
+
+def test_r2_five_men_outside_the_eligible_offspring_release_them(tmp_path):
+    """Five fathers of the same five sibships: each sex has five individuals outside the eligible offspring."""
+    source = summarize(write_ped(tmp_path / "p.tsv", _one_father_families(5)), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    blocks = _concordance_blocks(tmp_path / "out")
+    assert {
+        name: (block["n_groups_eligible"], block["eligible_by_sex"].get("bins")) for name, block in blocks.items()
+    } == (dict.fromkeys(GROUPINGS, (5, {"male": 5, "female": 5})))
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+def test_r3_group_counts_of_two_groupings_are_not_differenced(tmp_path):
+    """Three mothers with a sibship by each of two fathers: 100 sibships are 97 maternal groups, the same offspring."""
+    rows: list[dict[str, Any]] = []
+    for k in range(100):
+        mother = 1000 + (k if k < 97 else k - 97)
+        if k < 97:
+            rows.append(_person(mother, "F"))
+        rows += [
+            _person(2000 + k, "M"),
+            _person(3000 + k, "M", mother, 2000 + k),
+            _person(4000 + k, "F", mother, 2000 + k),
+        ]
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    blocks = _concordance_blocks(tmp_path / "out")
+    by_sex = {"male": 100, "female": 100}
+    assert {
+        name: (block["n_groups_eligible"], block["eligible_by_sex"].get("bins")) for name, block in blocks.items()
+    } == {
+        "sibship": (100, by_sex),
+        "maternal_offspring_group": (97, by_sex),
+        "paternal_offspring_group": (100, by_sex),
+    }
     assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []

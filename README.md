@@ -616,9 +616,12 @@ record). The test is written only
 when the counts it rests on are intact at `--min-cell`. The groupings are
 nested: the offspring of an eligible full sibship are eligible in both
 single-parent groupings, and every eligible offspring has the grouping's
-parent recorded. A grouping's counts are withheld when they differ from
-the full sibships' counts, or from the parents-known counts, by 1 to
-`--min-cell` − 1 groups or offspring of a sex. The largest
+parent recorded and is among the individuals of its sex. A grouping's
+counts are withheld when its eligible offspring differ from the full
+sibships' offspring, from the parents-known counts, or from the sex table's
+count of their sex, by 1 to `--min-cell` − 1 individuals. Group counts are
+not compared across groupings, because one mother's two sibships are one
+maternal group. The largest
 group's pair share, the `all_resolved` sensitivity, the distributions and
 the `by_group_size` rows are not written (see
 [Safe output](#safe-output---safe-attempt)).
@@ -640,10 +643,11 @@ counts each estimator rests on, protected at `--min-cell`, and an estimate
 only when all of its counts are at least that. A per-depth or per-cohort
 array is written whole or not at all. Mean F per depth, and the per-depth
 estimates over F (`ne_inbreeding`, `ne_group_coancestry`, the `ne_per_gen`
-of `ne_individual_delta_f`), are written only when every depth's inbred
-individuals are none or at least `--min-cell` in each bin of the F
-histogram; a pedigree with a few highly inbred individuals at one depth
-has them withheld. The `supports` keys follow the options: a table with
+of `ne_individual_delta_f`), are written only when every distinct F value above
+zero at a depth is held by at least `--min-cell` of that depth's
+individuals; most real pedigrees have an F value held by a few, and have
+them withheld. The scalar `ne` of `ne_inbreeding` is withheld with the
+series: with one inbred depth it is a function of that depth's mean F. The `supports` keys follow the options: a table with
 nothing to count is `null`. `ne_long_term_contributions` is
 never written: its record is always `reason: not_released_in_safe_mode`.
 A stop at the memory limit writes
@@ -1317,7 +1321,10 @@ directory.
 **The log.** Under `--safe-attempt` the log on stderr names no ID and no
 data value, at any level. Every count and every other number drawn from
 the input rows prints as `[withheld]`, as does any text pedsum cannot show,
-and a traceback is replaced by the exception's type. The numbers that
+and a traceback is replaced by the exception's type. A Rust panic is the
+exception: Rust writes its message and source location to stderr before
+pedsum sees it, unscrubbed, which is one more reason the log is never
+transferred. The numbers that
 remain are not data: option values, the thread count, the minimum cell,
 elapsed seconds and the memory limit. A failed validation names each failing
 Check and writes no `validate.log`. To see what was withheld, add
