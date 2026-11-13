@@ -52,7 +52,7 @@ import numpy as np
 
 from pedsum.base import SEX_MALE, SexSource, logger
 from pedsum.progress import timed
-from pedsum.redaction import null_below, redact_small_group
+from pedsum.safe_log import Public, detail
 from pedsum.sections import numeric_distribution
 
 if TYPE_CHECKING:
@@ -324,7 +324,7 @@ def _run_permutations(
             "sex-concordance permutations skipped: %s eligible offspring reaches the numba sampler's "
             "documented bound (%s); analytical results are still reported",
             f"{n_total:,}",
-            f"{_NUMBA_SAMPLER_MAX_N:,}",
+            Public(f"{_NUMBA_SAMPLER_MAX_N:,}"),
         )
         return block
 
@@ -774,77 +774,11 @@ def _warn_if_unpermuted_tail(name: str, block: dict) -> None:
     if block.get("p_source") == "permutation":
         return
     logger.warning(
-        "%s: analytical p = %.3g is below %.2f, where the normal approximation runs up to ~18x too "
-        "liberal in the positive (over-concordant) tail; max_group_pair_share = %.3g. Re-run with "
+        "%s: analytical p = %s is below %.2f, where the normal approximation runs up to ~18x too "
+        "liberal in the positive (over-concordant) tail; max_group_pair_share = %s. Re-run with "
         "--sex-concordance-permutations before claiming this.",
-        name,
-        p,
-        ANALYTICAL_P_WARN,
-        block.get("max_group_pair_share") or 0.0,
+        Public(name),
+        detail(f"{p:.3g}"),
+        Public(ANALYTICAL_P_WARN),
+        detail(f"{block.get('max_group_pair_share') or 0.0:.3g}"),
     )
-
-
-# ---------------------------------------------------------------------------
-# --safe-attempt rule (``SectionSpec.redact``)
-# ---------------------------------------------------------------------------
-
-# Every key that carries inference or a derived rate over the eligible set.
-# Suppressed wholesale when the grouping rests on fewer than ``min_cell``
-# eligible groups; eligibility metadata (_COUNT_KEYS) is retained, and
-# small-cell-nulled, so the reader still sees why nothing was reported.
-_INFERENCE_KEYS: tuple[str, ...] = (
-    "conditioning_male_fraction",
-    "n_within_group_pairs",
-    "max_group_pair_share",
-    "observed_pair_concordance",
-    "expected_pair_concordance",
-    "excess_concordance",
-    "direction",
-    "z",
-    "p_analytical",
-    "p_analytical_holm",
-    "p_holm",
-    "p_source",
-    "all_resolved_excess_concordance",
-)
-
-
-def _redact_grouping(block: dict, min_cell: int) -> None:
-    """Small-cell redaction for one grouping's block.
-
-    Recurses once into the ``all_resolved`` sensitivity block, which carries
-    the same eligibility/statistic keys and none of the outer wrappers.
-    Permutation count and seed survive — they describe the procedure, not
-    the pedigree.
-    """
-    if 0 < int(block.get("n_groups_eligible", 0) or 0) < min_cell:
-        for key in _INFERENCE_KEYS:
-            if key in block:
-                block[key] = None
-        if "male_proportion_distribution" in block:
-            block["male_proportion_distribution"] = None
-        if "by_group_size" in block:
-            block["by_group_size"] = []
-        perms = block.get("permutations")
-        if isinstance(perms, dict):
-            perms["p_raw"] = None
-            perms["p_holm"] = None
-
-    for row in block.get("by_group_size") or []:
-        redact_small_group(row, ("group_size", "n_groups"), min_cell, ("n_offspring",), size_key="n_groups")
-
-    null_below(block, _COUNT_KEYS, min_cell)
-    by_source = block.get("eligible_by_sex_source")
-    if isinstance(by_source, dict):
-        null_below(by_source, list(by_source), min_cell)
-
-    nested = block.get("all_resolved")
-    if isinstance(nested, dict):
-        _redact_grouping(nested, min_cell)
-
-
-def redact_offspring_sex_concordance(section: dict, min_cell: int, n_total: int) -> None:
-    """Redact each grouping's block; the ``null_model`` description is not data."""
-    for name, block in section.items():
-        if name != "null_model" and isinstance(block, dict):
-            _redact_grouping(block, min_cell)

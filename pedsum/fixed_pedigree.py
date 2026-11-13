@@ -40,6 +40,7 @@ import polars as pl
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, SexSource, logger
 from pedsum.checks import rows_phrase
 from pedsum.parse import plink_sex
+from pedsum.safe_log import Public, detail
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -310,10 +311,10 @@ def multiple_birth_sets(mothers: np.ndarray, fathers: np.ndarray, birth_date: np
     if wide.any():
         logger.warning(
             "%d multiple-birth set(s) span more than --twin-max-days %d through a chain of births "
-            "(widest %d days); check those birth dates",
+            "(widest %s days); check those birth dates",
             int(wide.sum()),
-            max_days,
-            int(span[wide].max()),
+            Public(max_days),
+            detail(int(span[wide].max())),
         )
     return sets
 

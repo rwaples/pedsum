@@ -1,1500 +1,329 @@
 exit: 0
-artifacts: ['summary.extra.yaml', 'summary.individual.tsv', 'summary.pedigree.tsv', 'summary.yaml']
-=== summary.extra.yaml ===
+artifacts: ['summary.extra.txt', 'summary.individual.tab', 'summary.pedigree.tab', 'summary.txt']
+=== summary.extra.txt ===
 input: <input>
 command: <command>
 version: <version>
 n_total: 200
+safe_attempt_min_cell: 5
 pedigree:
+  relatedness:
+    inbreeding:
+      F_hist:
+        status: blanked
+        total: 200
+      sd_F_inbred: null
+  strata:
+    depth_summary:
+      sex:
+        status: intact
+        total: 200
+        cells:
+          '0':
+            female: 15
+            male: 15
+          '1':
+            female: 19
+            male: 21
+          '2':
+            female: 18
+            male: 32
+          '3':
+            female: 26
+            male: 24
+          '4':
+            female: 14
+            male: 16
+      reproductive:
+        status: blanked
+        total: 200
+      inbred:
+        status: blanked
+        total: 200
+      parents_recorded:
+        status: intact
+        total: 200
+        cells:
+          '0':
+            both: 0
+            mother_only: 0
+            father_only: 0
+            none: 30
+          '1':
+            both: 40
+            mother_only: 0
+            father_only: 0
+            none: 0
+          '2':
+            both: 50
+            mother_only: 0
+            father_only: 0
+            none: 0
+          '3':
+            both: 50
+            mother_only: 0
+            father_only: 0
+            none: 0
+          '4':
+            both: 30
+            mother_only: 0
+            father_only: 0
+            none: 0
+      mean_F: null
+      mean_distinct_ancestors:
+        '0': 0.0
+        '1': 2.0
+        '2': 6.0
+        '3': 13.48
+        '4': 25.3
+      mean_descendant_paths: null
   demography:
     offspring_sex_concordance:
       sibship:
-        skip_message: null
-        n_groups_total: 99
-        n_groups_incomplete: 0
-        n_groups_too_small: 30
-        n_offspring_total: 170
-        n_offspring_sex_excluded: 0
-        n_offspring_in_small_groups: 30
-        eligible_by_sex_source:
-          input: 140
-          imputed_from_missing: 0
-          imputed_from_role: 0
-        conditioning_male_fraction: 0.55
-        n_within_group_pairs: 73
-        observed_pair_concordance: 0.5616
-        expected_pair_concordance: 0.5014
-        z: 1.0356
-        p_analytical: 0.3004
-        p_analytical_holm: 0.3004
-        permutations:
-          requested: 50
-          completed: 50
-          seed: 3
-          p_raw: 0.451
-          skip_reason: null
-          p_holm: 0.451
-        all_resolved:
-          computed: true
-          skip_reason: null
-          skip_message: null
-          n_groups_total: 99
-          n_groups_eligible: 69
-          n_groups_incomplete: 0
-          n_groups_too_small: 30
-          n_offspring_total: 170
-          n_offspring_eligible: 140
-          n_offspring_sex_excluded: 0
-          n_offspring_in_small_groups: 30
-          eligible_by_sex_source:
-            input: 140
-            imputed_from_missing: 0
-            imputed_from_role: 0
-          conditioning_male_fraction: 0.55
-          n_within_group_pairs: 73
-          max_group_pair_share: 0.0411
-          observed_pair_concordance: 0.5616
-          expected_pair_concordance: 0.5014
-          excess_concordance: 0.0602
-          direction: over_concordant
-          z: 1.0356
-          p_analytical: 0.3004
-        male_proportion_distribution:
-          mean: 0.5507
-          std: 0.3763
-          q1: 0.5
-          median: 0.5
-          q3: 1.0
-          nz: 53
-        by_group_size:
-        - group_size: 2
-          n_groups: 67
-          n_offspring: 134
-          observed_pair_concordance: 0.5821
-          expected_pair_concordance: 0.5014
-          excess_concordance: 0.0807
-        - group_size: 3
-          n_groups: 2
-          n_offspring: null
-          observed_pair_concordance: null
-          expected_pair_concordance: null
-          excess_concordance: null
+        eligible_by_sex:
+          status: intact
+          total: 140
+          bins:
+            male: 77
+            female: 63
       maternal_offspring_group:
-        skip_message: null
-        n_groups_total: 75
-        n_groups_incomplete: 0
-        n_groups_too_small: 16
-        n_offspring_total: 170
-        n_offspring_sex_excluded: 0
-        n_offspring_in_small_groups: 16
-        eligible_by_sex_source:
-          input: 154
-          imputed_from_missing: 0
-          imputed_from_role: 0
-        conditioning_male_fraction: 0.5455
-        n_within_group_pairs: 150
-        observed_pair_concordance: 0.5667
-        expected_pair_concordance: 0.5009
-        z: 1.6228
-        p_analytical: 0.1046
-        p_analytical_holm: 0.2499
-        permutations:
-          requested: 50
-          completed: 50
-          seed: 3
-          p_raw: 0.098
-          skip_reason: null
-          p_holm: 0.2941
-        all_resolved:
-          computed: true
-          skip_reason: null
-          skip_message: null
-          n_groups_total: 75
-          n_groups_eligible: 59
-          n_groups_incomplete: 0
-          n_groups_too_small: 16
-          n_offspring_total: 170
-          n_offspring_eligible: 154
-          n_offspring_sex_excluded: 0
-          n_offspring_in_small_groups: 16
-          eligible_by_sex_source:
-            input: 154
-            imputed_from_missing: 0
-            imputed_from_role: 0
-          conditioning_male_fraction: 0.5455
-          n_within_group_pairs: 150
-          max_group_pair_share: 0.0667
-          observed_pair_concordance: 0.5667
-          expected_pair_concordance: 0.5009
-          excess_concordance: 0.0658
-          direction: over_concordant
-          z: 1.6228
-          p_analytical: 0.1046
-        male_proportion_distribution:
-          mean: 0.5463
-          std: 0.3575
-          q1: 0.3667
-          median: 0.5
-          q3: 1.0
-          nz: 47
-        by_group_size:
-        - group_size: 2
-          n_groups: 41
-          n_offspring: 82
-          observed_pair_concordance: 0.5854
-          expected_pair_concordance: 0.5009
-          excess_concordance: 0.0845
-        - group_size: 3
-          n_groups: 1
-          n_offspring: null
-          observed_pair_concordance: null
-          expected_pair_concordance: null
-          excess_concordance: null
-        - group_size: 4
-          n_groups: 16
-          n_offspring: 64
-          observed_pair_concordance: 0.5833
-          expected_pair_concordance: 0.5009
-          excess_concordance: 0.0824
-        - group_size: 5
-          n_groups: 1
-          n_offspring: null
-          observed_pair_concordance: null
-          expected_pair_concordance: null
-          excess_concordance: null
+        eligible_by_sex:
+          status: intact
+          total: 154
+          bins:
+            male: 84
+            female: 70
       paternal_offspring_group:
-        skip_message: null
-        n_groups_total: 80
-        n_groups_incomplete: 0
-        n_groups_too_small: 16
-        n_offspring_total: 170
-        n_offspring_sex_excluded: 0
-        n_offspring_in_small_groups: 16
-        eligible_by_sex_source:
-          input: 154
-          imputed_from_missing: 0
-          imputed_from_role: 0
-        conditioning_male_fraction: 0.5519
-        n_within_group_pairs: 128
-        observed_pair_concordance: 0.5781
-        expected_pair_concordance: 0.5022
-        z: 1.7318
-        p_analytical: 0.0833
-        p_analytical_holm: 0.2499
-        permutations:
-          requested: 50
-          completed: 50
-          seed: 3
-          p_raw: 0.1765
-          skip_reason: null
-          p_holm: 0.3529
-        all_resolved:
-          computed: true
-          skip_reason: null
-          skip_message: null
-          n_groups_total: 80
-          n_groups_eligible: 64
-          n_groups_incomplete: 0
-          n_groups_too_small: 16
-          n_offspring_total: 170
-          n_offspring_eligible: 154
-          n_offspring_sex_excluded: 0
-          n_offspring_in_small_groups: 16
-          eligible_by_sex_source:
-            input: 154
-            imputed_from_missing: 0
-            imputed_from_role: 0
-          conditioning_male_fraction: 0.5519
-          n_within_group_pairs: 128
-          max_group_pair_share: 0.0469
-          observed_pair_concordance: 0.5781
-          expected_pair_concordance: 0.5022
-          excess_concordance: 0.076
-          direction: over_concordant
-          z: 1.7318
-          p_analytical: 0.0833
-        male_proportion_distribution:
-          mean: 0.5547
-          std: 0.3589
-          q1: 0.4583
-          median: 0.5
-          q3: 1.0
-          nz: 51
-        by_group_size:
-        - group_size: 2
-          n_groups: 50
-          n_offspring: 100
-          observed_pair_concordance: 0.56
-          expected_pair_concordance: 0.5022
-          excess_concordance: 0.0578
-        - group_size: 3
-          n_groups: 2
-          n_offspring: null
-          observed_pair_concordance: null
-          expected_pair_concordance: null
-          excess_concordance: null
-        - group_size: 4
-          n_groups: 12
-          n_offspring: 48
-          observed_pair_concordance: 0.6111
-          expected_pair_concordance: 0.5022
-          excess_concordance: 0.1089
-  relatedness:
-    relationship_pairs: {}
-  strata:
-    sex_summary:
-      female:
-        frac_reproductive: 0.8152
-        n_terminal: 17
-        offspring_count:
-          mean: 1.8478
-          std: 1.3088
-          q1: 1
-          median: 2
-          q3: 2
-          nz: 75
-        mate_count:
-          mean: 1.0761
-          std: 0.6669
-          q1: 1
-          median: 1
-          q3: 2
-          nz: 75
-        depth:
-          mean: 2.0543
-          std: 1.329
-          q1: 1
-          median: 2
-          q3: 3
-          nz: 77
-        F:
-          mean: 0.011
-          std: 0.0314
-          q1: 0.0
-          median: 0.0
-          q3: 0.0
-          nz: 20
-      male:
-        frac_reproductive: 0.7407
-        n_terminal: 28
-        offspring_count:
-          mean: 1.5741
-          std: 1.2167
-          q1: 0
-          median: 2
-          q3: 2
-          nz: 80
-        mate_count:
-          mean: 0.9167
-          std: 0.6575
-          q1: 0
-          median: 1
-          q3: 1
-          nz: 80
-        depth:
-          mean: 2.0463
-          std: 1.2559
-          q1: 1
-          median: 2
-          q3: 3
-          nz: 93
-        F:
-          mean: 0.0121
-          std: 0.0373
-          q1: 0.0
-          median: 0.0
-          q3: 0.0
-          nz: 23
-    depth_summary:
-    - n_male: 15
-      n_female: 15
-      n_founders: 30
-      n_reproductive: 30
-      frac_reproductive: 1.0
-      n_terminal: 0
-      offspring_count:
-        mean: 2.6667
-        std: 0.9589
-        q1: 2
-        median: 2
-        q3: 4
-        nz: 30
-      offspring_count_hist:
-        '0': 0.0
-        '1': 0.0
-        '2': 0.6667
-        '3': 0.0
-        4+: 0.3333
-      mate_count:
-        mean: 1.3333
-        std: 0.4795
-        q1: 1
-        median: 1
-        q3: 2
-        nz: 30
-      mean_distinct_ancestors: 0.0
-      mean_descendant_paths: 38.6667
-      mean_F: 0.0
-      max_F: 0.0
-      n_inbred: 0
-    - n_male: 21
-      n_female: 19
-      n_founders: 0
-      n_reproductive: 39
-      frac_reproductive: 0.975
-      n_terminal: null
-      offspring_count:
-        mean: 2.5
-        std: 0.9871
-        q1: 2
-        median: 2
-        q3: 4
-        nz: 39
-      offspring_count_hist:
-        '0': 0.025
-        '1': 0.0
-        '2': 0.7
-        '3': 0.0
-        4+: 0.275
-      mate_count:
-        mean: 1.25
-        std: 0.4935
-        q1: 1
-        median: 1
-        q3: 2
-        nz: 39
-      mean_distinct_ancestors: 2.0
-      mean_descendant_paths: 13.5
-      mean_F: 0.0
-      max_F: 0.0
-      n_inbred: 0
-    - n_male: 32
-      n_female: 18
-      n_founders: 0
-      n_reproductive: 40
-      frac_reproductive: 0.8
-      n_terminal: 10
-      offspring_count:
-        mean: 2.0
-        std: 1.2778
-        q1: 2
-        median: 2
-        q3: 2
-        nz: 40
-      offspring_count_hist:
-        '0': 0.2
-        '1': 0.0
-        '2': 0.58
-        '3': 0.06
-        4+: 0.16
-      mate_count:
-        mean: 0.96
-        std: 0.6047
-        q1: 1
-        median: 1
-        q3: 1
-        nz: 40
-      mean_distinct_ancestors: 6.0
-      mean_descendant_paths: 4.4
-      mean_F: 0.0
-      max_F: 0.0
-      n_inbred: 0
-    - n_male: 24
-      n_female: 26
-      n_founders: 0
-      n_reproductive: 46
-      frac_reproductive: 0.92
-      n_terminal: null
-      offspring_count:
-        mean: 1.2
-        std: 0.5714
-        q1: 1
-        median: 1
-        q3: 2
-        nz: 46
-      offspring_count_hist:
-        '0': 0.08
-        '1': 0.64
-        '2': 0.28
-        '3': 0.0
-        4+: 0.0
-      mate_count:
-        mean: 1.2
-        std: 0.5714
-        q1: 1
-        median: 1
-        q3: 2
-        nz: 46
-      mean_distinct_ancestors: 13.48
-      mean_descendant_paths: 1.2
-      mean_F: 0.0163
-      max_F: 0.0625
-      n_inbred: 17
-    - n_male: 16
-      n_female: 14
-      n_founders: 0
-      n_reproductive: 0
-      frac_reproductive: 0.0
-      n_terminal: 30
-      offspring_count:
-        mean: 0.0
-        std: 0.0
-        q1: 0
-        median: 0
-        q3: 0
-        nz: 0
-      offspring_count_hist:
-        '0': 1.0
-        '1': 0.0
-        '2': 0.0
-        '3': 0.0
-        4+: 0.0
-      mate_count:
-        mean: 0.0
-        std: 0.0
-        q1: 0
-        median: 0
-        q3: 0
-        nz: 0
-      mean_distinct_ancestors: 25.3
-      mean_descendant_paths: 0.0
-      mean_F: 0.0503
-      max_F: 0.25
-      n_inbred: 26
+        eligible_by_sex:
+          status: intact
+          total: 154
+          bins:
+            male: 85
+            female: 69
 individual:
   distributions:
-    F:
-      std: 0.0347
-      q1: 0.0
-      q3: 0.0
-      nz: 43
-    n_full_sibs:
-      mean: 0.73
-      std: 0.5083
-      q1: 0
-      median: 1
-      q3: 1
-      nz: 140
-    n_mat_half_sibs:
-      mean: 0.77
-      std: 0.9548
-      q1: 0
-      median: 0
-      q3: 2
-      nz: 83
-    n_pat_half_sibs:
-      mean: 0.55
-      std: 0.8551
-      q1: 0
-      median: 0
-      q3: 1
-      nz: 62
-    n_offspring:
-      std: 1.2641
-      q1: 1
-      q3: 2
-      nz: 155
-    n_mates:
-      std: 0.6649
-      q1: 1
-      q3: 1
-      nz: 155
-    n_grandparents:
-      mean: 2.6
-      std: 1.9127
-      q1: 0
-      median: 4
-      q3: 4
-      nz: 130
-    n_grandchildren:
-      mean: 2.57
-      std: 3.201
-      q1: 0
-      median: 2
-      q3: 4
-      nz: 108
-    n_uncles_aunts:
-      mean: 1.325
-      std: 0.987
-      q1: 0
-      median: 2
-      q3: 2
-      nz: 130
-    n_first_cousins:
-      mean: 2.65
-      std: 2.3908
-      q1: 0
-      median: 2
-      q3: 4
-      nz: 128
-    n_founder_ancestors:
-      mean: 5.275
-      std: 3.8475
-      q1: 2
-      median: 4
-      q3: 8
-      nz: 200
-    n_distinct_ancestors:
-      std: 8.4533
-      q1: 2
-      q3: 14
-      nz: 170
     ecg:
       mean: 2.05
       std: 1.2868
-      q1: 1.0
-      median: 2.0
-      q3: 3.0
-      nz: 170
-    n_descendant_paths:
-      mean: 9.9
-      std: 15.2273
-      q1: 1
-      median: 4
-      q3: 12
-      nz: 155
 
-=== summary.individual.tsv ===
+=== summary.individual.tab ===
 section	key	subkey	value
 meta	input		<input>
 meta	command		<command>
 meta	version		<version>
 meta	n_total		200
-distributions	F	mean	0.0116
-distributions	F	std	0.0347
-distributions	F	q1	0.0
-distributions	F	median	0.0
-distributions	F	q3	0.0
-distributions	F	nz	43
-distributions	n_full_sibs	mean	0.73
-distributions	n_full_sibs	std	0.5083
-distributions	n_full_sibs	q1	0
-distributions	n_full_sibs	median	1
-distributions	n_full_sibs	q3	1
-distributions	n_full_sibs	nz	140
-distributions	n_mat_half_sibs	mean	0.77
-distributions	n_mat_half_sibs	std	0.9548
-distributions	n_mat_half_sibs	q1	0
-distributions	n_mat_half_sibs	median	0
-distributions	n_mat_half_sibs	q3	2
-distributions	n_mat_half_sibs	nz	83
-distributions	n_pat_half_sibs	mean	0.55
-distributions	n_pat_half_sibs	std	0.8551
-distributions	n_pat_half_sibs	q1	0
-distributions	n_pat_half_sibs	median	0
-distributions	n_pat_half_sibs	q3	1
-distributions	n_pat_half_sibs	nz	62
-distributions	n_offspring	mean	1.7
-distributions	n_offspring	std	1.2641
-distributions	n_offspring	q1	1
-distributions	n_offspring	median	2
-distributions	n_offspring	q3	2
-distributions	n_offspring	nz	155
-distributions	n_mates	mean	0.99
-distributions	n_mates	std	0.6649
-distributions	n_mates	q1	1
-distributions	n_mates	median	1
-distributions	n_mates	q3	1
-distributions	n_mates	nz	155
-distributions	n_grandparents	mean	2.6
-distributions	n_grandparents	std	1.9127
-distributions	n_grandparents	q1	0
-distributions	n_grandparents	median	4
-distributions	n_grandparents	q3	4
-distributions	n_grandparents	nz	130
-distributions	n_grandchildren	mean	2.57
-distributions	n_grandchildren	std	3.201
-distributions	n_grandchildren	q1	0
-distributions	n_grandchildren	median	2
-distributions	n_grandchildren	q3	4
-distributions	n_grandchildren	nz	108
-distributions	n_uncles_aunts	mean	1.325
-distributions	n_uncles_aunts	std	0.987
-distributions	n_uncles_aunts	q1	0
-distributions	n_uncles_aunts	median	2
-distributions	n_uncles_aunts	q3	2
-distributions	n_uncles_aunts	nz	130
-distributions	n_first_cousins	mean	2.65
-distributions	n_first_cousins	std	2.3908
-distributions	n_first_cousins	q1	0
-distributions	n_first_cousins	median	2
-distributions	n_first_cousins	q3	4
-distributions	n_first_cousins	nz	128
-distributions	n_founder_ancestors	mean	5.275
-distributions	n_founder_ancestors	std	3.8475
-distributions	n_founder_ancestors	q1	2
-distributions	n_founder_ancestors	median	4
-distributions	n_founder_ancestors	q3	8
-distributions	n_founder_ancestors	nz	200
-distributions	n_distinct_ancestors	mean	9.065
-distributions	n_distinct_ancestors	std	8.4533
-distributions	n_distinct_ancestors	q1	2
-distributions	n_distinct_ancestors	median	6
-distributions	n_distinct_ancestors	q3	14
-distributions	n_distinct_ancestors	nz	170
+meta	safe_attempt_min_cell		5
 distributions	ecg	mean	2.05
 distributions	ecg	std	1.2868
-distributions	ecg	q1	1.0
-distributions	ecg	median	2.0
-distributions	ecg	q3	3.0
-distributions	ecg	nz	170
-distributions	n_descendant_paths	mean	9.9
-distributions	n_descendant_paths	std	15.2273
-distributions	n_descendant_paths	q1	1
-distributions	n_descendant_paths	median	4
-distributions	n_descendant_paths	q3	12
-distributions	n_descendant_paths	nz	155
 
-=== summary.pedigree.tsv ===
+=== summary.pedigree.tab ===
 section	key	subkey	value
 meta	input		<input>
 meta	command		<command>
 meta	version		<version>
 meta	n_total		200
+meta	safe_attempt_min_cell		5
 meta	max_degree_enumerated		5
-size_structure	n_founders		30
-size_structure	founder_frac		0.15
-size_structure	n_nonfounders		170
-size_structure	nonfounder_frac		0.85
-size_structure	n_male		108
-size_structure	n_female		92
-size_structure	n_mother_links		170
-size_structure	n_father_links		170
-size_structure	n_parent_child_edges		340
-size_structure	n_with_both_parents		170
-size_structure	n_with_mother_only		0
-size_structure	n_with_father_only		0
-size_structure	n_half_founders		0
-size_structure	max_depth		4
-size_structure	mean_depth		2.05
-size_structure	median_depth		2.0
-size_structure	depth_counts	0	30
-size_structure	depth_counts	1	40
-size_structure	depth_counts	2	50
-size_structure	depth_counts	3	50
-size_structure	depth_counts	4	30
-size_structure	n_components		1
-size_structure	largest_component		200
-size_structure	largest_component_frac		1.0
-sibship_size	n_sibships		99
-sibship_size	mean		1.7172
-sibship_size	median		2.0
-sibship_size	q1		1.0
-sibship_size	q3		2.0
-sibship_size	size_dist	1	0.303
-sibship_size	size_dist	2	0.6768
-sibship_size	size_dist	3	0.0202
-sibship_size	size_dist	4+	0.0
+size_structure	sex	status	intact
+size_structure	sex	total	200
+size_structure	sex	bins.female	92
+size_structure	sex	bins.male	108
+size_structure	sex	bins.unknown	0
+size_structure	parents_known	status	intact
+size_structure	parents_known	total	200
+size_structure	parents_known	bins.both	170
+size_structure	parents_known	bins.mother_only	0
+size_structure	parents_known	bins.father_only	0
+size_structure	parents_known	bins.founder_with_descendants	30
+size_structure	parents_known	bins.founder_without_descendants	0
+size_structure	depth	status	intact
+size_structure	depth	total	200
+size_structure	depth	bins.0	30
+size_structure	depth	bins.1	40
+size_structure	depth	bins.2	50
+size_structure	depth	bins.3	50
+size_structure	depth	bins.4	30
+size_structure	depth_stats	mean	2.05
+size_structure	depth_stats	std	1.2868
+size_structure	depth_stats	q1	1
+size_structure	depth_stats	median	2
+size_structure	depth_stats	q3	3
+components	n_components		
 mating_pairs	n_pairs		99
-mating_pairs	n_pairs_with_multiple_children		69
-mating_pairs	frac_pairs_with_multiple_children		0.697
-mating_pairs	children_per_pair	mean	1.7172
-mating_pairs	children_per_pair	std	0.4957
-mating_pairs	children_per_pair	q1	1
-mating_pairs	children_per_pair	median	2
-mating_pairs	children_per_pair	q3	2
-mating_pairs	children_per_pair	nz	99
-mating_pairs	effective_pairs_by_children		91.4557
 offspring_sex_concordance	null_model	method	fixed_margin_exchangeability
 offspring_sex_concordance	null_model	statistic	within_group_pair_concordance
 offspring_sex_concordance	null_model	sex_probability	conditioned_margin
 offspring_sex_concordance	null_model	min_group_size	2
 offspring_sex_concordance	null_model	headline_eligibility	sex_source_input
-offspring_sex_concordance	null_model	sensitivity_eligibility	all_resolved_sex
 offspring_sex_concordance	null_model	multiplicity	holm_across_groupings
-offspring_sex_concordance	sibship	computed	True
-offspring_sex_concordance	sibship	skip_reason	
-offspring_sex_concordance	sibship	skip_message	
-offspring_sex_concordance	sibship	n_groups_total	99
 offspring_sex_concordance	sibship	n_groups_eligible	69
-offspring_sex_concordance	sibship	n_groups_incomplete	0
-offspring_sex_concordance	sibship	n_groups_too_small	30
-offspring_sex_concordance	sibship	n_offspring_total	170
-offspring_sex_concordance	sibship	n_offspring_eligible	140
-offspring_sex_concordance	sibship	n_offspring_sex_excluded	0
-offspring_sex_concordance	sibship	n_offspring_in_small_groups	30
-offspring_sex_concordance	sibship	eligible_by_sex_source.input	140
-offspring_sex_concordance	sibship	eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	sibship	eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	sibship	conditioning_male_fraction	0.55
-offspring_sex_concordance	sibship	n_within_group_pairs	73
-offspring_sex_concordance	sibship	max_group_pair_share	0.0411
-offspring_sex_concordance	sibship	observed_pair_concordance	0.5616
-offspring_sex_concordance	sibship	expected_pair_concordance	0.5014
-offspring_sex_concordance	sibship	excess_concordance	0.0602
-offspring_sex_concordance	sibship	direction	over_concordant
-offspring_sex_concordance	sibship	z	1.0356
-offspring_sex_concordance	sibship	p_analytical	0.3004
-offspring_sex_concordance	sibship	p_analytical_holm	0.3004
-offspring_sex_concordance	sibship	permutations.requested	50
-offspring_sex_concordance	sibship	permutations.completed	50
-offspring_sex_concordance	sibship	permutations.seed	3
-offspring_sex_concordance	sibship	permutations.p_raw	0.451
-offspring_sex_concordance	sibship	permutations.skip_reason	
-offspring_sex_concordance	sibship	permutations.p_holm	0.451
-offspring_sex_concordance	sibship	p_source	permutation
-offspring_sex_concordance	sibship	p_holm	0.451
-offspring_sex_concordance	sibship	all_resolved_excess_concordance	0.0602
-offspring_sex_concordance	sibship	all_resolved.computed	True
-offspring_sex_concordance	sibship	all_resolved.skip_reason	
-offspring_sex_concordance	sibship	all_resolved.skip_message	
-offspring_sex_concordance	sibship	all_resolved.n_groups_total	99
-offspring_sex_concordance	sibship	all_resolved.n_groups_eligible	69
-offspring_sex_concordance	sibship	all_resolved.n_groups_incomplete	0
-offspring_sex_concordance	sibship	all_resolved.n_groups_too_small	30
-offspring_sex_concordance	sibship	all_resolved.n_offspring_total	170
-offspring_sex_concordance	sibship	all_resolved.n_offspring_eligible	140
-offspring_sex_concordance	sibship	all_resolved.n_offspring_sex_excluded	0
-offspring_sex_concordance	sibship	all_resolved.n_offspring_in_small_groups	30
-offspring_sex_concordance	sibship	all_resolved.eligible_by_sex_source.input	140
-offspring_sex_concordance	sibship	all_resolved.eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	sibship	all_resolved.eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	sibship	all_resolved.conditioning_male_fraction	0.55
-offspring_sex_concordance	sibship	all_resolved.n_within_group_pairs	73
-offspring_sex_concordance	sibship	all_resolved.max_group_pair_share	0.0411
-offspring_sex_concordance	sibship	all_resolved.observed_pair_concordance	0.5616
-offspring_sex_concordance	sibship	all_resolved.expected_pair_concordance	0.5014
-offspring_sex_concordance	sibship	all_resolved.excess_concordance	0.0602
-offspring_sex_concordance	sibship	all_resolved.direction	over_concordant
-offspring_sex_concordance	sibship	all_resolved.z	1.0356
-offspring_sex_concordance	sibship	all_resolved.p_analytical	0.3004
-offspring_sex_concordance	sibship	male_proportion_distribution.mean	0.5507
-offspring_sex_concordance	sibship	male_proportion_distribution.std	0.3763
-offspring_sex_concordance	sibship	male_proportion_distribution.q1	0.5
-offspring_sex_concordance	sibship	male_proportion_distribution.median	0.5
-offspring_sex_concordance	sibship	male_proportion_distribution.q3	1.0
-offspring_sex_concordance	sibship	male_proportion_distribution.nz	53
-offspring_sex_concordance	sibship	by_group_size.0.group_size	2
-offspring_sex_concordance	sibship	by_group_size.0.n_groups	67
-offspring_sex_concordance	sibship	by_group_size.0.n_offspring	134
-offspring_sex_concordance	sibship	by_group_size.0.observed_pair_concordance	0.5821
-offspring_sex_concordance	sibship	by_group_size.0.expected_pair_concordance	0.5014
-offspring_sex_concordance	sibship	by_group_size.0.excess_concordance	0.0807
-offspring_sex_concordance	sibship	by_group_size.1.group_size	3
-offspring_sex_concordance	sibship	by_group_size.1.n_groups	2
-offspring_sex_concordance	sibship	by_group_size.1.n_offspring	
-offspring_sex_concordance	sibship	by_group_size.1.observed_pair_concordance	
-offspring_sex_concordance	sibship	by_group_size.1.expected_pair_concordance	
-offspring_sex_concordance	sibship	by_group_size.1.excess_concordance	
-offspring_sex_concordance	maternal_offspring_group	computed	True
-offspring_sex_concordance	maternal_offspring_group	skip_reason	
-offspring_sex_concordance	maternal_offspring_group	skip_message	
-offspring_sex_concordance	maternal_offspring_group	n_groups_total	75
+offspring_sex_concordance	sibship	eligible_by_sex.status	intact
+offspring_sex_concordance	sibship	eligible_by_sex.total	140
+offspring_sex_concordance	sibship	eligible_by_sex.bins.male	77
+offspring_sex_concordance	sibship	eligible_by_sex.bins.female	63
+offspring_sex_concordance	sibship	test.observed_pair_concordance	0.5616
+offspring_sex_concordance	sibship	test.excess_concordance	0.0602
+offspring_sex_concordance	sibship	test.direction	over_concordant
+offspring_sex_concordance	sibship	test.z	1.0356
+offspring_sex_concordance	sibship	test.p_analytical	0.3004
+offspring_sex_concordance	sibship	test.p_analytical_holm	0.3004
+offspring_sex_concordance	sibship	test.p_source	permutation
+offspring_sex_concordance	sibship	test.p_holm	0.451
+offspring_sex_concordance	sibship	test.male_proportion_mean	0.5507
+offspring_sex_concordance	sibship	test.male_proportion_sd	0.3763
+offspring_sex_concordance	sibship	test.permutations.requested	50
+offspring_sex_concordance	sibship	test.permutations.completed	50
+offspring_sex_concordance	sibship	test.permutations.seed	3
+offspring_sex_concordance	sibship	test.permutations.p_raw	0.451
+offspring_sex_concordance	sibship	test.permutations.p_holm	0.451
 offspring_sex_concordance	maternal_offspring_group	n_groups_eligible	59
-offspring_sex_concordance	maternal_offspring_group	n_groups_incomplete	0
-offspring_sex_concordance	maternal_offspring_group	n_groups_too_small	16
-offspring_sex_concordance	maternal_offspring_group	n_offspring_total	170
-offspring_sex_concordance	maternal_offspring_group	n_offspring_eligible	154
-offspring_sex_concordance	maternal_offspring_group	n_offspring_sex_excluded	0
-offspring_sex_concordance	maternal_offspring_group	n_offspring_in_small_groups	16
-offspring_sex_concordance	maternal_offspring_group	eligible_by_sex_source.input	154
-offspring_sex_concordance	maternal_offspring_group	eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	maternal_offspring_group	eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	maternal_offspring_group	conditioning_male_fraction	0.5455
-offspring_sex_concordance	maternal_offspring_group	n_within_group_pairs	150
-offspring_sex_concordance	maternal_offspring_group	max_group_pair_share	0.0667
-offspring_sex_concordance	maternal_offspring_group	observed_pair_concordance	0.5667
-offspring_sex_concordance	maternal_offspring_group	expected_pair_concordance	0.5009
-offspring_sex_concordance	maternal_offspring_group	excess_concordance	0.0658
-offspring_sex_concordance	maternal_offspring_group	direction	over_concordant
-offspring_sex_concordance	maternal_offspring_group	z	1.6228
-offspring_sex_concordance	maternal_offspring_group	p_analytical	0.1046
-offspring_sex_concordance	maternal_offspring_group	p_analytical_holm	0.2499
-offspring_sex_concordance	maternal_offspring_group	permutations.requested	50
-offspring_sex_concordance	maternal_offspring_group	permutations.completed	50
-offspring_sex_concordance	maternal_offspring_group	permutations.seed	3
-offspring_sex_concordance	maternal_offspring_group	permutations.p_raw	0.098
-offspring_sex_concordance	maternal_offspring_group	permutations.skip_reason	
-offspring_sex_concordance	maternal_offspring_group	permutations.p_holm	0.2941
-offspring_sex_concordance	maternal_offspring_group	p_source	permutation
-offspring_sex_concordance	maternal_offspring_group	p_holm	0.2941
-offspring_sex_concordance	maternal_offspring_group	all_resolved_excess_concordance	0.0658
-offspring_sex_concordance	maternal_offspring_group	all_resolved.computed	True
-offspring_sex_concordance	maternal_offspring_group	all_resolved.skip_reason	
-offspring_sex_concordance	maternal_offspring_group	all_resolved.skip_message	
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_groups_total	75
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_groups_eligible	59
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_groups_incomplete	0
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_groups_too_small	16
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_offspring_total	170
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_offspring_eligible	154
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_offspring_sex_excluded	0
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_offspring_in_small_groups	16
-offspring_sex_concordance	maternal_offspring_group	all_resolved.eligible_by_sex_source.input	154
-offspring_sex_concordance	maternal_offspring_group	all_resolved.eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	maternal_offspring_group	all_resolved.eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	maternal_offspring_group	all_resolved.conditioning_male_fraction	0.5455
-offspring_sex_concordance	maternal_offspring_group	all_resolved.n_within_group_pairs	150
-offspring_sex_concordance	maternal_offspring_group	all_resolved.max_group_pair_share	0.0667
-offspring_sex_concordance	maternal_offspring_group	all_resolved.observed_pair_concordance	0.5667
-offspring_sex_concordance	maternal_offspring_group	all_resolved.expected_pair_concordance	0.5009
-offspring_sex_concordance	maternal_offspring_group	all_resolved.excess_concordance	0.0658
-offspring_sex_concordance	maternal_offspring_group	all_resolved.direction	over_concordant
-offspring_sex_concordance	maternal_offspring_group	all_resolved.z	1.6228
-offspring_sex_concordance	maternal_offspring_group	all_resolved.p_analytical	0.1046
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.mean	0.5463
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.std	0.3575
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.q1	0.3667
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.median	0.5
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.q3	1.0
-offspring_sex_concordance	maternal_offspring_group	male_proportion_distribution.nz	47
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.group_size	2
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.n_groups	41
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.n_offspring	82
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.observed_pair_concordance	0.5854
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.expected_pair_concordance	0.5009
-offspring_sex_concordance	maternal_offspring_group	by_group_size.0.excess_concordance	0.0845
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.group_size	3
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.n_groups	1
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.n_offspring	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.observed_pair_concordance	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.expected_pair_concordance	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.1.excess_concordance	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.group_size	4
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.n_groups	16
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.n_offspring	64
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.observed_pair_concordance	0.5833
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.expected_pair_concordance	0.5009
-offspring_sex_concordance	maternal_offspring_group	by_group_size.2.excess_concordance	0.0824
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.group_size	5
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.n_groups	1
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.n_offspring	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.observed_pair_concordance	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.expected_pair_concordance	
-offspring_sex_concordance	maternal_offspring_group	by_group_size.3.excess_concordance	
-offspring_sex_concordance	paternal_offspring_group	computed	True
-offspring_sex_concordance	paternal_offspring_group	skip_reason	
-offspring_sex_concordance	paternal_offspring_group	skip_message	
-offspring_sex_concordance	paternal_offspring_group	n_groups_total	80
+offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.status	intact
+offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.total	154
+offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.bins.male	84
+offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.bins.female	70
+offspring_sex_concordance	maternal_offspring_group	test.observed_pair_concordance	0.5667
+offspring_sex_concordance	maternal_offspring_group	test.excess_concordance	0.0658
+offspring_sex_concordance	maternal_offspring_group	test.direction	over_concordant
+offspring_sex_concordance	maternal_offspring_group	test.z	1.6228
+offspring_sex_concordance	maternal_offspring_group	test.p_analytical	0.1046
+offspring_sex_concordance	maternal_offspring_group	test.p_analytical_holm	0.2499
+offspring_sex_concordance	maternal_offspring_group	test.p_source	permutation
+offspring_sex_concordance	maternal_offspring_group	test.p_holm	0.2941
+offspring_sex_concordance	maternal_offspring_group	test.male_proportion_mean	0.5463
+offspring_sex_concordance	maternal_offspring_group	test.male_proportion_sd	0.3575
+offspring_sex_concordance	maternal_offspring_group	test.permutations.requested	50
+offspring_sex_concordance	maternal_offspring_group	test.permutations.completed	50
+offspring_sex_concordance	maternal_offspring_group	test.permutations.seed	3
+offspring_sex_concordance	maternal_offspring_group	test.permutations.p_raw	0.098
+offspring_sex_concordance	maternal_offspring_group	test.permutations.p_holm	0.2941
 offspring_sex_concordance	paternal_offspring_group	n_groups_eligible	64
-offspring_sex_concordance	paternal_offspring_group	n_groups_incomplete	0
-offspring_sex_concordance	paternal_offspring_group	n_groups_too_small	16
-offspring_sex_concordance	paternal_offspring_group	n_offspring_total	170
-offspring_sex_concordance	paternal_offspring_group	n_offspring_eligible	154
-offspring_sex_concordance	paternal_offspring_group	n_offspring_sex_excluded	0
-offspring_sex_concordance	paternal_offspring_group	n_offspring_in_small_groups	16
-offspring_sex_concordance	paternal_offspring_group	eligible_by_sex_source.input	154
-offspring_sex_concordance	paternal_offspring_group	eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	paternal_offspring_group	eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	paternal_offspring_group	conditioning_male_fraction	0.5519
-offspring_sex_concordance	paternal_offspring_group	n_within_group_pairs	128
-offspring_sex_concordance	paternal_offspring_group	max_group_pair_share	0.0469
-offspring_sex_concordance	paternal_offspring_group	observed_pair_concordance	0.5781
-offspring_sex_concordance	paternal_offspring_group	expected_pair_concordance	0.5022
-offspring_sex_concordance	paternal_offspring_group	excess_concordance	0.076
-offspring_sex_concordance	paternal_offspring_group	direction	over_concordant
-offspring_sex_concordance	paternal_offspring_group	z	1.7318
-offspring_sex_concordance	paternal_offspring_group	p_analytical	0.0833
-offspring_sex_concordance	paternal_offspring_group	p_analytical_holm	0.2499
-offspring_sex_concordance	paternal_offspring_group	permutations.requested	50
-offspring_sex_concordance	paternal_offspring_group	permutations.completed	50
-offspring_sex_concordance	paternal_offspring_group	permutations.seed	3
-offspring_sex_concordance	paternal_offspring_group	permutations.p_raw	0.1765
-offspring_sex_concordance	paternal_offspring_group	permutations.skip_reason	
-offspring_sex_concordance	paternal_offspring_group	permutations.p_holm	0.3529
-offspring_sex_concordance	paternal_offspring_group	p_source	permutation
-offspring_sex_concordance	paternal_offspring_group	p_holm	0.3529
-offspring_sex_concordance	paternal_offspring_group	all_resolved_excess_concordance	0.076
-offspring_sex_concordance	paternal_offspring_group	all_resolved.computed	True
-offspring_sex_concordance	paternal_offspring_group	all_resolved.skip_reason	
-offspring_sex_concordance	paternal_offspring_group	all_resolved.skip_message	
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_groups_total	80
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_groups_eligible	64
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_groups_incomplete	0
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_groups_too_small	16
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_offspring_total	170
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_offspring_eligible	154
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_offspring_sex_excluded	0
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_offspring_in_small_groups	16
-offspring_sex_concordance	paternal_offspring_group	all_resolved.eligible_by_sex_source.input	154
-offspring_sex_concordance	paternal_offspring_group	all_resolved.eligible_by_sex_source.imputed_from_missing	0
-offspring_sex_concordance	paternal_offspring_group	all_resolved.eligible_by_sex_source.imputed_from_role	0
-offspring_sex_concordance	paternal_offspring_group	all_resolved.conditioning_male_fraction	0.5519
-offspring_sex_concordance	paternal_offspring_group	all_resolved.n_within_group_pairs	128
-offspring_sex_concordance	paternal_offspring_group	all_resolved.max_group_pair_share	0.0469
-offspring_sex_concordance	paternal_offspring_group	all_resolved.observed_pair_concordance	0.5781
-offspring_sex_concordance	paternal_offspring_group	all_resolved.expected_pair_concordance	0.5022
-offspring_sex_concordance	paternal_offspring_group	all_resolved.excess_concordance	0.076
-offspring_sex_concordance	paternal_offspring_group	all_resolved.direction	over_concordant
-offspring_sex_concordance	paternal_offspring_group	all_resolved.z	1.7318
-offspring_sex_concordance	paternal_offspring_group	all_resolved.p_analytical	0.0833
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.mean	0.5547
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.std	0.3589
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.q1	0.4583
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.median	0.5
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.q3	1.0
-offspring_sex_concordance	paternal_offspring_group	male_proportion_distribution.nz	51
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.group_size	2
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.n_groups	50
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.n_offspring	100
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.observed_pair_concordance	0.56
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.expected_pair_concordance	0.5022
-offspring_sex_concordance	paternal_offspring_group	by_group_size.0.excess_concordance	0.0578
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.group_size	3
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.n_groups	2
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.n_offspring	
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.observed_pair_concordance	
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.expected_pair_concordance	
-offspring_sex_concordance	paternal_offspring_group	by_group_size.1.excess_concordance	
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.group_size	4
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.n_groups	12
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.n_offspring	48
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.observed_pair_concordance	0.6111
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.expected_pair_concordance	0.5022
-offspring_sex_concordance	paternal_offspring_group	by_group_size.2.excess_concordance	0.1089
-relationship_summary	computed		True
-relationship_summary	max_degree		5
-relationship_summary	n_individual_pairs		19900
-relationship_summary	n_related_pairs		7471
-relationship_summary	n_unrelated_pairs		12429
-relationship_summary	related_pair_density		0.3754
-relationship_summary	related_pairs_by_closest_degree	1	413
-relationship_summary	related_pairs_by_closest_degree	2	917
-relationship_summary	related_pairs_by_closest_degree	3	1701
-relationship_summary	related_pairs_by_closest_degree	4	2348
-relationship_summary	related_pairs_by_closest_degree	5	2092
-relationship_summary	closest_relationship_per_individual	none	0
-relationship_summary	closest_relationship_per_individual	1	200
-relationship_summary	closest_relationship_per_individual	2	0
-relationship_summary	closest_relationship_per_individual	3	0
-relationship_summary	closest_relationship_per_individual	4	0
-relationship_summary	closest_relationship_per_individual	5	0
-relationship_summary	relatives_by_degree	5.mean	20.92
-relationship_summary	relatives_by_degree	5.std	16.4049
-relationship_summary	relatives_by_degree	5.q1	4
-relationship_summary	relatives_by_degree	5.median	22
-relationship_summary	relatives_by_degree	5.q3	35
-relationship_summary	relatives_by_degree	5.nz	156
-relationship_summary	relatives_by_degree	4.mean	23.48
-relationship_summary	relatives_by_degree	4.std	11.5871
-relationship_summary	relatives_by_degree	4.q1	15
-relationship_summary	relatives_by_degree	4.median	22
-relationship_summary	relatives_by_degree	4.q3	32
-relationship_summary	relatives_by_degree	4.nz	198
-relationship_summary	relatives_by_degree	3.mean	17.01
-relationship_summary	relatives_by_degree	3.std	6.2647
-relationship_summary	relatives_by_degree	3.q1	13
-relationship_summary	relatives_by_degree	3.median	17
-relationship_summary	relatives_by_degree	3.q3	21
-relationship_summary	relatives_by_degree	3.nz	200
-relationship_summary	relatives_by_degree	2.mean	9.17
-relationship_summary	relatives_by_degree	2.std	3.4013
-relationship_summary	relatives_by_degree	2.q1	7
-relationship_summary	relatives_by_degree	2.median	9
-relationship_summary	relatives_by_degree	2.q3	11
-relationship_summary	relatives_by_degree	2.nz	200
-relationship_summary	relatives_by_degree	1.mean	4.13
-relationship_summary	relatives_by_degree	1.std	1.5476
-relationship_summary	relatives_by_degree	1.q1	2
-relationship_summary	relatives_by_degree	1.median	4
-relationship_summary	relatives_by_degree	1.q3	5
-relationship_summary	relatives_by_degree	1.nz	200
-relationship_summary	relatives_total	mean	74.71
-relationship_summary	relatives_total	std	29.9263
-relationship_summary	relatives_total	q1	56
-relationship_summary	relatives_total	median	78
-relationship_summary	relatives_total	q3	99
-relationship_summary	relatives_total	nz	200
-relationship_summary	related_pair_density_by_depth	0.depth	0
-relationship_summary	related_pair_density_by_depth	0.n	30
-relationship_summary	related_pair_density_by_depth	0.n_individual_pairs	435
-relationship_summary	related_pair_density_by_depth	0.n_related_pairs	0
-relationship_summary	related_pair_density_by_depth	0.n_unrelated_pairs	435
-relationship_summary	related_pair_density_by_depth	0.related_pair_density	0.0
-relationship_summary	related_pair_density_by_depth	1.depth	1
-relationship_summary	related_pair_density_by_depth	1.n	40
-relationship_summary	related_pair_density_by_depth	1.n_individual_pairs	780
-relationship_summary	related_pair_density_by_depth	1.n_related_pairs	60
-relationship_summary	related_pair_density_by_depth	1.n_unrelated_pairs	720
-relationship_summary	related_pair_density_by_depth	1.related_pair_density	0.0769
-relationship_summary	related_pair_density_by_depth	2.depth	2
-relationship_summary	related_pair_density_by_depth	2.n	50
-relationship_summary	related_pair_density_by_depth	2.n_individual_pairs	1225
-relationship_summary	related_pair_density_by_depth	2.n_related_pairs	445
-relationship_summary	related_pair_density_by_depth	2.n_unrelated_pairs	780
-relationship_summary	related_pair_density_by_depth	2.related_pair_density	0.3633
-relationship_summary	related_pair_density_by_depth	3.depth	3
-relationship_summary	related_pair_density_by_depth	3.n	50
-relationship_summary	related_pair_density_by_depth	3.n_individual_pairs	1225
-relationship_summary	related_pair_density_by_depth	3.n_related_pairs	816
-relationship_summary	related_pair_density_by_depth	3.n_unrelated_pairs	409
-relationship_summary	related_pair_density_by_depth	3.related_pair_density	0.6661
-relationship_summary	related_pair_density_by_depth	4.depth	4
-relationship_summary	related_pair_density_by_depth	4.n	30
-relationship_summary	related_pair_density_by_depth	4.n_individual_pairs	435
-relationship_summary	related_pair_density_by_depth	4.n_related_pairs	232
-relationship_summary	related_pair_density_by_depth	4.n_unrelated_pairs	203
-relationship_summary	related_pair_density_by_depth	4.related_pair_density	0.5333
-reproduction	n_reproductive		155
-reproduction	frac_reproductive		0.775
-reproduction	n_terminal		45
-reproduction	frac_terminal		0.225
-reproduction	frac_with_full_sib		0.8235
-reproduction	offspring_count	mean	1.7
-reproduction	offspring_count	std	1.2641
-reproduction	offspring_count	q1	1
-reproduction	offspring_count	median	2
-reproduction	offspring_count	q3	2
-reproduction	offspring_count	nz	155
-reproduction	offspring_count_hist	0	0.225
-reproduction	offspring_count_hist	1	0.16
-reproduction	offspring_count_hist	2	0.455
-reproduction	offspring_count_hist	3	0.015
-reproduction	offspring_count_hist	4+	0.145
-reproduction	offspring_count_hist_male	0	0.2593
-reproduction	offspring_count_hist_male	1	0.1481
-reproduction	offspring_count_hist_male	2	0.463
-reproduction	offspring_count_hist_male	3	0.0185
-reproduction	offspring_count_hist_male	4+	0.1111
-reproduction	offspring_count_hist_female	0	0.1848
-reproduction	offspring_count_hist_female	1	0.1739
-reproduction	offspring_count_hist_female	2	0.4457
-reproduction	offspring_count_hist_female	3	0.0109
-reproduction	offspring_count_hist_female	4+	0.1848
-reproduction	mate_count	mean	0.99
-reproduction	mate_count	std	0.6649
-reproduction	mate_count	q1	1
-reproduction	mate_count	median	1
-reproduction	mate_count	q3	1
-reproduction	mate_count	nz	155
-reproduction	mate_count_male	mean	0.9167
-reproduction	mate_count_male	std	0.6575
-reproduction	mate_count_male	q1	0
-reproduction	mate_count_male	median	1
-reproduction	mate_count_male	q3	1
-reproduction	mate_count_male	nz	80
-reproduction	mate_count_female	mean	1.0761
-reproduction	mate_count_female	std	0.6669
-reproduction	mate_count_female	q1	1
-reproduction	mate_count_female	median	1
-reproduction	mate_count_female	q3	2
-reproduction	mate_count_female	nz	75
-genealogy	descendant_paths	mean	9.9
-genealogy	descendant_paths	std	15.2273
-genealogy	descendant_paths	q1	1
-genealogy	descendant_paths	median	4
-genealogy	descendant_paths	q3	12
-genealogy	descendant_paths	nz	155
-genealogy	distinct_ancestors	mean	9.065
-genealogy	distinct_ancestors	std	8.4533
-genealogy	distinct_ancestors	q1	2
-genealogy	distinct_ancestors	median	6
-genealogy	distinct_ancestors	q3	14
-genealogy	distinct_ancestors	nz	170
-founder_contribution	n_founders_with_descendants		30
-founder_contribution	n_founders_without_descendants		0
-founder_contribution	frac_founders_with_descendants		1.0
-founder_contribution	descendant_paths_per_founder	mean	38.6667
-founder_contribution	descendant_paths_per_founder	std	18.6424
-founder_contribution	descendant_paths_per_founder	q1	22
-founder_contribution	descendant_paths_per_founder	median	35
-founder_contribution	descendant_paths_per_founder	q3	50
-founder_contribution	descendant_paths_per_founder	nz	30
+offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.status	intact
+offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.total	154
+offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.bins.male	85
+offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.bins.female	69
+offspring_sex_concordance	paternal_offspring_group	test.observed_pair_concordance	0.5781
+offspring_sex_concordance	paternal_offspring_group	test.excess_concordance	0.076
+offspring_sex_concordance	paternal_offspring_group	test.direction	over_concordant
+offspring_sex_concordance	paternal_offspring_group	test.z	1.7318
+offspring_sex_concordance	paternal_offspring_group	test.p_analytical	0.0833
+offspring_sex_concordance	paternal_offspring_group	test.p_analytical_holm	0.2499
+offspring_sex_concordance	paternal_offspring_group	test.p_source	permutation
+offspring_sex_concordance	paternal_offspring_group	test.p_holm	0.3529
+offspring_sex_concordance	paternal_offspring_group	test.male_proportion_mean	0.5547
+offspring_sex_concordance	paternal_offspring_group	test.male_proportion_sd	0.3589
+offspring_sex_concordance	paternal_offspring_group	test.permutations.requested	50
+offspring_sex_concordance	paternal_offspring_group	test.permutations.completed	50
+offspring_sex_concordance	paternal_offspring_group	test.permutations.seed	3
+offspring_sex_concordance	paternal_offspring_group	test.permutations.p_raw	0.1765
+offspring_sex_concordance	paternal_offspring_group	test.permutations.p_holm	0.3529
+reproduction	by_status	status	blanked
+reproduction	by_status	total	200
 founder_contribution	effective_founders_by_descendant_paths		24.4957
-founder_summary	computed		True
-founder_summary	by_depth	0.depth	0
-founder_summary	by_depth	0.n	30
-founder_summary	by_depth	0.active_founders	30
-founder_summary	by_depth	0.active_founder_frac	1.0
-founder_summary	by_depth	0.effective_founders_by_descendants	30.0
-founder_summary	by_depth	0.founder_ancestors.mean	1.0
-founder_summary	by_depth	0.founder_ancestors.std	0.0
-founder_summary	by_depth	0.founder_ancestors.q1	1
-founder_summary	by_depth	0.founder_ancestors.median	1
-founder_summary	by_depth	0.founder_ancestors.q3	1
-founder_summary	by_depth	0.founder_ancestors.nz	30
-founder_summary	by_depth	1.depth	1
-founder_summary	by_depth	1.n	40
-founder_summary	by_depth	1.active_founders	30
-founder_summary	by_depth	1.active_founder_frac	1.0
-founder_summary	by_depth	1.effective_founders_by_descendants	26.6667
-founder_summary	by_depth	1.founder_ancestors.mean	2.0
-founder_summary	by_depth	1.founder_ancestors.std	0.0
-founder_summary	by_depth	1.founder_ancestors.q1	2
-founder_summary	by_depth	1.founder_ancestors.median	2
-founder_summary	by_depth	1.founder_ancestors.q3	2
-founder_summary	by_depth	1.founder_ancestors.nz	40
-founder_summary	by_depth	2.depth	2
-founder_summary	by_depth	2.n	50
-founder_summary	by_depth	2.active_founders	30
-founder_summary	by_depth	2.active_founder_frac	1.0
-founder_summary	by_depth	2.effective_founders_by_descendants	24.8756
-founder_summary	by_depth	2.founder_ancestors.mean	4.0
-founder_summary	by_depth	2.founder_ancestors.std	0.0
-founder_summary	by_depth	2.founder_ancestors.q1	4
-founder_summary	by_depth	2.founder_ancestors.median	4
-founder_summary	by_depth	2.founder_ancestors.q3	4
-founder_summary	by_depth	2.founder_ancestors.nz	50
-founder_summary	by_depth	3.depth	3
-founder_summary	by_depth	3.n	50
-founder_summary	by_depth	3.active_founders	30
-founder_summary	by_depth	3.active_founder_frac	1.0
-founder_summary	by_depth	3.effective_founders_by_descendants	24.7568
-founder_summary	by_depth	3.founder_ancestors.mean	7.48
-founder_summary	by_depth	3.founder_ancestors.std	0.7887
-founder_summary	by_depth	3.founder_ancestors.q1	7
-founder_summary	by_depth	3.founder_ancestors.median	8
-founder_summary	by_depth	3.founder_ancestors.q3	8
-founder_summary	by_depth	3.founder_ancestors.nz	50
-founder_summary	by_depth	4.depth	4
-founder_summary	by_depth	4.n	30
-founder_summary	by_depth	4.active_founders	30
-founder_summary	by_depth	4.active_founder_frac	1.0
-founder_summary	by_depth	4.effective_founders_by_descendants	25.1032
-founder_summary	by_depth	4.founder_ancestors.mean	12.3667
-founder_summary	by_depth	4.founder_ancestors.std	1.9025
-founder_summary	by_depth	4.founder_ancestors.q1	12
-founder_summary	by_depth	4.founder_ancestors.median	13
-founder_summary	by_depth	4.founder_ancestors.q3	13
-founder_summary	by_depth	4.founder_ancestors.nz	30
-founder_summary	bottleneck	min_active_founders	30
-founder_summary	bottleneck	min_active_founder_frac	1.0
-founder_summary	bottleneck	min_active_depths.0	0
-founder_summary	bottleneck	min_active_depths.1	1
-founder_summary	bottleneck	min_active_depths.2	2
-founder_summary	bottleneck	min_active_depths.3	3
-founder_summary	bottleneck	min_active_depths.4	4
-founder_summary	bottleneck	min_effective_founders_by_descendants	24.7568
-founder_summary	bottleneck	min_effective_depths.0	3
-components	singletons		0
-components	singletons_frac		0.0
-components	size_dist	1	0.0
-components	size_dist	2	0.0
-components	size_dist	3-9	0.0
-components	size_dist	10-99	0.0
-components	size_dist	100+	1.0
-components	component_size	mean	200.0
-components	component_size	std	0.0
-components	component_size	q1	200
-components	component_size	median	200
-components	component_size	q3	200
-components	component_size	nz	1
-sex_summary	female	n	92
-sex_summary	female	n_founders	15
-sex_summary	female	n_reproductive	75
-sex_summary	female	frac_reproductive	0.8152
-sex_summary	female	n_terminal	17
-sex_summary	female	offspring_count.mean	1.8478
-sex_summary	female	offspring_count.std	1.3088
-sex_summary	female	offspring_count.q1	1
-sex_summary	female	offspring_count.median	2
-sex_summary	female	offspring_count.q3	2
-sex_summary	female	offspring_count.nz	75
-sex_summary	female	mate_count.mean	1.0761
-sex_summary	female	mate_count.std	0.6669
-sex_summary	female	mate_count.q1	1
-sex_summary	female	mate_count.median	1
-sex_summary	female	mate_count.q3	2
-sex_summary	female	mate_count.nz	75
-sex_summary	female	depth.mean	2.0543
-sex_summary	female	depth.std	1.329
-sex_summary	female	depth.q1	1
-sex_summary	female	depth.median	2
-sex_summary	female	depth.q3	3
-sex_summary	female	depth.nz	77
-sex_summary	female	F.mean	0.011
-sex_summary	female	F.std	0.0314
-sex_summary	female	F.q1	0.0
-sex_summary	female	F.median	0.0
-sex_summary	female	F.q3	0.0
-sex_summary	female	F.nz	20
-sex_summary	female	n_inbred	20
-sex_summary	male	n	108
-sex_summary	male	n_founders	15
-sex_summary	male	n_reproductive	80
-sex_summary	male	frac_reproductive	0.7407
-sex_summary	male	n_terminal	28
-sex_summary	male	offspring_count.mean	1.5741
-sex_summary	male	offspring_count.std	1.2167
-sex_summary	male	offspring_count.q1	0
-sex_summary	male	offspring_count.median	2
-sex_summary	male	offspring_count.q3	2
-sex_summary	male	offspring_count.nz	80
-sex_summary	male	mate_count.mean	0.9167
-sex_summary	male	mate_count.std	0.6575
-sex_summary	male	mate_count.q1	0
-sex_summary	male	mate_count.median	1
-sex_summary	male	mate_count.q3	1
-sex_summary	male	mate_count.nz	80
-sex_summary	male	depth.mean	2.0463
-sex_summary	male	depth.std	1.2559
-sex_summary	male	depth.q1	1
-sex_summary	male	depth.median	2
-sex_summary	male	depth.q3	3
-sex_summary	male	depth.nz	93
-sex_summary	male	F.mean	0.0121
-sex_summary	male	F.std	0.0373
-sex_summary	male	F.q1	0.0
-sex_summary	male	F.median	0.0
-sex_summary	male	F.q3	0.0
-sex_summary	male	F.nz	23
-sex_summary	male	n_inbred	23
-depth_summary	0	depth	0
-depth_summary	0	n	30
-depth_summary	0	n_male	15
-depth_summary	0	n_female	15
-depth_summary	0	n_founders	30
-depth_summary	0	n_reproductive	30
-depth_summary	0	frac_reproductive	1.0
-depth_summary	0	n_terminal	0
-depth_summary	0	offspring_count.mean	2.6667
-depth_summary	0	offspring_count.std	0.9589
-depth_summary	0	offspring_count.q1	2
-depth_summary	0	offspring_count.median	2
-depth_summary	0	offspring_count.q3	4
-depth_summary	0	offspring_count.nz	30
-depth_summary	0	offspring_count_hist.0	0.0
-depth_summary	0	offspring_count_hist.1	0.0
-depth_summary	0	offspring_count_hist.2	0.6667
-depth_summary	0	offspring_count_hist.3	0.0
-depth_summary	0	offspring_count_hist.4+	0.3333
-depth_summary	0	mate_count.mean	1.3333
-depth_summary	0	mate_count.std	0.4795
-depth_summary	0	mate_count.q1	1
-depth_summary	0	mate_count.median	1
-depth_summary	0	mate_count.q3	2
-depth_summary	0	mate_count.nz	30
-depth_summary	0	mean_distinct_ancestors	0.0
-depth_summary	0	mean_descendant_paths	38.6667
-depth_summary	0	mean_F	0.0
-depth_summary	0	max_F	0.0
-depth_summary	0	n_inbred	0
-depth_summary	1	depth	1
-depth_summary	1	n	40
-depth_summary	1	n_male	21
-depth_summary	1	n_female	19
-depth_summary	1	n_founders	0
-depth_summary	1	n_reproductive	39
-depth_summary	1	frac_reproductive	0.975
-depth_summary	1	n_terminal	
-depth_summary	1	offspring_count.mean	2.5
-depth_summary	1	offspring_count.std	0.9871
-depth_summary	1	offspring_count.q1	2
-depth_summary	1	offspring_count.median	2
-depth_summary	1	offspring_count.q3	4
-depth_summary	1	offspring_count.nz	39
-depth_summary	1	offspring_count_hist.0	0.025
-depth_summary	1	offspring_count_hist.1	0.0
-depth_summary	1	offspring_count_hist.2	0.7
-depth_summary	1	offspring_count_hist.3	0.0
-depth_summary	1	offspring_count_hist.4+	0.275
-depth_summary	1	mate_count.mean	1.25
-depth_summary	1	mate_count.std	0.4935
-depth_summary	1	mate_count.q1	1
-depth_summary	1	mate_count.median	1
-depth_summary	1	mate_count.q3	2
-depth_summary	1	mate_count.nz	39
-depth_summary	1	mean_distinct_ancestors	2.0
-depth_summary	1	mean_descendant_paths	13.5
-depth_summary	1	mean_F	0.0
-depth_summary	1	max_F	0.0
-depth_summary	1	n_inbred	0
-depth_summary	2	depth	2
-depth_summary	2	n	50
-depth_summary	2	n_male	32
-depth_summary	2	n_female	18
-depth_summary	2	n_founders	0
-depth_summary	2	n_reproductive	40
-depth_summary	2	frac_reproductive	0.8
-depth_summary	2	n_terminal	10
-depth_summary	2	offspring_count.mean	2.0
-depth_summary	2	offspring_count.std	1.2778
-depth_summary	2	offspring_count.q1	2
-depth_summary	2	offspring_count.median	2
-depth_summary	2	offspring_count.q3	2
-depth_summary	2	offspring_count.nz	40
-depth_summary	2	offspring_count_hist.0	0.2
-depth_summary	2	offspring_count_hist.1	0.0
-depth_summary	2	offspring_count_hist.2	0.58
-depth_summary	2	offspring_count_hist.3	0.06
-depth_summary	2	offspring_count_hist.4+	0.16
-depth_summary	2	mate_count.mean	0.96
-depth_summary	2	mate_count.std	0.6047
-depth_summary	2	mate_count.q1	1
-depth_summary	2	mate_count.median	1
-depth_summary	2	mate_count.q3	1
-depth_summary	2	mate_count.nz	40
-depth_summary	2	mean_distinct_ancestors	6.0
-depth_summary	2	mean_descendant_paths	4.4
-depth_summary	2	mean_F	0.0
-depth_summary	2	max_F	0.0
-depth_summary	2	n_inbred	0
-depth_summary	3	depth	3
-depth_summary	3	n	50
-depth_summary	3	n_male	24
-depth_summary	3	n_female	26
-depth_summary	3	n_founders	0
-depth_summary	3	n_reproductive	46
-depth_summary	3	frac_reproductive	0.92
-depth_summary	3	n_terminal	
-depth_summary	3	offspring_count.mean	1.2
-depth_summary	3	offspring_count.std	0.5714
-depth_summary	3	offspring_count.q1	1
-depth_summary	3	offspring_count.median	1
-depth_summary	3	offspring_count.q3	2
-depth_summary	3	offspring_count.nz	46
-depth_summary	3	offspring_count_hist.0	0.08
-depth_summary	3	offspring_count_hist.1	0.64
-depth_summary	3	offspring_count_hist.2	0.28
-depth_summary	3	offspring_count_hist.3	0.0
-depth_summary	3	offspring_count_hist.4+	0.0
-depth_summary	3	mate_count.mean	1.2
-depth_summary	3	mate_count.std	0.5714
-depth_summary	3	mate_count.q1	1
-depth_summary	3	mate_count.median	1
-depth_summary	3	mate_count.q3	2
-depth_summary	3	mate_count.nz	46
-depth_summary	3	mean_distinct_ancestors	13.48
-depth_summary	3	mean_descendant_paths	1.2
-depth_summary	3	mean_F	0.0163
-depth_summary	3	max_F	0.0625
-depth_summary	3	n_inbred	17
-depth_summary	4	depth	4
-depth_summary	4	n	30
-depth_summary	4	n_male	16
-depth_summary	4	n_female	14
-depth_summary	4	n_founders	0
-depth_summary	4	n_reproductive	0
-depth_summary	4	frac_reproductive	0.0
-depth_summary	4	n_terminal	30
-depth_summary	4	offspring_count.mean	0.0
-depth_summary	4	offspring_count.std	0.0
-depth_summary	4	offspring_count.q1	0
-depth_summary	4	offspring_count.median	0
-depth_summary	4	offspring_count.q3	0
-depth_summary	4	offspring_count.nz	0
-depth_summary	4	offspring_count_hist.0	1.0
-depth_summary	4	offspring_count_hist.1	0.0
-depth_summary	4	offspring_count_hist.2	0.0
-depth_summary	4	offspring_count_hist.3	0.0
-depth_summary	4	offspring_count_hist.4+	0.0
-depth_summary	4	mate_count.mean	0.0
-depth_summary	4	mate_count.std	0.0
-depth_summary	4	mate_count.q1	0
-depth_summary	4	mate_count.median	0
-depth_summary	4	mate_count.q3	0
-depth_summary	4	mate_count.nz	0
-depth_summary	4	mean_distinct_ancestors	25.3
-depth_summary	4	mean_descendant_paths	0.0
-depth_summary	4	mean_F	0.0503
-depth_summary	4	max_F	0.25
-depth_summary	4	n_inbred	26
-meta	pairs_engine		rust_streaming_burden
-relationship_pairs	MZ		0
-relationship_pairs	MO		170
-relationship_pairs	FO		170
-relationship_pairs	FS		73
-relationship_pairs	MHS		77
-relationship_pairs	PHS		55
-relationship_pairs	GP		514
-relationship_pairs	Av		271
-relationship_pairs	GGP		588
-relationship_pairs	HAv		453
-relationship_pairs	GAv		366
-relationship_pairs	1C		294
-relationship_pairs	GGGP		371
-relationship_pairs	HGAv		412
-relationship_pairs	GGAv		282
-relationship_pairs	H1C		427
-relationship_pairs	1C1R		856
-relationship_pairs	G3GP		0
-relationship_pairs	HGGAv		160
-relationship_pairs	G3Av		0
-relationship_pairs	H1C1R		697
-relationship_pairs	1C2R		608
-relationship_pairs	2C		627
-relationship_pairs	PO		340
-relationship_pairs	by_degree	0	0
-relationship_pairs	by_degree	1	413
-relationship_pairs	by_degree	2	917
-relationship_pairs	by_degree	3	1701
-relationship_pairs	by_degree	4	2348
-relationship_pairs	by_degree	5	2092
-inbreeding	n_inbred		43
-inbreeding	frac_inbred		0.215
-inbreeding	mean_F		0.0116
-inbreeding	max_F		0.25
-inbreeding	hist	0	0.785
-inbreeding	hist	<0.0625	0.185
-inbreeding	hist	<0.125	
-inbreeding	hist	<0.25	
-inbreeding	hist	<1	0.0
+relationship_pairs	engine		rust_relatives_per_person
+relationship_pairs	by_code	status	blanked
+relationship_pairs	by_code	total	7131
+inbreeding	inbred	status	blanked
+inbreeding	inbred	total	200
+inbreeding	F_hist	status	blanked
+inbreeding	F_hist	total	200
+inbreeding	mean_F_inbred		
+inbreeding	sd_F_inbred		
+sex_summary	reproductive	status	blanked
+sex_summary	reproductive	total	200
+sex_summary	inbred	status	blanked
+sex_summary	inbred	total	200
+depth_summary	sex	status	intact
+depth_summary	sex	total	200
+depth_summary	sex	cells.0.female	15
+depth_summary	sex	cells.0.male	15
+depth_summary	sex	cells.1.female	19
+depth_summary	sex	cells.1.male	21
+depth_summary	sex	cells.2.female	18
+depth_summary	sex	cells.2.male	32
+depth_summary	sex	cells.3.female	26
+depth_summary	sex	cells.3.male	24
+depth_summary	sex	cells.4.female	14
+depth_summary	sex	cells.4.male	16
+depth_summary	reproductive	status	blanked
+depth_summary	reproductive	total	200
+depth_summary	inbred	status	blanked
+depth_summary	inbred	total	200
+depth_summary	parents_recorded	status	intact
+depth_summary	parents_recorded	total	200
+depth_summary	parents_recorded	cells.0.both	0
+depth_summary	parents_recorded	cells.0.mother_only	0
+depth_summary	parents_recorded	cells.0.father_only	0
+depth_summary	parents_recorded	cells.0.none	30
+depth_summary	parents_recorded	cells.1.both	40
+depth_summary	parents_recorded	cells.1.mother_only	0
+depth_summary	parents_recorded	cells.1.father_only	0
+depth_summary	parents_recorded	cells.1.none	0
+depth_summary	parents_recorded	cells.2.both	50
+depth_summary	parents_recorded	cells.2.mother_only	0
+depth_summary	parents_recorded	cells.2.father_only	0
+depth_summary	parents_recorded	cells.2.none	0
+depth_summary	parents_recorded	cells.3.both	50
+depth_summary	parents_recorded	cells.3.mother_only	0
+depth_summary	parents_recorded	cells.3.father_only	0
+depth_summary	parents_recorded	cells.3.none	0
+depth_summary	parents_recorded	cells.4.both	30
+depth_summary	parents_recorded	cells.4.mother_only	0
+depth_summary	parents_recorded	cells.4.father_only	0
+depth_summary	parents_recorded	cells.4.none	0
+depth_summary	mean_F		
+depth_summary	mean_distinct_ancestors	0	0.0
+depth_summary	mean_distinct_ancestors	1	2.0
+depth_summary	mean_distinct_ancestors	2	6.0
+depth_summary	mean_distinct_ancestors	3	13.48
+depth_summary	mean_distinct_ancestors	4	25.3
+depth_summary	mean_descendant_paths		
 
-=== summary.yaml ===
+=== summary.txt ===
 input: <input>
 command: <command>
 version: <version>
 n_total: 200
+safe_attempt_min_cell: 5
 pedigree:
   structure:
-    size_structure:
-      n_founders: 30
-      founder_frac: 0.15
-      n_nonfounders: 170
-      nonfounder_frac: 0.85
-      n_male: 108
-      n_female: 92
-      n_mother_links: 170
-      n_father_links: 170
-      n_parent_child_edges: 340
-      n_with_both_parents: 170
-      n_with_mother_only: 0
-      n_with_father_only: 0
-      n_half_founders: 0
-      max_depth: 4
-      mean_depth: 2.05
-      median_depth: 2.0
-      depth_counts:
-      - 30
-      - 40
-      - 50
-      - 50
-      - 30
-      n_components: 1
-      largest_component: 200
-      largest_component_frac: 1.0
-      next_components: []
-    components:
-      singletons: 0
-      singletons_frac: 0.0
-      size_dist:
-        '1': 0.0
-        '2': 0.0
-        3-9: 0.0
-        10-99: 0.0
-        100+: 1.0
-      component_size:
-        mean: 200.0
-        std: 0.0
-        q1: 200
-        median: 200
-        q3: 200
-        nz: 1
     max_degree_enumerated: 5
-  demography:
-    sibship_size:
-      n_sibships: 99
-      mean: 1.7172
-      median: 2.0
-      q1: 1.0
-      q3: 2.0
-      size_dist:
-        '1': 0.303
-        '2': 0.6768
-        '3': 0.0202
-        4+: 0.0
-    mating_pairs:
-      n_pairs: 99
-      n_pairs_with_multiple_children: 69
-      frac_pairs_with_multiple_children: 0.697
-      children_per_pair:
-        mean: 1.7172
-        std: 0.4957
+    size_structure:
+      sex:
+        status: intact
+        total: 200
+        bins:
+          female: 92
+          male: 108
+          unknown: 0
+      parents_known:
+        status: intact
+        total: 200
+        bins:
+          both: 170
+          mother_only: 0
+          father_only: 0
+          founder_with_descendants: 30
+          founder_without_descendants: 0
+      depth:
+        status: intact
+        total: 200
+        bins:
+          '0': 30
+          '1': 40
+          '2': 50
+          '3': 50
+          '4': 30
+      depth_stats:
+        mean: 2.05
+        std: 1.2868
         q1: 1
         median: 2
-        q3: 2
-        nz: 99
-      effective_pairs_by_children: 91.4557
+        q3: 3
+    components:
+      n_components: null
+  demography:
+    mating_pairs:
+      n_pairs: 99
     offspring_sex_concordance:
       null_model:
         method: fixed_margin_exchangeability
@@ -1502,364 +331,89 @@ pedigree:
         sex_probability: conditioned_margin
         min_group_size: 2
         headline_eligibility: sex_source_input
-        sensitivity_eligibility: all_resolved_sex
         multiplicity: holm_across_groupings
       sibship:
-        computed: true
-        skip_reason: null
         n_groups_eligible: 69
-        n_offspring_eligible: 140
-        excess_concordance: 0.0602
-        direction: over_concordant
-        p_holm: 0.451
-        p_source: permutation
-        max_group_pair_share: 0.0411
-        all_resolved_excess_concordance: 0.0602
+        test:
+          observed_pair_concordance: 0.5616
+          excess_concordance: 0.0602
+          direction: over_concordant
+          z: 1.0356
+          p_analytical: 0.3004
+          p_analytical_holm: 0.3004
+          p_source: permutation
+          p_holm: 0.451
+          male_proportion_mean: 0.5507
+          male_proportion_sd: 0.3763
+          permutations:
+            requested: 50
+            completed: 50
+            seed: 3
+            p_raw: 0.451
+            p_holm: 0.451
       maternal_offspring_group:
-        computed: true
-        skip_reason: null
         n_groups_eligible: 59
-        n_offspring_eligible: 154
-        excess_concordance: 0.0658
-        direction: over_concordant
-        p_holm: 0.2941
-        p_source: permutation
-        max_group_pair_share: 0.0667
-        all_resolved_excess_concordance: 0.0658
+        test:
+          observed_pair_concordance: 0.5667
+          excess_concordance: 0.0658
+          direction: over_concordant
+          z: 1.6228
+          p_analytical: 0.1046
+          p_analytical_holm: 0.2499
+          p_source: permutation
+          p_holm: 0.2941
+          male_proportion_mean: 0.5463
+          male_proportion_sd: 0.3575
+          permutations:
+            requested: 50
+            completed: 50
+            seed: 3
+            p_raw: 0.098
+            p_holm: 0.2941
       paternal_offspring_group:
-        computed: true
-        skip_reason: null
         n_groups_eligible: 64
-        n_offspring_eligible: 154
-        excess_concordance: 0.076
-        direction: over_concordant
-        p_holm: 0.3529
-        p_source: permutation
-        max_group_pair_share: 0.0469
-        all_resolved_excess_concordance: 0.076
+        test:
+          observed_pair_concordance: 0.5781
+          excess_concordance: 0.076
+          direction: over_concordant
+          z: 1.7318
+          p_analytical: 0.0833
+          p_analytical_holm: 0.2499
+          p_source: permutation
+          p_holm: 0.3529
+          male_proportion_mean: 0.5547
+          male_proportion_sd: 0.3589
+          permutations:
+            requested: 50
+            completed: 50
+            seed: 3
+            p_raw: 0.1765
+            p_holm: 0.3529
   individuals:
     reproduction:
-      n_reproductive: 155
-      frac_reproductive: 0.775
-      n_terminal: 45
-      frac_terminal: 0.225
-      frac_with_full_sib: 0.8235
-      offspring_count:
-        mean: 1.7
-        std: 1.2641
-        q1: 1
-        median: 2
-        q3: 2
-        nz: 155
-      offspring_count_hist:
-        '0': 0.225
-        '1': 0.16
-        '2': 0.455
-        '3': 0.015
-        4+: 0.145
-      offspring_count_hist_male:
-        '0': 0.2593
-        '1': 0.1481
-        '2': 0.463
-        '3': 0.0185
-        4+: 0.1111
-      offspring_count_hist_female:
-        '0': 0.1848
-        '1': 0.1739
-        '2': 0.4457
-        '3': 0.0109
-        4+: 0.1848
-      mate_count:
-        mean: 0.99
-        std: 0.6649
-        q1: 1
-        median: 1
-        q3: 1
-        nz: 155
-      mate_count_male:
-        mean: 0.9167
-        std: 0.6575
-        q1: 0
-        median: 1
-        q3: 1
-        nz: 80
-      mate_count_female:
-        mean: 1.0761
-        std: 0.6669
-        q1: 1
-        median: 1
-        q3: 2
-        nz: 75
-    genealogy:
-      descendant_paths:
-        mean: 9.9
-        std: 15.2273
-        q1: 1
-        median: 4
-        q3: 12
-        nz: 155
-      distinct_ancestors:
-        mean: 9.065
-        std: 8.4533
-        q1: 2
-        median: 6
-        q3: 14
-        nz: 170
+      by_status:
+        status: blanked
+        total: 200
   founders:
     founder_contribution:
-      n_founders_with_descendants: 30
-      n_founders_without_descendants: 0
-      frac_founders_with_descendants: 1.0
-      descendant_paths_per_founder:
-        mean: 38.6667
-        std: 18.6424
-        q1: 22
-        median: 35
-        q3: 50
-        nz: 30
       effective_founders_by_descendant_paths: 24.4957
-    founder_summary:
-      computed: true
-      by_depth:
-      - depth: 0
-        n: 30
-        active_founders: 30
-        active_founder_frac: 1.0
-        effective_founders_by_descendants: 30.0
-        founder_ancestors:
-          mean: 1.0
-          std: 0.0
-          q1: 1
-          median: 1
-          q3: 1
-          nz: 30
-      - depth: 1
-        n: 40
-        active_founders: 30
-        active_founder_frac: 1.0
-        effective_founders_by_descendants: 26.6667
-        founder_ancestors:
-          mean: 2.0
-          std: 0.0
-          q1: 2
-          median: 2
-          q3: 2
-          nz: 40
-      - depth: 2
-        n: 50
-        active_founders: 30
-        active_founder_frac: 1.0
-        effective_founders_by_descendants: 24.8756
-        founder_ancestors:
-          mean: 4.0
-          std: 0.0
-          q1: 4
-          median: 4
-          q3: 4
-          nz: 50
-      - depth: 3
-        n: 50
-        active_founders: 30
-        active_founder_frac: 1.0
-        effective_founders_by_descendants: 24.7568
-        founder_ancestors:
-          mean: 7.48
-          std: 0.7887
-          q1: 7
-          median: 8
-          q3: 8
-          nz: 50
-      - depth: 4
-        n: 30
-        active_founders: 30
-        active_founder_frac: 1.0
-        effective_founders_by_descendants: 25.1032
-        founder_ancestors:
-          mean: 12.3667
-          std: 1.9025
-          q1: 12
-          median: 13
-          q3: 13
-          nz: 30
-      bottleneck:
-        min_active_founders: 30
-        min_active_founder_frac: 1.0
-        min_active_depths:
-        - 0
-        - 1
-        - 2
-        - 3
-        - 4
-        min_effective_founders_by_descendants: 24.7568
-        min_effective_depths:
-        - 3
   relatedness:
     relationship_pairs:
-      MZ: 0
-      MO: 170
-      FO: 170
-      FS: 73
-      MHS: 77
-      PHS: 55
-      GP: 514
-      Av: 271
-      GGP: 588
-      HAv: 453
-      GAv: 366
-      1C: 294
-      GGGP: 371
-      HGAv: 412
-      GGAv: 282
-      H1C: 427
-      1C1R: 856
-      G3GP: 0
-      HGGAv: 160
-      G3Av: 0
-      H1C1R: 697
-      1C2R: 608
-      2C: 627
-      PO: 340
-      engine: rust_streaming_burden
-    relationship_summary:
-      computed: true
-      max_degree: 5
-      n_individual_pairs: 19900
-      n_related_pairs: 7471
-      n_unrelated_pairs: 12429
-      related_pair_density: 0.3754
-      related_pairs_by_closest_degree:
-        '1': 413
-        '2': 917
-        '3': 1701
-        '4': 2348
-        '5': 2092
-      closest_relationship_per_individual:
-        none: 0
-        '1': 200
-        '2': 0
-        '3': 0
-        '4': 0
-        '5': 0
-      relatives_by_degree:
-        '5':
-          mean: 20.92
-          std: 16.4049
-          q1: 4
-          median: 22
-          q3: 35
-          nz: 156
-        '4':
-          mean: 23.48
-          std: 11.5871
-          q1: 15
-          median: 22
-          q3: 32
-          nz: 198
-        '3':
-          mean: 17.01
-          std: 6.2647
-          q1: 13
-          median: 17
-          q3: 21
-          nz: 200
-        '2':
-          mean: 9.17
-          std: 3.4013
-          q1: 7
-          median: 9
-          q3: 11
-          nz: 200
-        '1':
-          mean: 4.13
-          std: 1.5476
-          q1: 2
-          median: 4
-          q3: 5
-          nz: 200
-      relatives_total:
-        mean: 74.71
-        std: 29.9263
-        q1: 56
-        median: 78
-        q3: 99
-        nz: 200
-      related_pair_density_by_depth:
-      - depth: 0
-        n: 30
-        n_individual_pairs: 435
-        n_related_pairs: 0
-        n_unrelated_pairs: 435
-        related_pair_density: 0.0
-      - depth: 1
-        n: 40
-        n_individual_pairs: 780
-        n_related_pairs: 60
-        n_unrelated_pairs: 720
-        related_pair_density: 0.0769
-      - depth: 2
-        n: 50
-        n_individual_pairs: 1225
-        n_related_pairs: 445
-        n_unrelated_pairs: 780
-        related_pair_density: 0.3633
-      - depth: 3
-        n: 50
-        n_individual_pairs: 1225
-        n_related_pairs: 816
-        n_unrelated_pairs: 409
-        related_pair_density: 0.6661
-      - depth: 4
-        n: 30
-        n_individual_pairs: 435
-        n_related_pairs: 232
-        n_unrelated_pairs: 203
-        related_pair_density: 0.5333
+      engine: rust_relatives_per_person
+      by_code:
+        status: blanked
+        total: 7131
     inbreeding:
-      n_inbred: 43
-      frac_inbred: 0.215
-      mean_F: 0.0116
-      max_F: 0.25
-      hist:
-        '0': 0.785
-        <0.0625: 0.185
-        <0.125: null
-        <0.25: null
-        <1: 0.0
+      inbred:
+        status: blanked
+        total: 200
+      mean_F_inbred: null
   strata:
     sex_summary:
-      female:
-        n: 92
-        n_founders: 15
-        n_reproductive: 75
-        n_inbred: 20
-      male:
-        n: 108
-        n_founders: 15
-        n_reproductive: 80
-        n_inbred: 23
-    depth_summary:
-    - depth: 0
-      n: 30
-    - depth: 1
-      n: 40
-    - depth: 2
-      n: 50
-    - depth: 3
-      n: 50
-    - depth: 4
-      n: 30
-individual:
-  distributions:
-    F:
-      mean: 0.0116
-      median: 0.0
-    n_offspring:
-      mean: 1.7
-      median: 2
-    n_mates:
-      mean: 0.99
-      median: 1
-    n_distinct_ancestors:
-      mean: 9.065
-      median: 6
+      reproductive:
+        status: blanked
+        total: 200
+      inbred:
+        status: blanked
+        total: 200
 

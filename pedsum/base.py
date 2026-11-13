@@ -72,4 +72,15 @@ PARENT_ROLES = (ParentRole.MOTHER, ParentRole.FATHER)
 
 
 class PedigreeError(Exception):
-    """Raised on any input validation failure."""
+    """Raised on any input validation failure.
+
+    ``public`` is what a ``--safe-attempt`` log prints in place of the
+    message: check and column names, no ID and no data value. True says the
+    message itself is that. Without it the message is withheld there
+    (:mod:`pedsum.safe_log`).
+    """
+
+    def __init__(self, message: str, *, public: str | bool = False) -> None:
+        """Keep ``message`` as the error text and resolve ``public``."""
+        super().__init__(message)
+        self.public: str | None = message if public is True else (public or None)

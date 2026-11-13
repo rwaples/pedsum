@@ -1,0 +1,171 @@
+exit: 0
+artifacts: ['effective_size.txt']
+=== effective_size.txt ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 200
+safe_attempt_min_cell: 5
+status: complete
+estimators_requested:
+- ne_inbreeding
+- ne_coancestry
+- ne_variance_family_size
+- ne_sex_ratio
+- ne_individual_delta_f
+- ne_long_term_contributions
+- ne_hill_overlapping
+- ne_group_coancestry
+supports:
+  depth:
+    status: intact
+    total: 200
+    bins:
+      '0': 30
+      '1': 40
+      '2': 50
+      '3': 50
+      '4': 30
+  sex:
+    status: intact
+    total: 200
+    bins:
+      male: 108
+      female: 92
+  depth_by_sex:
+    status: intact
+    total: 200
+    cells:
+      '0':
+        male: 15
+        female: 15
+      '1':
+        male: 21
+        female: 19
+      '2':
+        male: 32
+        female: 18
+      '3':
+        male: 24
+        female: 26
+      '4':
+        male: 16
+        female: 14
+  founders_contributing: 30
+  birth_cohort_by_sex:
+    status: intact
+    total: 200
+    cells:
+      '2000':
+        male: 15
+        female: 15
+      '2005':
+        male: 21
+        female: 19
+      '2010':
+        male: 32
+        female: 18
+      '2015':
+        male: 24
+        female: 26
+      not_used:
+        male: 16
+        female: 14
+  parent_links_with_birth_years:
+    status: intact
+    total: 340
+    bins:
+      father: 170
+      mother: 170
+effective_size:
+  ne_inbreeding:
+    ne: 29.2251
+    mean_f_per_gen:
+      '0': 0.0
+      '1': 0.0
+      '2': 0.0
+      '3': 0.0163
+      '4': 0.0503
+    ne_per_gen:
+      0-1: null
+      1-2: null
+      2-3: 30.7692
+      3-4: 14.4625
+  ne_coancestry:
+    ne: 64.3912
+    mean_theta_per_gen:
+      '0': 0.0
+      '1': 0.0128
+      '2': 0.0228
+      '3': 0.0315
+      '4': 0.0352
+    ne_per_gen:
+      0-1: 39.0
+      1-2: 49.684
+      2-3: 55.7613
+      3-4: 133.2565
+  ne_variance_family_size:
+    ne: 57.6128
+    ne_per_transition:
+      '0': 57.3299
+      '1': 71.1
+      '2': 60.5577
+      '3': 46.7109
+      '4': null
+  ne_sex_ratio:
+    ne: 37.4219
+    ne_per_gen:
+      '0': 30.0
+      '1': 39.9
+      '2': 46.08
+      '3': 49.92
+      '4': 29.8667
+  ne_individual_delta_f:
+    ne: 37.3982
+    standard_error: 10.1289
+    ne_unrelated_founders: 28.2483
+    ne_per_gen:
+      '0': null
+      '1': null
+      '2': null
+      '3': 90.657
+      '4': 37.3982
+  ne_long_term_contributions:
+    ne: 46.9629
+  ne_hill_overlapping:
+    ne: 288.0639
+    T_m: 5.0
+    T_f: 5.0
+    Ne_m: 139.5963
+    Ne_f: 148.7588
+    ne_per_cohort:
+      '2000': 286.6494
+      '2005': 355.4999
+      '2010': 302.7887
+      '2015': 233.5547
+    Ne_m_per_cohort:
+      '2000': 142.7738
+      '2005': 171.4233
+      '2010': 131.2827
+      '2015': 121.9614
+    Ne_f_per_cohort:
+      '2000': 143.8799
+      '2005': 184.5615
+      '2010': 178.7827
+      '2015': 112.016
+    collapses_to_ne_v: false
+    vk_scaled: false
+  ne_group_coancestry:
+    ne: 54.5251
+    mean_group_coancestry_per_gen:
+      '0': 0.0167
+      '1': 0.025
+      '2': 0.0323
+      '3': 0.0411
+      '4': 0.0515
+    ne_per_gen:
+      0-1: 59.0
+      1-2: 66.7808
+      2-3: 55.2971
+      3-4: 45.9515
+

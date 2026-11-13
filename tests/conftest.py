@@ -17,6 +17,7 @@ from hypothesis import settings
 
 from pedsum.cli import main
 from pedsum.pedigree_ops import IdIndex, rows_of_parents
+from pedsum.report import output_name
 from pedsum.validate import ValidationConfig, ValidationContext, run_checks
 
 REPO = Path(__file__).resolve().parents[1]
@@ -75,6 +76,12 @@ def run_pedsum(args: list[str], cwd: Path | None = None) -> subprocess.Completed
         os.chdir(prev_cwd)
         logging.getLogger().handlers.clear()
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+
+
+def written_output(out_dir: Path, name: str) -> Path:
+    """The file a run wrote for the output an ordinary run calls ``name``: that name, or its ``--safe-attempt`` one."""
+    path = out_dir / name
+    return path if path.exists() else out_dir / output_name(name, safe=True)
 
 
 def run_check(name: str, rows: list[dict], config: ValidationConfig | None = None) -> CheckResult:

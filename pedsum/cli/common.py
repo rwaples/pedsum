@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import sys
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from pedigree_graph import configure_threads
 
+from pedsum import safe_log
 from pedsum.base import (
     PedigreeError,
     logger,
@@ -15,12 +18,18 @@ from pedsum.base import (
 from pedsum.pairs import build_pedigree_graph
 from pedsum.progress import timed
 from pedsum.report import (
+    findings_frame,
+    id_log_name,
+    output_name,
+    prepare_out_dir,
     write_validate_log,
 )
+from pedsum.safe_log import LOG_DATEFMT, LOG_FORMAT, Public
 from pedsum.validate import ValidationConfig, load_and_validate, validate_pedigree
 
 if TYPE_CHECKING:
     import argparse
+    from pathlib import Path
 
     import polars as pl
     from pedigree_graph import PedigreeGraph
@@ -41,7 +50,7 @@ def commit_thread_budget(args: argparse.Namespace) -> None:
     except RuntimeError:
         # Already committed by an earlier call in this process (the test
         # suite drives several runs in-process); the budget stands.
-        logger.debug("pedigree-graph thread budget already committed; --threads=%s ignored", threads)
+        logger.debug("pedigree-graph thread budget already committed; --threads=%s ignored", Public(threads))
 
 
 def init_logging(verbose: bool, quiet: bool) -> None:
@@ -53,12 +62,59 @@ def init_logging(verbose: bool, quiet: bool) -> None:
     else:
         level = logging.INFO
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+        format=LOG_FORMAT,
+        datefmt=LOG_DATEFMT,
         level=level,
         stream=sys.stderr,
         force=True,
     )
+
+
+def prepare_outputs(args: argparse.Namespace, *names: str) -> dict[str, Path] | int:
+    """Ready ``--out`` for the outputs an ordinary run calls ``names``; their paths in this run, or the exit code.
+
+    Under ``--safe-attempt`` each path has its safe name, a directory holding
+    any other file is refused, and ``--id-log`` opens its file. A runner
+    writes only to the paths returned here.
+    """
+    safe = getattr(args, "safe_attempt", False)
+    paths = {name: args.out_dir / output_name(name, safe=safe) for name in names}
+    if not safe:
+        return prepare_out_dir(args.out_dir) or paths
+    only = {path.name for path in paths.values()}
+    if args.id_log:
+        only.add(id_log_name(args.subcommand))
+    if prepare_out_dir(args.out_dir, only=only) != 0:
+        return 1
+    if args.id_log:
+        safe_log.open_id_log(args.out_dir / id_log_name(args.subcommand))
+    return paths
+
+
+def _report_safe_validation_failure(args: argparse.Namespace, config: ValidationConfig) -> None:
+    """After a failed Check under ``--safe-attempt``: each failing Check by name and count, and no ``validate.log``.
+
+    The rows and IDs go to the ``--id-log`` file only.
+    """
+    try:
+        _, _, findings, ctx = validate_pedigree(args.in_path, config, sep=args.sep, require_birth_year_col=True)
+    except (PedigreeError, FileNotFoundError, OSError) as e:
+        logger.error("could not list the failing checks: %s", e)
+        return
+    for check, n in Counter(f.check for f in findings).items():
+        logger.error("check %s: %d finding(s)", Public(check), n)
+    name = id_log_name(args.subcommand)
+    if safe_log.id_log_is_open():
+        buf = io.StringIO()
+        findings_frame(findings, ctx.id_labels).write_csv(buf, separator="\t")
+        safe_log.write_id_detail(buf.getvalue())
+        logger.error("wrote the findings, with rows and IDs, to %s; never transfer that file", args.out_dir / name)
+    else:
+        logger.error(
+            "the rows and IDs are withheld under --safe-attempt: add --id-log to write them to %s, "
+            "or run pedsum validate on the input",
+            args.out_dir / name,
+        )
 
 
 def write_validation_failure_log(args: argparse.Namespace, config: ValidationConfig) -> None:
@@ -94,7 +150,10 @@ def load_or_fail(args: argparse.Namespace) -> tuple[pl.DataFrame, IdLabels] | in
             return load_and_validate(args.in_path, config, sep=args.sep)
     except PedigreeError as e:
         logger.error("validation failed: %s", e)
-        write_validation_failure_log(args, config)
+        if getattr(args, "safe_attempt", False):
+            _report_safe_validation_failure(args, config)
+        else:
+            write_validation_failure_log(args, config)
         return 1
     except (FileNotFoundError, OSError) as e:
         logger.error("file error: %s", e)

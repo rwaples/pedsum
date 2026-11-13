@@ -27,6 +27,7 @@ from pedsum.parse import (
     read_pedigree_table,
 )
 from pedsum.pedigree_ops import IdIndex, ParentRefs, rows_of_parents, structural_depth
+from pedsum.safe_log import Public
 
 if TYPE_CHECKING:
     import argparse
@@ -440,7 +441,7 @@ def run_checks(ctx: ValidationContext) -> tuple[dict[str, CheckResult], list[Fin
             if ctx.fail_fast:
                 # The id parse Check runs before any Check that names an id.
                 label = ctx.label if ctx.id_labels is not None else str
-                raise PedigreeError(summarize_findings(result.findings, label))
+                raise PedigreeError(summarize_findings(result.findings, label), public=f"check {check.name} failed")
             findings.extend(result.findings)
         results[check.name] = result
     return results, findings
@@ -469,14 +470,14 @@ def load_and_validate(path: Path, config: ValidationConfig, *, sep: str = "auto"
     """
     t0 = time.perf_counter()
     df = read_pedigree_table(path, sep=sep, dtype=str)
-    logger.info("read %d rows from %s in %.2fs", len(df), path, time.perf_counter() - t0)
+    logger.info("read %d rows from %s in %.2fs", len(df), path, Public(time.perf_counter() - t0))
     maybe_warn_csv(df)
     ctx = ValidationContext(df, config, fail_fast=True, require_birth_year_col=True)
     run_checks(ctx)
     # Every Check passed, so no parent is missing and there is no founder to
     # synthesize: the frame is the input rows of the pedigree validate would write.
     fp = fix_pedigree(ctx, synthesize_founders=False)
-    logger.info("validated %d rows in %.2fs", len(fp.ids), time.perf_counter() - t0)
+    logger.info("validated %d rows in %.2fs", len(fp.ids), Public(time.perf_counter() - t0))
     return fp.frame(), fp.labels
 
 

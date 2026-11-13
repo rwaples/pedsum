@@ -204,8 +204,10 @@ With `--multiple-birth-col`, `summarize` adds `demography.multiple_births`:
 | `weinberg` | Weinberg's differential rule on sets of two with both sexes known: `same_sex`, `opposite_sex`, `mz_pairs_estimate` = same − opposite, `dz_pairs_estimate` = 2 × opposite, `mz_fraction_estimate`. It assumes DZ pairs are as often same-sex as opposite-sex, and on few pairs the MZ estimate can be negative. |
 | `by_birth_decade` | with `--birth-year-col`, `summary.extra.yaml` only: the pairs by sex mix per decade of the set's earliest known birth year |
 
-`--safe-attempt` nulls counts below 5, and all of `weinberg` but
-`n_twin_pairs` when either of its counts is below 5.
+Under `--safe-attempt` the sets of two are written as a table by the
+sexes of the pair, protected at `--min-cell`, and larger sets are not
+written. Of `weinberg` only `mz_fraction_estimate` is written, and only
+when that table is intact (see [Safe output](#safe-output---safe-attempt)).
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
@@ -300,8 +302,8 @@ An unsexed individual has no such evidence and is never repaired (see
 same individual (`parents_distinct` BLOCKs it).
 
 The Reduced Pedigree is individual-level data (IDs, parents, and the dropped
-IDs in the manifest), not aggregate statistics — `--safe-attempt` redaction
-applies only to `summarize` output, never to `validate`. Treat
+IDs in the manifest), not aggregate statistics — `validate` has no
+`--safe-attempt`, and none of its files may leave a secure environment. Treat
 `validate.tsv.gz` / `validate.dropped.tsv` as the cleaned source pedigree, not
 as a shareable artifact.
 
@@ -358,9 +360,12 @@ pedsum summarize --in PED.tsv --out DIR [options]
 |---|---|---|
 | `summary.yaml` | always | slim categorised summary (~500 lines) |
 | `summary.extra.yaml` | always | per-depth / per-cohort arrays + full per-individual quantiles |
-| `annotated.tsv.gz` | always (unless `--safe-attempt`) | input pedigree + per-individual columns |
+| `annotated.tsv.gz` | always (never under `--safe-attempt`) | input pedigree + per-individual columns |
 | `summary.pedigree.tsv` | with `--tsv` | long-form pedigree-level summary |
 | `summary.individual.tsv` | with `--tsv` | long-form per-individual distribution |
+
+Under `--safe-attempt` the files have other names and other content: see
+[Safe output](#safe-output---safe-attempt).
 
 Flags:
 
@@ -406,10 +411,13 @@ Flags:
 - `--tsv` — additionally write the long-form `summary.pedigree.tsv`
   and `summary.individual.tsv`. Off by default; collaborators
   typically need only the YAML outputs.
-- `--safe-attempt` — best-effort GDPR-style redaction: skip the
-  per-individual `annotated.tsv.gz`, drop `min`/`max` from
-  distributions, and null any count or stratum below cell-size 5.
-  **Not a safe-harbor guarantee** — review before sharing.
+- `--safe-attempt` — write only a fixed list of aggregate results, each
+  protected at `--min-cell N` (default 5, at least 3), as `summary.txt`
+  and `summary.extra.txt` (`.tab` for the `--tsv` tables), into a `--out`
+  that holds no other file. `--id-log` writes the log lines that name an
+  ID to `summarize.ids.local.log`. Best effort, **not a guarantee**:
+  review the output before it leaves a secure environment. See
+  [Safe output](#safe-output---safe-attempt).
 - `--allow-missing-sex` — tolerate an individual with unknown sex used
   as BOTH mother and father (role-ambiguous), which otherwise
   hard-blocks; `validate` writes it with `sex=0` (unknown). `summarize`,
@@ -600,11 +608,14 @@ whole `all_resolved` sensitivity, the unweighted
 `male_proportion_distribution`, and descriptive `by_group_size` rows.
 No per-parent, per-Mating-Pair or per-Sibship record is ever emitted.
 
-Under `--safe-attempt`, a grouping resting on fewer than five eligible
-groups keeps its eligibility metadata but has concordance, direction,
-inference and distributions nulled; counts of one through four are
-nulled; `by_group_size` rows get small-cell redaction; permutation
-count and seed may remain.
+Under `--safe-attempt` each grouping writes its count of eligible groups,
+its eligible offspring by sex as a table, and its test (the observed and
+excess concordance, direction, `z`, the p-values and the permutation
+record). The test is written only
+when the counts it rests on are intact at `--min-cell`. The largest
+group's pair share, the `all_resolved` sensitivity, the distributions and
+the `by_group_size` rows are not written (see
+[Safe output](#safe-output---safe-attempt)).
 
 ### Estimate effective population size
 
@@ -617,6 +628,13 @@ file, `DIR/effective_size.yaml`. It holds the run metadata, a `status`
 (`complete`, or `stopped_memory_limit`; see [Memory limit](#memory-limit)),
 the `estimators_requested`, and one record per estimator under
 `effective_size:` with its scalar `ne` and its per-depth arrays.
+
+With `--safe-attempt` the file is `effective_size.txt`. It holds the
+counts each estimator rests on, protected at `--min-cell`, and an estimate
+only when all of its counts are at least that. A per-depth or per-cohort
+array is written whole or not at all. A stop at the memory limit writes
+the same file name, with no estimate that needs a count. See
+[Safe output](#safe-output---safe-attempt).
 
 pedsum offers eight pedigree-based estimators. They measure different
 things and are not interchangeable; [GLOSSARY.md](GLOSSARY.md) explains why
@@ -712,6 +730,12 @@ pedsum assortative-mating --in PED.tsv --out DIR --trait COL [COL2] [options]
 `--out DIR` is a directory (created if needed). The command writes one
 file, `DIR/assortative_mating.yaml`, with the run metadata and an
 `assortative_mating:` block. It never runs as part of `summarize`.
+
+With `--safe-attempt` the file is `assortative_mating.txt`. The couples
+table of a cell is protected at `--min-cell`, and an estimate is written
+only when the table it is fitted to is intact. One small group of couples
+withholds every cell's `n` and estimate. See
+[Safe output](#safe-output---safe-attempt).
 
 pedsum reads and types the traits, assigns strata and writes the YAML.
 The estimates and their inference come from
@@ -1154,6 +1178,181 @@ Flags:
   the output feeds an estimator, where a founder's degenerate full-sib stratum
   can break h² estimation).
 
+### Safe output (`--safe-attempt`)
+
+`summarize`, `effective-size` and `assortative-mating` take
+`--safe-attempt`. It is for a pedigree held in a secure environment, where
+only aggregate results may leave. It is a best effort and not a guarantee:
+read [Transferring results from Statistics Denmark](#transferring-results-from-statistics-denmark)
+before you transfer anything.
+
+```bash
+pedsum summarize --in PED.tsv --out SAFE_DIR --safe-attempt [--min-cell N] [--id-log]
+```
+
+A safe run does not redact the ordinary output. Each command has a release
+list: the results that may be written, each with a written reason. The run
+builds its files from that list and from nothing else, so a result the list
+does not name is absent, including any key a later pedsum or pedigree-graph
+adds.
+
+**The minimum cell.** `--min-cell N` sets the fewest individuals, families
+or couples a released count may rest on. The default is 5 and the smallest
+value accepted is 3. Every safe file records it as `safe_attempt_min_cell`.
+
+**Tables.** A frequency table is written with a `status`:
+
+| `status` | Meaning |
+|---|---|
+| `intact` | every nonzero cell is at least `N`; the table is written as counted |
+| `merged` | an ordered table (depth, the F histogram) had a small bin at an end, and end bins were merged inward until the merged bin is at least `N` |
+| `blanked` | merging could not help: the table is withheld and only its `total` is written, when the total itself may be |
+
+Zero cells stay visible. A zero in a row or column of a two-way table
+whose total is below `N` is still never written: that row or column holds
+a nonzero cell below `N`, which withholds the table.
+
+A table that repeats the totals of a finer one is written only while the
+finer one is `intact`. The by-status and by-sex offspring tables wait on
+the depth-by-offspring table, and the inbred table, the F histogram and the
+by-sex inbred table on the depth-by-inbred table: no individual of the
+deepest depth has offspring and none of the first two depths is inbred, so
+a total would give back a cell of the withheld table.
+
+**Statistics.** A mean, standard deviation, quartile, estimate, p-value or
+Ne is written only when every table and count it is computed from is
+`intact`. A statistic of a `merged` or `blanked` table is `null`: a mean and
+a standard deviation can undo a merge. A statistic the data gives no value
+for is `null` too, so which keys a file holds depends on the options and
+the input's columns, never on the data. A continuous quantity such as `F`
+keeps its mean and standard deviation at `n >= N` and its quartiles at
+`n >= 4N`. The mean and standard deviation of `F` over the inbred are
+written only when the F histogram is `intact`, and the per-depth means of
+ancestor and descendant-path counts only when the depth-by-recorded-parents
+table is (for descendant paths, the depth-by-offspring table as well).
+
+**Pair counts.** A count of pairs is not a count of people, so it is gated
+on the people behind it. A relationship code in `relationship_pairs.by_code`
+needs `N` distinct families among the individuals who have a relative of
+that code, where a family is the individuals who share a recorded mother
+and father, and `N` distinct ancestors that its pairs go through: the
+shared mother of maternal half sibs, the shared father of paternal ones,
+the smaller of the distinct mothers and the distinct fathers of full sibs,
+the grandparents of grandparent pairs, and for cousins and avuncular pairs
+the fewest grandparents that could account for them. One woman's five
+children by five men are one mother, so their ten half-sib pairs are
+withheld. A count of Mating Pairs in `assortative-mating` is backed by
+the smaller of its distinct mothers and its distinct fathers.
+
+**Never written by a safe run:**
+
+- a minimum, a maximum, or any other extreme (`max_F`, the largest group's
+  or Mate Network's share, the first and last birth year of the Hill cohort
+  window);
+- a per-individual file (`annotated.tsv.gz`);
+- a histogram of a per-individual count of relatives (offspring, mates,
+  sibs, ancestors) and any sibship-size table, because the relationship
+  pair counts are sums over those tables and the two together would give
+  back a merged tail;
+- the table of related pairs at the same depth;
+- the Hill estimator's parental-age table;
+- a number that repeats another: a fraction beside its count, a
+  complement, a rollup;
+- the levels of a numeric trait.
+
+**File names.** The content is unchanged, YAML text and tab-separated
+text, under extensions on Statistics Denmark's list of transferable types.
+A safe run writes no `.yaml`, `.tsv` or `.gz` file.
+
+| Command | Ordinary file | `--safe-attempt` file |
+|---|---|---|
+| `summarize` | `summary.yaml` | `summary.txt` |
+| `summarize` | `summary.extra.yaml` | `summary.extra.txt` |
+| `summarize --tsv` | `summary.pedigree.tsv` | `summary.pedigree.tab` |
+| `summarize --tsv` | `summary.individual.tsv` | `summary.individual.tab` |
+| `effective-size` | `effective_size.yaml` | `effective_size.txt` |
+| `assortative-mating` | `assortative_mating.yaml` | `assortative_mating.txt` |
+
+The meta block names the input, and every path in the recorded command, by
+base name only. A directory name can identify a person or a project.
+
+**The `--out` directory.** A safe run refuses, with exit 1 and nothing
+written, a `--out` directory that holds any file other than the ones this
+run writes. An `annotated.tsv.gz` or a `summary.yaml` from an ordinary run
+beside the safe files could be transferred in their place. A new or empty
+directory is accepted, and so is the output of the same safe command run
+earlier with the same output flags. Give each safe command its own
+directory.
+
+**The log.** Under `--safe-attempt` the log on stderr names no ID and no
+data value, at any level. Every count and every other number drawn from
+the input rows prints as `[withheld]`, as does any text pedsum cannot show,
+and a traceback is replaced by the exception's type. The numbers that
+remain are not data: option values, the thread count, the minimum cell,
+elapsed seconds and the memory limit. A failed validation names each failing
+Check and writes no `validate.log`. To see what was withheld, add
+`--id-log`: the withheld lines, and the findings of a failed validation
+with their rows and IDs, are written in full to `<command>.ids.local.log`
+in `--out` (`summarize.ids.local.log`, `effective-size.ids.local.log`,
+`assortative-mating.ids.local.log`) and nowhere else. `pedsum validate`
+on the same input shows the same findings. A line from pedigree-graph or
+any other library, and the text of a Python warning, print as `[withheld]`
+whole.
+
+**Limits.** The engine protects each table it declares, and withholds the
+statistics of a table it had to merge or blank. The tests check, by exact
+integer programming over the declared relations between tables, that no
+withheld cell has a single possible value. A relation nobody declared is
+not checked. The choice of which cells to withhold is greedy, not optimal.
+
+### Transferring results from Statistics Denmark
+
+`--safe-attempt` targets two documents of Statistics Denmark (DST): the
+March 2022
+[Rules for data safety under the microdata scheme](https://www.dst.dk/Site/Dst/SingleFiles/GetArchiveFile.aspx?fi=38014105383&fo=0&ext=forskning)
+and the web page
+[Rules on transfer of analysis results](https://www.dst.dk/en/TilSalg/data-til-forskning/regler-og-datasikkerhed/regler-for-hjemtagelse-af-analyseresultater).
+pedsum is not a DST tool and DST has not reviewed it. The mode is a best
+effort to produce output that follows those rules. It does not make an
+output compliant, and nothing here is a guarantee.
+
+What the mode does about each rule:
+
+| DST rule | pedsum under `--safe-attempt` |
+|---|---|
+| "Tables shall contain at least 3 observations per cell" | `--min-cell`, default 5, never below 3. Some registers require 5; the minimum for your data is shown in DDP App when the data is ordered. Check it and set `--min-cell` to match. |
+| "if only one cell is blinded and the total is indicated, then at least two cells should be blinded. It is therefore best to merge categories, if possible" | ordered tables are merged first; a table that still has a small cell is withheld whole, and so is every statistic computed from it |
+| "Max and minimum and percentiles such as median may only be transferred if there is no danger of individual identification" | no minimum or maximum is written; quartiles need `n >= 4N`. Whether a quartile identifies anyone in your data is still your assessment. |
+| "A transfer log that lists pseudonymised PINs is always considered a rule breach" | the log names no ID; `--id-log` writes them to a separate file that stays on the research machine |
+| allowed file types include `txt`, `tab`, `csv`, `log`, `pdf`; not `yaml`, `json` or `tsv` | reports are `.txt`, long tables are `.tab` |
+
+What stays with you:
+
+- **You have the final responsibility.** Read every file before you
+  transfer it. DST's transfer tool scans files for microdata, and a scan
+  does not replace your own check.
+- **Runs can be differenced.** Two safe runs on overlapping subsets of a
+  pedigree, or a safe run and an ordinary run on the same pedigree, can
+  give back a withheld cell by subtraction. So can a safe run beside a
+  result transferred earlier. pedsum sees one run at a time and cannot
+  prevent this.
+- **Never transfer a log, or any file a safe run did not write.** That
+  covers pedsum's stderr log, `*.ids.local.log`, `validate.log`,
+  `validate.tsv.gz`, `validate.dropped.tsv`, `validate.cleared_links.tsv`,
+  `annotated.tsv.gz`, the `epimight-input` files (`pipeline_input.tsv`,
+  `pipeline_input.parquet`), and every `.yaml` and `.tsv` of an ordinary
+  run. They hold IDs, rows, or results that were not protected. DST allows
+  a log that lists pseudonymised IDs to exist on the research machine and
+  forbids transferring it.
+- **Pairs.** DST's documents do not say whether a pair of relatives is an
+  observation. pedsum gates pair counts on families and on the ancestors
+  the pairs go through, which is its own reading.
+
+One question is open. DST's page says "Changing the file extension in
+relation to the file content is not allowed." A safe report is YAML text in
+a `.txt` file. YAML is plain text, but DST has not said whether that is
+acceptable. Ask DST (`DDVHjemtag@dst.dk`) before you rely on it.
+
 ## Input format
 
 Header-row required, one individual per line. By default `--sep auto`
@@ -1476,6 +1675,9 @@ in `summary.yaml`; `effective-size` writes it to `effective_size.yaml`.
 - `-v` / `--verbose`: also shows per-degree timings and matrix-product
   diagnostics from the relationship enumerator.
 - `-q` / `--quiet`: warnings only.
+- Under `--safe-attempt` the log names no ID and no data value; see
+  [Safe output](#safe-output---safe-attempt). A log is still never a file
+  to transfer.
 - Relationship counting in `summarize` and `epimight-input` can run for
   many minutes on a large pedigree. In a terminal it shows a progress bar
   in rows walked; when stderr is redirected, it logs a progress line every

@@ -19,6 +19,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from pedsum.base import logger
+from pedsum.safe_log import Public
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -135,4 +136,4 @@ def timed(label: str) -> Generator[None]:
         yield
     finally:
         _PROFILE_PHASE_STACK.pop()
-    logger.info("%s in %.2fs", label, time.perf_counter() - t0)
+    logger.info("%s in %.2fs", Public(label), Public(time.perf_counter() - t0))

@@ -204,20 +204,6 @@ def test_drop_offending_self_verifies_plink_input(tmp_path):
     assert dict(zip(fixed["id"].to_list(), fixed["sex"].to_list(), strict=True)) == {1: 2, 2: 1, 4: 2, 5: 1}
 
 
-def test_safe_attempt_nulls_small_sex_source_counts():
-    """--safe-attempt nulls a sex_source count below the minimum cell, like the other size counts."""
-    from pedsum.sections import redact_size_structure
-
-    sizes = {
-        "next_components": [],
-        "depth_counts": [],
-        "largest_component": 100,
-        "sex_source": {"input": 90, "imputed_from_missing": 0, "imputed_from_role": 3, "unresolved": 7},
-    }
-    redact_size_structure(sizes, 5, 100)
-    assert sizes["sex_source"] == {"input": 90, "imputed_from_missing": 0, "imputed_from_role": None, "unresolved": 7}
-
-
 def test_reloaded_fixed_pedigree_keeps_provenance(tmp_path):
     """Loading validate.tsv.gz keeps its sex_source, founders validate added included, in every command."""
     from pedsum.validate import ValidationConfig, load_and_validate

@@ -9,7 +9,7 @@ from conftest import load_validate_tsv_gz, run_check, run_pedsum, write_ped
 
 from pedsum.base import PedigreeError
 from pedsum.checks import CheckStatus
-from pedsum.multiple_births import compute_multiple_births, redact_multiple_births
+from pedsum.multiple_births import compute_multiple_births
 from pedsum.parse import as_zygosity_col
 from pedsum.validate import ValidationConfig
 
@@ -350,21 +350,3 @@ def _payload(n_same: int, n_opposite: int) -> dict:
 def test_full_sib_share_is_none_when_full_sibs_were_not_counted():
     """--max-degree 0 leaves FS uncounted; the share is None rather than a division by it."""
     assert _payload(1, 1)["full_sib_pair_fraction"] is None
-
-
-def test_safe_attempt_nulls_weinberg_on_a_small_count():
-    """Either Weinberg count below the cell size nulls both counts and every estimate."""
-    section = _payload(9, 3)
-    redact_multiple_births(section, 5, 100)
-    assert section["weinberg"] == {
-        "n_twin_pairs": 12,
-        "same_sex": None,
-        "opposite_sex": None,
-        "mz_pairs_estimate": None,
-        "dz_pairs_estimate": None,
-        "mz_fraction_estimate": None,
-    }
-    assert section["pairs_by_sex"]["male_female"] is None
-    big = _payload(9, 6)
-    redact_multiple_births(big, 5, 100)
-    assert big["weinberg"]["mz_pairs_estimate"] == 3

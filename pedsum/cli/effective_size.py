@@ -12,15 +12,16 @@ from pedsum.base import (
     PedigreeError,
     logger,
 )
-from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail
+from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail, prepare_outputs
 from pedsum.memory import GiB
 from pedsum.parse import read_reference_mask
 from pedsum.progress import timed
 from pedsum.report import (
     build_effective_size_data,
-    prepare_out_dir,
+    safe_meta_block,
     write_yaml,
 )
+from pedsum.safe_log import Public
 from pedsum.sections import (
     compute_effective_size,
     compute_individual_delta_f_for_reference,
@@ -28,6 +29,8 @@ from pedsum.sections import (
 
 if TYPE_CHECKING:
     import argparse
+
+    from pedigree_graph import PedigreeGraph
 
     from pedsum.memory import MemoryWatchdog
 
@@ -40,20 +43,41 @@ _SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size"
 def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:
     """``effective-size``: run the selected Ne estimators and write ``effective_size.yaml``.
 
-    A stop at the memory limit still publishes ``effective_size.yaml``, with
+    A ``--safe-attempt`` run writes the file under its safe name. A stop at
+    the memory limit still publishes the file, with
     the estimators that were running marked ``memory_limit`` (ADR 0004 §4).
     """
-    if prepare_out_dir(args.out_dir) != 0:
-        return 1
+    paths = prepare_outputs(args, "effective_size.yaml")
+    if isinstance(paths, int):
+        return paths
+    out_path = paths["effective_size.yaml"]
     commit_thread_budget(args)
 
     requested = args.estimators
-    out_path = args.out_dir / "effective_size.yaml"
+    safe = None
+    if args.safe_attempt:
+        # Imported here so an ordinary run does not pay for loading the release list.
+        from pedsum import safe_effective_size as safe
     # Registered before the input is read, so a stop at any point replaces an
     # effective_size.yaml left by an earlier run. Until the graph is built,
     # n_total is unknown and no estimator has run.
     n_total: int | None = None
     results: dict = {name: {"ne": None, "reason": "not_requested"} for name in ALL_EFFECTIVE_SIZE_ESTIMATORS}
+
+    def payload(status: str, records: dict, pg: PedigreeGraph | None, reference: np.ndarray | None) -> dict:
+        if safe is None:
+            return build_effective_size_data(args.in_path, cmd, n_total, status, requested, records)
+        # Nothing here reads the report payload: the safe file is laid out from the release.
+        with timed("safe-attempt supports"):
+            source = safe.build_source(
+                meta=safe_meta_block(args.in_path, cmd, n_total),
+                status=status,
+                requested=requested,
+                results=records,
+                pg=pg,
+                reference_rows=reference,
+            )
+        return safe.safe_payload(source, args.min_cell)
 
     def publish_partial(rss: int, limit: int) -> None:
         stopped = {
@@ -67,8 +91,9 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
             name: dict(stopped) if name in requested and record.get("reason") == "not_requested" else record
             for name, record in results.items()
         }
-        data = build_effective_size_data(args.in_path, cmd, n_total, "stopped_memory_limit", requested, partial)
-        write_yaml(data, out_path)
+        # Without the graph: counting an estimate's supports would allocate at the limit, so a safe
+        # partial file withholds every estimate that needs one.
+        write_yaml(payload("stopped_memory_limit", partial, None, None), out_path)
         logger.error("wrote %s with the estimators that finished", out_path)
 
     watchdog.on_breach(publish_partial)
@@ -82,7 +107,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
         logger.error(
             "effective size needs resolved sex for every row to run %s; supply "
             "sex for the unsexed rows, or select only estimators that do not use sex",
-            ", ".join(needs_sex),
+            Public(", ".join(needs_sex)),
         )
         return 1
 
@@ -97,7 +122,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
             return 1
         reference_rows = np.flatnonzero(mask)
         if reference_rows.size == 0:
-            logger.error("reference column %r marks no row", args.reference_col)
+            logger.error("reference column %s marks no row", Public(repr(args.reference_col)))
             return 1
         if "ne_individual_delta_f" not in requested:
             logger.warning("--reference-col only affects ne_individual_delta_f, which was not requested")
@@ -126,14 +151,17 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
         logger.warning(
             "ne_individual_delta_f has no estimate (%s) over %s with n_reference=%d, though ne_per_gen has "
             "one at another depth; pass --reference-col NAME to choose a different reference subpopulation",
-            delta_f["code"],
+            Public(delta_f["code"]),
             reference,
             delta_f["n_reference"],
         )
 
+    # Built before the watchdog is disarmed: counting the safe supports allocates.
+    data = payload("complete", results, pg, reference_rows)
     with watchdog.disarm() as owns_output:
         if owns_output:
-            data = build_effective_size_data(args.in_path, cmd, len(df), "complete", requested, results)
             write_yaml(data, out_path)
+            if safe is not None:
+                logger.info("safe-attempt: release list applied (min cell = %d)", Public(args.min_cell))
             logger.info("wrote %s", out_path)
     return 0

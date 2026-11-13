@@ -83,7 +83,7 @@ def classify_trait(name: str, tokens: np.ndarray, stated: TraitKind | None = Non
     column = pl.Series(name, tokens.tolist(), dtype=pl.String)
     present = column.is_not_null().to_numpy()
     if not present.any():
-        raise PedigreeError(f"trait {name!r} is missing in every row")
+        raise PedigreeError(f"trait {name!r} is missing in every row", public=True)
     observed = column.drop_nulls()
     numeric = observed.cast(pl.Float64, strict=False)
     if numeric.is_null().any():
@@ -93,18 +93,27 @@ def classify_trait(name: str, tokens: np.ndarray, stated: TraitKind | None = Non
             values[present] = (observed.str.to_lowercase() == words[1]).cast(pl.Float64).to_numpy()
             return Trait(name, "binary", source, (words[0], words[1]), values)
         if len(words) == 1:
-            raise PedigreeError(f"trait {name!r} is constant ({words[0]!r} in every non-missing row)")
+            raise PedigreeError(
+                f"trait {name!r} is constant ({words[0]!r} in every non-missing row)",
+                public=f"trait {name!r} is constant",
+            )
         samples = observed.filter(numeric.is_null()).unique(maintain_order=True).head(3).to_list()
         raise PedigreeError(
-            f"trait {name!r} must be numeric (binary traits may also use true/false or yes/no); got {samples}"
+            f"trait {name!r} must be numeric (binary traits may also use true/false or yes/no); got {samples}",
+            public=f"trait {name!r} must be numeric (binary traits may also use true/false or yes/no)",
         )
     values = numeric.to_numpy()
     if not np.isfinite(values).all():
         samples = observed.filter(~numeric.is_finite()).unique(maintain_order=True).head(3).to_list()
-        raise PedigreeError(f"trait {name!r} holds non-finite value(s) {samples}")
+        raise PedigreeError(
+            f"trait {name!r} holds non-finite value(s) {samples}", public=f"trait {name!r} holds non-finite value(s)"
+        )
     n_levels = len(np.unique(values))
     if n_levels == 1:
-        raise PedigreeError(f"trait {name!r} is constant ({_level_label(float(values[0]))} in every non-missing row)")
+        raise PedigreeError(
+            f"trait {name!r} is constant ({_level_label(float(values[0]))} in every non-missing row)",
+            public=f"trait {name!r} is constant",
+        )
     kind = stated
     if kind is None:
         if n_levels == 2:
@@ -114,10 +123,14 @@ def classify_trait(name: str, tokens: np.ndarray, stated: TraitKind | None = Non
         else:
             raise PedigreeError(
                 f"trait {name!r} has {n_levels} distinct numeric values; pass "
-                f"--trait-type {name}=ordinal or --trait-type {name}=continuous"
+                f"--trait-type {name}=ordinal or --trait-type {name}=continuous",
+                public=f"trait {name!r} needs --trait-type {name}=ordinal or --trait-type {name}=continuous",
             )
     if kind == "binary" and n_levels != 2:
-        raise PedigreeError(f"trait {name!r} is stated binary but has {n_levels} distinct values")
+        raise PedigreeError(
+            f"trait {name!r} is stated binary but has {n_levels} distinct values",
+            public=f"trait {name!r} is stated binary but does not have two distinct values",
+        )
     out = np.full(len(tokens), np.nan)
     if kind == "continuous":
         out[present] = values

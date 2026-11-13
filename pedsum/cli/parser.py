@@ -20,6 +20,7 @@ from pedsum.cli.effective_size import run_effective_size
 from pedsum.cli.epimight_input import run_epimight_input
 from pedsum.cli.summarize import run_summarize
 from pedsum.cli.validate import run_validate
+from pedsum.disclosure import DEFAULT_MIN_CELL, MIN_CELL_FLOOR
 from pedsum.epimight import (
     BASE_YEAR,
     EPIMIGHT_RELATIONSHIP_ORDER,
@@ -304,6 +305,46 @@ def _int64(v: str) -> int:
     return n
 
 
+def _min_cell(v: str) -> int:
+    """Argparse type guard for a minimum cell of at least ``MIN_CELL_FLOOR``."""
+    n = _nonnegative_int(v)
+    if n < MIN_CELL_FLOOR:
+        raise argparse.ArgumentTypeError(f"expected an integer >= {MIN_CELL_FLOOR}, got {v!r}")
+    return n
+
+
+def _add_safe_args(p: argparse.ArgumentParser) -> None:
+    """Add ``--safe-attempt``, its ``--min-cell`` and ``--id-log``."""
+    p.add_argument(
+        "--safe-attempt",
+        action="store_true",
+        help="write only a fixed list of aggregate results, each protected at "
+        "--min-cell: small tables are merged or withheld, statistics of a "
+        "withheld table are withheld, and no minimum, maximum or "
+        "per-individual file is written. Reports are written as .txt (the "
+        "same YAML text) and long tables as .tab. --out must be new, empty, "
+        "or hold only the files this run writes. The log names no ID and no "
+        "data value. Best effort, not a guarantee: review the output before "
+        "it leaves a secure environment, and never transfer a log. See "
+        "README 'Safe output'.",
+    )
+    p.add_argument(
+        "--id-log",
+        action="store_true",
+        help="with --safe-attempt, write the log lines that name an ID or a "
+        "data value, in full, to <command>.ids.local.log in --out (for example "
+        "summarize.ids.local.log). That file must never be transferred.",
+    )
+    p.add_argument(
+        "--min-cell",
+        type=_min_cell,
+        default=DEFAULT_MIN_CELL,
+        metavar="N",
+        help=f"with --safe-attempt, the fewest individuals or families a released "
+        f"count may rest on (default: {DEFAULT_MIN_CELL}; at least {MIN_CELL_FLOOR}).",
+    )
+
+
 def _positive_int(v: str) -> int:
     """Argparse type guard for ints >= 1."""
     n = _nonnegative_int(v)
@@ -343,9 +384,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "summary.yaml (slim categorised summary), summary.extra.yaml "
         "(per-generation / per-cohort / per-transition arrays and full "
         "per-individual quantiles), and annotated.tsv.gz (input pedigree "
-        "+ per-individual columns; suppressed under --safe-attempt). "
+        "+ per-individual columns). "
         "Pass --tsv to also write summary.pedigree.tsv and "
-        "summary.individual.tsv.",
+        "summary.individual.tsv. Under --safe-attempt the files are "
+        "summary.txt, summary.extra.txt, summary.pedigree.tab and "
+        "summary.individual.tab, annotated.tsv.gz is not written, and DIR "
+        "must hold no other file.",
         birth_year_help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). When set, summarize "
         "validates it: numeric, within --birth-year-min/--birth-year-max, and "
@@ -433,13 +477,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(summary.pedigree.tsv + summary.individual.tsv) inside --out. "
         "Off by default; collaborators typically need only the YAML.",
     )
-    p_sum.add_argument(
-        "--safe-attempt",
-        action="store_true",
-        help="best-effort GDPR-style redaction: skip the per-individual "
-        "annotated TSV, drop min/max from distributions, and null any "
-        "count or stratum below cell-size 5. Not a safe-harbor guarantee.",
-    )
+    _add_safe_args(p_sum)
     _add_format_args(p_sum)
     _add_threads_args(p_sum)
     _add_memory_args(p_sum)
@@ -635,7 +673,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         out_help="output directory (created if needed); writes effective_size.yaml "
         "with every estimator's scalar and per-depth arrays. After a stop at "
         "the memory limit (exit 3) the file holds the estimators that finished, "
-        "with status: stopped_memory_limit.",
+        "with status: stopped_memory_limit. Under --safe-attempt the file is "
+        "effective_size.txt and DIR must hold no other file.",
         birth_year_help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). The Hill overlapping-"
         "generation estimator (ne_hill_overlapping) builds its cohort window "
@@ -662,6 +701,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "individual increase in inbreeding (Gutiérrez et al. 2008). Default: "
         "the last observed depth. The record gains reference_column.",
     )
+    _add_safe_args(p_es)
     _add_format_args(p_es)
     _add_threads_args(p_es)
     _add_memory_args(p_es)
@@ -673,7 +713,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_input_args(
         p_am,
-        out_help="output directory (created if needed); writes assortative_mating.yaml.",
+        out_help="output directory (created if needed); writes assortative_mating.yaml. "
+        "Under --safe-attempt the file is assortative_mating.txt and DIR must hold no other file.",
         birth_year_help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). Required by --stratify-by birth_year.",
     )
@@ -749,6 +790,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="seed for the permutations and the bootstrap draws, an integer from -2^63 to 2^63-1 "
         "(default: %(default)s).",
     )
+    _add_safe_args(p_am)
     _add_format_args(p_am)
     _add_threads_args(p_am, default_cores=True)
     _add_memory_args(p_am)
@@ -792,16 +834,24 @@ def _check_validate(p_val: argparse.ArgumentParser, parser: argparse.ArgumentPar
     _check_zygosity(parser, args)
 
 
+def _check_safe(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """``--id-log`` without ``--safe-attempt`` is a usage error (exit 2)."""
+    if args.id_log and not args.safe_attempt:
+        parser.error("--id-log needs --safe-attempt")
+
+
 def _check_summarize(p_sum: argparse.ArgumentParser, parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Usage errors (exit 2) of ``summarize``; ``--zygosity-col`` first."""
     _check_zygosity(parser, args)
+    _check_safe(p_sum, args)
     if args.per_individual_pairs and args.max_degree < 5:
         p_sum.error("--per-individual-burden always counts degrees 1-5; drop --max-degree")
 
 
 def _check_effective_size(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """``--zygosity-col``, then put the chosen estimators in their canonical order."""
+    """``--zygosity-col`` and ``--id-log``, then put the chosen estimators in their canonical order."""
     _check_zygosity(parser, args)
+    _check_safe(parser, args)
     selected = set(args.estimators or ALL_EFFECTIVE_SIZE_ESTIMATORS)
     args.estimators = [name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in selected]
 
@@ -811,6 +861,7 @@ def _check_assortative_mating(
 ) -> None:
     """``--zygosity-col``, then the ``assortative-mating`` usage errors."""
     _check_zygosity(parser, args)
+    _check_safe(p_am, args)
     _check_assortative_mating_args(p_am, args)
 
 

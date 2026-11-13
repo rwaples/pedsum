@@ -26,6 +26,7 @@ _NONNEG_FLOATS = st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_
 
 def _assert_distribution_invariants(d: Distribution, n: int) -> None:
     """Assert the ordering, support, and count invariants of a distribution."""
+    assert d.n == n
     if n == 0:
         assert d.mean == 0.0
         assert d.std == 0.0

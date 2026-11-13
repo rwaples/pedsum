@@ -64,6 +64,8 @@ CASES: dict[str, list[str]] = {
     "effective_size_clean": ["effective-size", "traits.tsv", *BY],
     "effective_size_reference": ["effective-size", "traits.tsv", "--reference-col", "ref", "--estimators", "ne_individual_delta_f"],
     "effective_size_strings": ["effective-size", "strings_clean.tsv", "--reference-col", "ref", "--estimators", "ne_individual_delta_f,ne_coancestry"],
+    "effective_size_safe_clean": ["effective-size", "traits.tsv", *BY, "--safe-attempt"],
+    "effective_size_safe_min_cell_3": ["effective-size", "traits.tsv", "--reference-col", "ref", "--safe-attempt", "--min-cell", "3"],
     "assortative_clean": [
         "assortative-mating", "traits.tsv", "--trait", "liability", "dx", "--trait-type", "dx=binary",
         "--permutations", "49", "--seed", "5", "--threads", "1",
@@ -71,6 +73,14 @@ CASES: dict[str, list[str]] = {
     "assortative_strings": [
         "assortative-mating", "strings_clean.tsv", *BY, "--trait", "birth_year", "--trait-type", "birth_year=continuous",
         "--permutations", "0", "--threads", "1",
+    ],
+    "assortative_safe_clean": [
+        "assortative-mating", "traits.tsv", "--trait", "liability", "dx", "--trait-type", "dx=binary",
+        "--permutations", "49", "--seed", "5", "--threads", "1", "--safe-attempt",
+    ],
+    "assortative_safe_strata_min_cell_3": [
+        "assortative-mating", "traits.tsv", "--trait", "dx", "--stratify-by", "depth", "--min-stratum-networks", "2",
+        "--permutations", "19", "--bootstrap", "20", "--threads", "1", "--safe-attempt", "--min-cell", "3",
     ],
     "epimight_clean": ["epimight-input", "traits.tsv", *BY, "--pairs", "--exact-kinship", "--parquet"],
     "epimight_strings": ["epimight-input", "strings_clean.tsv", "--pairs", "--drop-founders"],

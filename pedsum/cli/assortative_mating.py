@@ -10,15 +10,16 @@ from pedsum.base import (
     PedigreeError,
     logger,
 )
-from pedsum.cli.common import commit_thread_budget, load_or_fail
+from pedsum.cli.common import commit_thread_budget, load_or_fail, prepare_outputs
 from pedsum.parse import read_trait_columns
 from pedsum.progress import timed
 from pedsum.report import (
     ASSORTATIVE_MATING_FIGURES,
     build_assortative_mating_data,
-    prepare_out_dir,
+    safe_meta_block,
     write_yaml,
 )
+from pedsum.safe_log import Public
 
 if TYPE_CHECKING:
     import argparse
@@ -74,19 +75,22 @@ def _set_assortative_threads(threads: int) -> None:
     try:
         numba.set_num_threads(threads)
     except ValueError:
-        logger.debug("numba allows fewer than --threads=%d thread(s) in this process; keeping its maximum", threads)
+        logger.debug(
+            "numba allows fewer than --threads=%d thread(s) in this process; keeping its maximum", Public(threads)
+        )
     try:
         pg_phenotype.configure_threads(numba.get_num_threads())
     except RuntimeError:
-        logger.debug("pg-phenotype thread budget already committed; --threads=%s ignored", threads)
+        logger.debug("pg-phenotype thread budget already committed; --threads=%s ignored", Public(threads))
 
 
 def run_assortative_mating(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``assortative-mating``: type the trait columns and write ``assortative_mating.yaml``."""
     from pedsum.assortative_mating import classify_trait, compute_assortative_mating
 
-    if prepare_out_dir(args.out_dir) != 0:
-        return 1
+    paths = prepare_outputs(args, "assortative_mating.yaml")
+    if isinstance(paths, int):
+        return paths
     commit_thread_budget(args)
     _set_assortative_threads(physical_cores() if args.threads is None else args.threads)
     loaded = load_or_fail(args)
@@ -106,9 +110,9 @@ def run_assortative_mating(args: argparse.Namespace, cmd: str, _watchdog: Memory
     for trait in traits:
         logger.info(
             "trait %s: %s (%s), %d missing of %d",
-            trait.name,
-            trait.kind,
-            trait.type_source,
+            Public(trait.name),
+            Public(trait.kind),
+            Public(trait.type_source),
             trait.n_missing,
             len(df),
         )
@@ -128,8 +132,30 @@ def run_assortative_mating(args: argparse.Namespace, cmd: str, _watchdog: Memory
     except PedigreeError as e:
         logger.error("%s", e)
         return 1
-    out_path = args.out_dir / "assortative_mating.yaml"
-    data = build_assortative_mating_data(args.in_path, cmd, len(df), payload)
+    out_path = paths["assortative_mating.yaml"]
+    if args.safe_attempt:
+        # Imported here so an ordinary run does not pay for loading the release list.
+        from pedsum import safe_assortative_mating as safe
+
+        try:
+            with timed("safe-attempt supports"):
+                source = safe.build_source(
+                    meta=safe_meta_block(args.in_path, cmd, len(df)),
+                    payload=payload,
+                    df=df,
+                    traits=traits,
+                    stratify_by=args.stratify_by,
+                    birth_year_bin=args.birth_year_bin,
+                    min_stratum_networks=args.min_stratum_networks,
+                )
+        except PedigreeError as e:
+            logger.error("%s", e)
+            return 1
+        # Nothing here reads the report payload: the safe file is laid out from the release.
+        data = safe.safe_payload(source, args.min_cell)
+        logger.info("safe-attempt: release list applied (min cell = %d)", Public(args.min_cell))
+    else:
+        data = build_assortative_mating_data(args.in_path, cmd, len(df), payload)
     write_yaml(data, out_path, figures=ASSORTATIVE_MATING_FIGURES)
     logger.info("wrote %s", out_path)
     return 0

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pedsum.base import logger
+from pedsum.safe_log import Public
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -134,7 +135,7 @@ def resolve_limit(max_memory: int | None) -> int | None:
         logger.info("memory limit off (--max-memory 0)")
         return None
     if max_memory is not None:
-        logger.info("memory limit %.1f GiB (--max-memory)", max_memory / GiB)
+        logger.info("memory limit %.1f GiB (--max-memory)", Public(max_memory / GiB))
         return max_memory
     headroom = memory_headroom_bytes()
     if headroom is None:
@@ -143,9 +144,9 @@ def resolve_limit(max_memory: int | None) -> int | None:
     limit = int(DEFAULT_LIMIT_FRACTION * headroom)
     logger.info(
         "memory limit %.1f GiB (%d%% of %.1f GiB available; --max-memory to change)",
-        limit / GiB,
-        round(DEFAULT_LIMIT_FRACTION * 100),
-        headroom / GiB,
+        Public(limit / GiB),
+        Public(round(DEFAULT_LIMIT_FRACTION * 100)),
+        Public(headroom / GiB),
     )
     return limit
 
@@ -230,18 +231,18 @@ class MemoryWatchdog:
             if not self._armed:
                 logger.warning(
                     "%s used %.1f GiB RSS, over the %.1f GiB limit, after its output was published",
-                    phase,
+                    Public(phase),
                     rss / GiB,
-                    limit / GiB,
+                    Public(limit / GiB),
                 )
                 return
             self._armed = False
             logger.error(
                 "%s used %.1f GiB RSS, over the %.1f GiB limit; stopping. "
                 "Pass --max-memory SIZE to raise the limit, or --max-memory 0 to remove it",
-                phase,
+                Public(phase),
                 rss / GiB,
-                limit / GiB,
+                Public(limit / GiB),
             )
             for fn in self._callbacks:
                 try:

@@ -24,8 +24,6 @@ from pedsum.pedigree_ops import group_mating_pairs, structural_depth
 from pedsum.report import (
     _flatten_long,
     _round_floats,
-    apply_safe_attempt,
-    as_plain,
     build_individual_data,
     build_pedigree_data,
     build_summary_data,
@@ -49,7 +47,6 @@ from pedsum.sections import (
     compute_mating_pair_summary,
     compute_sibship_sizes,
     compute_size_structure,
-    numeric_distribution,
 )
 from pedsum.validate import ValidationConfig, ValidationContext, run_checks, validate_pedigree
 
@@ -365,60 +362,14 @@ class TestReportEdgeCases:
         assert "n_offspring" in slim["individual"]["distributions"]
         assert "custom" in extra["individual"]["distributions"]
 
-    def test_flatten_long_round_floats_and_drop_extrema(self) -> None:
-        """Long flattening, recursive rounding, and extrema dropping handle all container types."""
+    def test_flatten_long_and_round_floats(self) -> None:
+        """Long flattening and recursive rounding handle all container types."""
         assert list(_flatten_long(5)) == []
         rows = list(_flatten_long({"a": {"b": [1.23456]}}))
         assert rows == [("a", "b", "0", 1.23456)]
         assert _round_floats({"x": [1.23456, {"y": 2.34567}]}, ndigits=2) == {"x": [1.23, {"y": 2.35}]}
         values = [0.123456, 0.0123456, 4.00001e-5, -3.14159e-9, 123.456789, 0.0, float("inf")]
         assert _round_floats(values, figures=4) == [0.1235, 0.01235, 4e-05, -3.142e-09, 123.4568, 0.0, float("inf")]
-        ped_data = {"n_total": 3, "x": [numeric_distribution(np.array([0, 1, 2]))], "y": {"nested": {"min": 0}}}
-        apply_safe_attempt(ped_data, {"distributions": {}})
-        assert "min" not in as_plain(ped_data)["x"][0]
-        assert ped_data["y"] == {"nested": {"min": 0}}
-
-    def test_redact_for_privacy_suppresses_small_groups(self) -> None:
-        """Privacy redaction handles singleton sibships, mating-pair details, and inbreeding bins."""
-        ped_data = {
-            "n_total": 10,
-            "size_structure": {"next_components": [1, 5], "depth_counts": [1, 6], "largest_component": 1},
-            "sibship_size": {"n_sibships": 1, "size_dist": {"1": 1, "2": 0}},
-            "mating_pairs": {"n_pairs": 1, "children_per_pair": {"mean": 1.0}, "n_pairs_with_multiple_children": 1},
-            "relationship_summary": {
-                "n_related_pairs": 1,
-                "related_pairs_by_closest_degree": {"1": 1},
-                "related_pair_density_by_depth": [{"depth": 0, "n": 1, "n_related_pairs": 1}],
-            },
-            "reproduction": {"n_reproductive": 1},
-            "founder_contribution": {"n_founders_with_descendants": 1},
-            "founder_summary": {
-                "by_depth": [{"depth": 0, "n": 1, "active_founders": 1}],
-                "bottleneck": {"min_active_founders": 1},
-            },
-            "components": {"singletons": 1},
-            "sex_summary": {"female": {"n": 1, "n_founders": 1}},
-            "depth_summary": [{"depth": 0, "n": 1, "n_male": 1}],
-            "relationship_pairs": {"FS": 1, "by_degree": {1: 1}},
-            "inbreeding": {
-                "n_inbred": 1,
-                "frac_inbred": 0.1,
-                "mean_F": 0.1,
-                "max_F": 0.2,
-                "hist": {"<0.25": 0.1, "0": None},
-            },
-        }
-        ind_data = {"distributions": {"F": numeric_distribution(np.array([0.0, 0.2]))}}
-        apply_safe_attempt(ped_data, ind_data, min_cell=3)
-        assert ped_data["size_structure"]["next_components"] == [5]
-        assert ped_data["sibship_size"]["size_dist"] == {"1": None, "2": None}
-        assert ped_data["mating_pairs"]["children_per_pair"] is None
-        assert ped_data["relationship_pairs"]["FS"] is None
-        assert ped_data["relationship_pairs"]["by_degree"] == {1: None}
-        assert ped_data["inbreeding"]["n_inbred"] is None
-        assert ped_data["inbreeding"]["hist"]["<0.25"] is None
-        assert "min" not in ind_data["distributions"]["F"].as_dict()
-        assert ind_data["distributions"]["F"].nz is None
 
     def test_prepare_out_dir_rejects_existing_file(self, tmp_path) -> None:
         """Output-directory preparation refuses an existing non-directory path."""

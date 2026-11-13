@@ -1,4 +1,4 @@
-"""Offspring Sex Concordance wiring: CLI flags, slim/extra routing, the long TSV, and safe-attempt redaction."""
+"""Offspring Sex Concordance wiring: CLI flags, slim/extra routing and the long TSV."""
 
 from __future__ import annotations
 
@@ -173,71 +173,6 @@ def test_long_tsv_carries_aggregates_but_no_group_identities(tmp_path):
     assert {r[1] for r in rows} == {"null_model", *GROUPINGS}
     forbidden = ("mother", "father", "id")
     assert not any(any(tok in r[2] for tok in forbidden) for r in rows)
-
-
-def test_safe_attempt_suppresses_inference_below_five_groups(tmp_path):
-    """Under five eligible groups: eligibility metadata stays, inference goes."""
-    ped = _two_sibship_pedigree(tmp_path)
-    out_dir = tmp_path / "out"
-    res = _run(
-        [
-            "summarize",
-            "--in",
-            str(ped),
-            "--out",
-            str(out_dir),
-            "--sex-concordance-permutations",
-            "20",
-            "--safe-attempt",
-        ],
-    )
-    assert res.returncode == 0, res.stderr
-    slim = _load_yaml(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]
-    extra = _load_extra(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]
-
-    assert slim["computed"] is True  # the analysis ran; its results are redacted
-    assert slim["excess_concordance"] is None
-    assert slim["direction"] is None
-    assert slim["p_holm"] is None
-    assert slim["max_group_pair_share"] is None
-    assert extra["z"] is None
-    assert extra["male_proportion_distribution"] is None
-    assert extra["by_group_size"] == []
-    assert extra["all_resolved"]["excess_concordance"] is None
-    # Counts of 1-4 are nulled; the procedure metadata may remain.
-    assert slim["n_groups_eligible"] is None
-    assert extra["permutations"]["completed"] == 20
-    assert extra["permutations"]["p_raw"] is None
-
-
-def test_safe_attempt_redacts_small_by_group_size_rows(tmp_path):
-    """Per-size rows below the cell threshold keep only size and group count."""
-    ped = _concordant_pedigree(tmp_path, [3] * 12 + [4] * 2)
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(ped), "--out", str(out_dir), "--sex-concordance", "--safe-attempt"])
-    assert res.returncode == 0, res.stderr
-    rows = {
-        r["group_size"]: r for r in _load_extra(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]["by_group_size"]
-    }
-    # 12 Sibships of 3 survive; the 2 Sibships of 4 are a small cell.
-    assert rows[3]["n_groups"] == 12
-    assert rows[3]["observed_pair_concordance"] is not None
-    assert rows[4]["n_groups"] == 2
-    assert rows[4]["observed_pair_concordance"] is None
-    assert rows[4]["excess_concordance"] is None
-    assert rows[4]["n_offspring"] is None
-
-
-def test_safe_attempt_drops_male_proportion_extrema(tmp_path):
-    """The male-proportion distribution loses min/max like every other one."""
-    ped = _concordant_pedigree(tmp_path, [3] * 12 + [4] * 2)
-    out_dir = tmp_path / "out"
-    res = _run(["summarize", "--in", str(ped), "--out", str(out_dir), "--sex-concordance", "--safe-attempt"])
-    assert res.returncode == 0, res.stderr
-    dist = _load_extra(out_dir)["pedigree"]["demography"][_SECTION]["sibship"]["male_proportion_distribution"]
-    assert dist is not None
-    assert "min" not in dist
-    assert "max" not in dist
 
 
 def test_real_imputation_feeds_the_provenance_tally(tmp_path):

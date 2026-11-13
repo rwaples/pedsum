@@ -13,6 +13,7 @@ import polars as pl
 
 from pedsum.base import SEX_FEMALE, SEX_MALE, SEX_UNKNOWN, PedigreeError, logger
 from pedsum.pedigree_ops import IdIndex
+from pedsum.safe_log import Public
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -287,7 +288,7 @@ def read_pedigree_table(
     if sep == "auto":
         chosen = _sniff_delimiter(path)
         if chosen != "\t":
-            logger.info("input: sniffed %s-separated", _SEP_HUMAN[chosen])
+            logger.info("input: sniffed %s-separated", Public(_SEP_HUMAN[chosen]))
     else:
         chosen = _SEP_MAP.get(sep, sep)
     as_str = dtype is str
@@ -354,7 +355,10 @@ def as_zygosity_col(series: pl.Series, name: str) -> np.ndarray:
     bad = ~upper.is_in(["", "MZ", "DZ"])
     if bad.any():
         samples = cleaned.filter(bad).unique(maintain_order=True).head(3).to_list()
-        raise PedigreeError(f"zygosity column {name!r} must hold MZ, DZ or NA/blank; got {samples}")
+        raise PedigreeError(
+            f"zygosity column {name!r} must hold MZ, DZ or NA/blank; got {samples}",
+            public=f"zygosity column {name!r} must hold MZ, DZ or NA/blank",
+        )
     out = np.full(len(cleaned), ZYGOSITY_UNKNOWN, dtype=np.int8)
     out[(upper == "MZ").to_numpy()] = ZYGOSITY_MZ
     out[(upper == "DZ").to_numpy()] = ZYGOSITY_DZ
@@ -421,14 +425,20 @@ def read_reference_mask(
         raw = read_aligned_columns(path, sep, id_col, ids, labels, columns=[column])
     except pl.exceptions.ColumnNotFoundError:
         header = read_pedigree_table(path, sep=sep, dtype=str).columns
-        raise PedigreeError(f"reference column {column!r} not in input; file has {header}") from None
+        raise PedigreeError(
+            f"reference column {column!r} not in input; file has {header}",
+            public=f"reference column {column!r} not in input",
+        ) from None
     tokens = raw[column].str.strip_chars().str.to_lowercase()
     missing = tokens.is_null() | tokens.is_in([t.lower() for t in _READER_NULL_TOKENS])
     is_true = tokens.is_in(sorted(_REFERENCE_TRUE)) & ~missing
     bad = ~(is_true | tokens.is_in(sorted(_REFERENCE_FALSE)) | missing)
     if bad.any():
         samples = raw[column].filter(bad).head(3).to_list()
-        raise PedigreeError(f"reference column {column!r} must hold 1/0 or true/false; got {samples}")
+        raise PedigreeError(
+            f"reference column {column!r} must hold 1/0 or true/false; got {samples}",
+            public=f"reference column {column!r} must hold 1/0 or true/false",
+        )
     return is_true.to_numpy()
 
 
@@ -454,7 +464,9 @@ def read_trait_columns(
         absent = [column for column in columns if column not in header]
         if not absent:
             raise
-        raise PedigreeError(f"trait column(s) {absent} not in input; file has {header}") from None
+        raise PedigreeError(
+            f"trait column(s) {absent} not in input; file has {header}", public=f"trait column(s) {absent} not in input"
+        ) from None
     extra = sorted({token.strip() for token in missing})
     upper_missing = sorted(PARENT_MISSING_TOKENS)
 

@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+- **`--safe-attempt` is rebuilt around a release list, and its output
+  shape changes** (breaking for anything that reads safe output). A safe
+  run no longer nulls cells of the ordinary summary. Each command writes
+  only the results its release list names, protected at a minimum cell:
+  an ordered table merges its small end bins, a table that still has a
+  small cell is withheld whole (`status: blanked`, `total` only), and a
+  statistic is written only when every table it is computed from is
+  intact. Pair counts are gated on the distinct families behind them and
+  on the distinct ancestors the pairs go through. No
+  minimum, maximum, largest share, birth-year window or Hill parental-age
+  table is written, and no histogram of a per-individual relative count or
+  sibship size. Fixes seven leaks of the old redaction, among them shares
+  that implied counts of 1, complements of nulled cells, and `max_F`.
+- **`effective-size --safe-attempt`** and **`assortative-mating
+  --safe-attempt`** are new. Before, only `summarize` had the flag.
+- **`--min-cell N`** sets the minimum cell (default 5, at least 3). Safe
+  files record it as `safe_attempt_min_cell`.
+- **Safe files have new names**: `summary.txt`, `summary.extra.txt`,
+  `summary.pedigree.tab`, `summary.individual.tab`, `effective_size.txt`,
+  `assortative_mating.txt`. The content is still YAML text and
+  tab-separated text. A safe run writes no `.yaml`, `.tsv` or `.gz`.
+- **A safe run refuses a `--out` directory that holds any other file**
+  (exit 1, nothing written), so an ordinary run's `annotated.tsv.gz` or
+  `summary.yaml` cannot sit beside safe files.
+- **The log of a safe run names no ID and no data value**, at any level:
+  such a value prints as `[withheld]`, every count and every line from
+  pedigree-graph or another library included, and a traceback as the
+  exception's type. A failed validation names the
+  failing Checks and writes no `validate.log`. **`--id-log`** writes the
+  withheld lines and the findings, in full, to `<command>.ids.local.log`
+  in `--out`.
+- The meta block of a safe file names the input and the paths of the
+  command by base name only.
+- README: new sections "Safe output" and "Transferring results from
+  Statistics Denmark". The mode is a best effort toward DST's transfer
+  rules, not a guarantee.
+- Library API: `pedsum/redaction.py` is removed, with `SectionSpec.redact`
+  and every per-section `redact_*`. New modules `pedsum.disclosure`,
+  `pedsum.safe_summary`, `pedsum.safe_effective_size`,
+  `pedsum.safe_assortative_mating` and `pedsum.safe_log`.
+  `PedigreeError` takes an optional `public=` text, `Distribution` has
+  `n`, and `report.prepare_out_dir` takes `only=`.
+
 ## 0.17.0 — 2026-11-10 — pedigree-graph 0.15, parent-role conflicts
 
 - **Requires pedigree-graph 0.15** (`>=0.15,<0.16`; `environment.yml`,

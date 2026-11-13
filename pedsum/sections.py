@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from itertools import pairwise
 from typing import TYPE_CHECKING, TypedDict
 
@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
 from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE, SEX_UNKNOWN
 from pedsum.pedigree_ops import build_children_csr, unique_ints
-from pedsum.redaction import null_below, redact_small_group
 
 #: The individual-table columns only the inbreeding computation fills; ``--no-inbreeding`` omits them.
 INBREEDING_COLUMNS: tuple[str, ...] = ("F", "n_distinct_ancestors")
@@ -96,34 +95,26 @@ def compute_size_structure(
 
 @dataclass(frozen=True)
 class Distribution:
-    """One numeric column summarised: mean, std, quartiles, extrema and the count of nonzero values.
+    """One numeric column summarised: mean, std, quartiles, extrema, the count of nonzero values and of all values.
 
-    Summary sections carry these through ``--safe-attempt``, which removes
-    the extrema; ``as_dict`` then renders the mapping the outputs write, in
-    field order, without a removed extremum. Quartiles and extrema are ints
-    for an integer column.
+    ``as_dict`` renders the mapping the outputs write, in field order.
+    Quartiles and extrema are ints for an integer column. ``n`` gates what
+    ``pedsum.disclosure`` releases and is not written.
     """
 
     mean: float
     std: float
-    min: float | None
+    min: float
     q1: float
     median: float
     q3: float
-    max: float | None
-    nz: int | None
+    max: float
+    nz: int
+    n: int
 
-    def without_extrema(self) -> Distribution:
-        """This distribution with ``min`` and ``max`` removed."""
-        return replace(self, min=None, max=None)
-
-    def as_dict(self) -> dict[str, float | None]:
-        """The output mapping; a removed extremum is absent rather than null."""
-        out = {f.name: getattr(self, f.name) for f in fields(self)}
-        for extremum in ("min", "max"):
-            if out[extremum] is None:
-                del out[extremum]
-        return out
+    def as_dict(self) -> dict[str, float]:
+        """The output mapping: every field but ``n``."""
+        return {f.name: getattr(self, f.name) for f in fields(self) if f.name != "n"}
 
 
 def numeric_distribution(values: pl.Series | np.ndarray) -> Distribution:
@@ -141,6 +132,7 @@ def numeric_distribution(values: pl.Series | np.ndarray) -> Distribution:
         q3=cast(np.quantile(arr, 0.75)) if n else 0,
         max=cast(arr.max()) if n else 0,
         nz=int((arr != 0).sum()) if n else 0,
+        n=n,
     )
 
 
@@ -628,6 +620,10 @@ def _effective_size_record(raw: dict) -> dict:
     return {"ne": None, "reason": "no_estimate", "code": _NO_ESTIMATE_CODE_RENAMES.get(code, code), **record}
 
 
+#: Upper edges of the inbreeding histogram's buckets above the zero bucket, after the lower edge ``INBRED_TOL``.
+F_HIST_EDGES: tuple[float, ...] = (INBRED_TOL, 0.0625, 0.125, 0.25, 1.0)
+
+
 def build_inbreeding_summary(F: np.ndarray) -> dict:
     """Aggregate a per-individual F vector into the YAML-shaped summary.
 
@@ -646,10 +642,9 @@ def build_inbreeding_summary(F: np.ndarray) -> dict:
     # (F <= INBRED_TOL). Starting at 0.0 double-counts F in (0, INBRED_TOL]
     # (in both the "0" bucket and the first range bucket), inflating the
     # histogram past 1.0. GLOSSARY.md: values 0 <= F <= 1e-9 are the zero bucket.
-    edges = [INBRED_TOL, 0.0625, 0.125, 0.25, 1.0]
     hist: dict[str, float] = {}
     hist["0"] = float((F <= INBRED_TOL).sum()) / n if n else 0.0
-    for lo, hi in pairwise(edges):
+    for lo, hi in pairwise(F_HIST_EDGES):
         label = f"<{hi:g}"
         hist[label] = float(((lo < F) & (hi >= F)).sum()) / n if n else 0.0
     return {
@@ -800,102 +795,3 @@ def build_individual_df(
         "n_descendant_paths": n_descendant_paths.astype(np.int64),
     }
     return pl.DataFrame({name: values for name, values in columns.items() if values is not None})
-
-
-# ---------------------------------------------------------------------------
-# --safe-attempt rules, one per section (``SectionSpec.redact``)
-# ---------------------------------------------------------------------------
-
-
-def redact_size_structure(sizes: dict, min_cell: int, n_total: int) -> None:
-    """Drop small components from ``next_components``; null small depth, ``sex_source`` and largest-component counts."""
-    sizes["next_components"] = [s for s in sizes.get("next_components", []) if s >= min_cell]
-    sizes["depth_counts"] = [(g if g is not None and g >= min_cell else None) for g in sizes.get("depth_counts", [])]
-    null_below(sizes, ("largest_component",), min_cell)
-    if sizes.get("sex_source") is not None:
-        null_below(sizes["sex_source"], tuple(sizes["sex_source"]), min_cell)
-
-
-def redact_sibship_size(sibships: dict, min_cell: int, n_total: int) -> None:
-    """Null the size histogram when few Sibships (one per Mating Pair) back it."""
-    if 0 < sibships["n_sibships"] < min_cell:
-        sibships["size_dist"] = dict.fromkeys(sibships["size_dist"])
-
-
-def redact_mating_pairs(mating: dict, min_cell: int, n_total: int) -> None:
-    """Null everything but ``n_pairs`` when there are few Mating Pairs, else a small multi-child count."""
-    if int(mating.get("n_pairs") or 0) > 0:
-        redact_small_group(mating, ("n_pairs",), min_cell, ("n_pairs_with_multiple_children",), size_key="n_pairs")
-    else:
-        null_below(mating, ("n_pairs_with_multiple_children",), min_cell)
-
-
-def redact_relationship_summary(summary: dict, min_cell: int, n_total: int) -> None:
-    """Null small pair counts and small per-degree tallies; redact small depth rows."""
-    null_below(summary, ("n_related_pairs", "n_unrelated_pairs"), min_cell)
-    for section in ("related_pairs_by_closest_degree", "closest_relationship_per_individual"):
-        vals = summary.get(section)
-        if isinstance(vals, dict):
-            null_below(vals, list(vals), min_cell)
-    for row in summary.get("related_pair_density_by_depth", []):
-        redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_individual_pairs", "n_related_pairs", "n_unrelated_pairs"),
-        )
-
-
-def redact_reproduction(reproduction: dict, min_cell: int, n_total: int) -> None:
-    """Null small reproductive and terminal counts."""
-    null_below(reproduction, ("n_reproductive", "n_terminal"), min_cell)
-
-
-def redact_founder_contribution(founder: dict, min_cell: int, n_total: int) -> None:
-    """Null small counts of founders with and without descendants."""
-    null_below(founder, ("n_founders_with_descendants", "n_founders_without_descendants"), min_cell)
-
-
-def redact_founder_summary(founder_summary: dict, min_cell: int, n_total: int) -> None:
-    """Redact small depth rows and a small bottleneck."""
-    for row in founder_summary.get("by_depth", []):
-        redact_small_group(row, ("depth", "n"), min_cell, ("active_founders",))
-    bottleneck = founder_summary.get("bottleneck")
-    if isinstance(bottleneck, dict):
-        null_below(bottleneck, ("min_active_founders",), min_cell)
-
-
-def redact_components(components: dict, min_cell: int, n_total: int) -> None:
-    """Null a small singleton count."""
-    null_below(components, ("singletons",), min_cell)
-
-
-def redact_sex_summary(sex_summary: dict, min_cell: int, n_total: int) -> None:
-    """Redact each sex as a group of ``n``."""
-    for stats in sex_summary.values():
-        redact_small_group(stats, ("n",), min_cell, ("n_founders", "n_reproductive", "n_terminal", "n_inbred"))
-
-
-def redact_depth_summary(depth_summary: list, min_cell: int, n_total: int) -> None:
-    """Redact each depth row as a group of ``n``."""
-    for row in depth_summary:
-        redact_small_group(
-            row,
-            ("depth", "n"),
-            min_cell,
-            ("n_male", "n_female", "n_founders", "n_reproductive", "n_terminal", "n_inbred"),
-        )
-
-
-def redact_inbreeding(inb: dict, min_cell: int, n_total: int) -> None:
-    """Null the F statistics when few individuals are inbred, and histogram buckets of few individuals."""
-    if 0 < int(inb.get("n_inbred") or 0) < min_cell:
-        inb["n_inbred"] = None
-        inb["frac_inbred"] = None
-        inb["mean_F"] = None
-        inb["max_F"] = None
-    for bucket, frac in list(inb.get("hist", {}).items()):
-        if frac is None:
-            continue
-        if 0 < frac * n_total < min_cell:
-            inb["hist"][bucket] = None

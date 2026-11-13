@@ -12,24 +12,23 @@ from pedsum.base import (
     SexSource,
     logger,
 )
-from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail
+from pedsum.cli.common import build_graph_or_fail, commit_thread_budget, load_or_fail, prepare_outputs
 from pedsum.multiple_births import compute_multiple_births
 from pedsum.pairs import augment_pair_counts
 from pedsum.parse import read_header
 from pedsum.pedigree_ops import group_mating_pairs
 from pedsum.progress import relationship_progress, timed
-from pedsum.redaction import SAFE_MIN_CELL
 from pedsum.report import (
-    apply_safe_attempt,
     as_plain,
     build_individual_data,
     build_pedigree_data,
     build_summary_data,
-    prepare_out_dir,
+    safe_meta_block,
     write_annotated_tsv,
     write_long_tsv,
     write_yaml,
 )
+from pedsum.safe_log import Public, detail
 from pedsum.sections import (
     build_inbreeding_summary,
     build_individual_df,
@@ -51,9 +50,16 @@ if TYPE_CHECKING:
 
 
 def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
-    """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs."""
-    if prepare_out_dir(args.out_dir) != 0:
-        return 1
+    """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs.
+
+    A ``--safe-attempt`` run writes the safe names of the YAMLs and TSVs and no ``annotated.tsv.gz``.
+    """
+    names = ["summary.yaml", "summary.extra.yaml"]
+    if args.tsv:
+        names += ["summary.pedigree.tsv", "summary.individual.tsv"]
+    paths = prepare_outputs(args, *names)
+    if isinstance(paths, int):
+        return paths
     commit_thread_budget(args)
     loaded = load_or_fail(args)
     if isinstance(loaded, int):
@@ -85,9 +91,9 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
         if e.code != "arithmetic_overflow":
             raise
         logger.error(
-            "descendant path counts overflow int64 at max depth %d, so summarize cannot "
+            "descendant path counts overflow int64 at max depth %s, so summarize cannot "
             "report n_descendant_paths for this pedigree; see README 'Deep pedigrees'",
-            max_depth,
+            detail(max_depth),
         )
         return 1
 
@@ -101,12 +107,6 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
     with timed("mating pairs grouped"):
         mating = group_mating_pairs(df, mother_rows, father_rows)
 
-    with timed("sibship sizes"):
-        sibships = compute_sibship_sizes(mating.sizes)
-
-    with timed("mating-pair summary"):
-        mating_pairs = compute_mating_pair_summary(mating.sizes)
-
     # Opt-in: no grouping, no moments, no sampler unless --sex-concordance was
     # typed. Runs on the validated final sex, so it must follow load_and_validate.
     sex_concordance: dict | None = None
@@ -117,48 +117,19 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             seed=args.sex_concordance_seed or 0,
         )
 
-    if args.per_individual_pairs:
-        with timed("relationship burden"):
-            with relationship_progress("relationship_burden") as progress:
-                burden = pg.relationship_burden(progress=progress)
-            pairs = augment_pair_counts(burden.category_counts)
-            pairs["_engine"] = "rust_streaming_burden"
-            relationship_summary = compute_relationship_summary_from_burden(df, burden)
-    else:
-        with (
-            timed("relationship pair counts (relationship_counts)"),
-            relationship_progress("relationship_counts") as progress,
-        ):
-            counts = pg.relationship_counts(max_degree=args.max_degree, progress=progress)
-        # The Rust row-streaming engine counts every pair under its closest
-        # category without materialising pair lists, so the 23 counts are
-        # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
-        pairs = augment_pair_counts(counts)
-        pairs["_engine"] = "rust_streaming"
-        relationship_summary = {
-            "computed": False,
-            "skip_reason": "per-individual relationship burden is opt-in; pass --per-individual-burden to compute it",
-            "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
-        }
-
-    # --multiple-birth-col: load_and_validate carried the sets in the frame.
-    multiple_births = compute_multiple_births(df, pairs) if "multiple_birth" in df.columns else None
-
     if args.inbreeding:
         if n_indiv * min(2 ** (max_depth + 1) - 2, n_indiv) > F_WALK_WARN_VISITS:
             logger.warning(
-                "computing F on %s rows at max depth %d; its time grows with rows and steeply "
+                "computing F on %s rows at max depth %s; its time grows with rows and steeply "
                 "with depth (README 'Deep pedigrees') — pass --no-inbreeding to skip",
-                f"{n_indiv:,}",
-                max_depth,
+                Public(f"{n_indiv:,}"),
+                detail(max_depth),
             )
         with timed("inbreeding (F + n_ancestors)"):
             F_vec = pg.inbreeding()
             n_anc = pg.distinct_ancestor_counts()
-            inb_summary: dict | None = build_inbreeding_summary(F_vec)
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
-        inb_summary = None
         F_vec = n_anc = None
 
     out_dir = args.out_dir
@@ -176,60 +147,106 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             comp_labels,
             sex_source,
         )
-        founder_summary, n_founder_anc = compute_founder_summary(idf, mother_rows, father_rows)
-        idf = idf.with_columns(
-            pl.Series("n_founder_ancestors", n_founder_anc),
-            pl.Series("ecg", equivalent_complete_generations(df, mother_rows, father_rows)),
-        )
-
-    with timed("aggregate pedigree sections"):
-        aggregates = compute_aggregate_sections(idf, founder_summary=founder_summary)
-
-    tsv_payload = build_pedigree_data(
-        args.in_path,
-        cmd,
-        size,
-        sibships,
-        pairs,
-        inb_summary,
-        mating_pairs,
-        relationship_summary,
-        aggregates,
-        sex_concordance,
-        max_degree=args.max_degree,
-        multiple_births=multiple_births,
-    )
-
-    ind_data = build_individual_data(idf, args.in_path, cmd)
+        ecg = pl.Series("ecg", equivalent_complete_generations(df, mother_rows, father_rows))
+        if args.safe_attempt:
+            idf = idf.with_columns(ecg)
+        else:
+            founder_summary, n_founder_anc = compute_founder_summary(idf, mother_rows, father_rows)
+            idf = idf.with_columns(pl.Series("n_founder_ancestors", n_founder_anc), ecg)
 
     if args.safe_attempt:
-        apply_safe_attempt(tsv_payload, ind_data)
-        logger.info("safe-attempt redaction applied (min cell = %d)", SAFE_MIN_CELL)
-    # The writers below walk plain dicts and lists.
-    tsv_payload = as_plain(tsv_payload)
-    ind_data = as_plain(ind_data)
+        # Imported here so an ordinary run does not pay for loading the release list.
+        from pedsum import safe_summary
 
-    slim_yaml, extra_yaml = build_summary_data(tsv_payload, ind_data)
-    write_yaml(slim_yaml, out_dir / "summary.yaml")
-    write_yaml(extra_yaml, out_dir / "summary.extra.yaml")
-    logger.info(
-        "wrote %s/{summary.yaml, summary.extra.yaml}",
-        out_dir,
-    )
+        # Nothing below reads the report payload: every safe output is laid out from the release.
+        # So a safe run computes none of its sections, and counts the pairs in the pass that gives their support.
+        with timed("safe-attempt pair counts and support"):
+            pairs = safe_summary.pair_counts(
+                pg, 5 if args.per_individual_pairs else args.max_degree, mother_rows, father_rows
+            )
+        source = safe_summary.build_source(
+            meta=safe_meta_block(args.in_path, cmd, n_indiv),
+            max_degree=args.max_degree,
+            df=df,
+            idf=idf,
+            mating=mating,
+            n_components=size["n_components"],
+            sex_source=size.get("sex_source"),
+            pairs=pairs,
+            sex_concordance=sex_concordance,
+        )
+        outputs = safe_summary.safe_outputs(source, args.min_cell)
+        slim_yaml, extra_yaml = outputs.slim, outputs.extra
+        pedigree_tsv, individual_tsv = outputs.pedigree_tsv, outputs.individual_tsv
+        logger.info("safe-attempt: release list applied (min cell = %d)", Public(args.min_cell))
+    else:
+        with timed("sibship sizes"):
+            sibships = compute_sibship_sizes(mating.sizes)
 
+        with timed("mating-pair summary"):
+            mating_pairs = compute_mating_pair_summary(mating.sizes)
+
+        if args.per_individual_pairs:
+            with timed("relationship burden"):
+                with relationship_progress("relationship_burden") as progress:
+                    burden = pg.relationship_burden(progress=progress)
+                pairs = augment_pair_counts(burden.category_counts)
+                pairs["_engine"] = "rust_streaming_burden"
+                relationship_summary = compute_relationship_summary_from_burden(df, burden)
+        else:
+            with (
+                timed("relationship pair counts (relationship_counts)"),
+                relationship_progress("relationship_counts") as progress,
+            ):
+                counts = pg.relationship_counts(max_degree=args.max_degree, progress=progress)
+            # The Rust row-streaming engine counts every pair under its closest
+            # category without materialising pair lists, so the 23 counts are
+            # exact and peak memory stays O(N) (pedigree-graph ADR 0010).
+            pairs = augment_pair_counts(counts)
+            pairs["_engine"] = "rust_streaming"
+            relationship_summary = {
+                "computed": False,
+                "skip_reason": "per-individual relationship burden is opt-in; pass --per-individual-burden to compute it",
+                "n_individual_pairs": int(n_indiv * (n_indiv - 1) // 2),
+            }
+
+        # --multiple-birth-col: load_and_validate carried the sets in the frame.
+        multiple_births = compute_multiple_births(df, pairs) if "multiple_birth" in df.columns else None
+
+        inb_summary = None if F_vec is None else build_inbreeding_summary(F_vec)
+
+        with timed("aggregate pedigree sections"):
+            aggregates = compute_aggregate_sections(idf, founder_summary=founder_summary)
+
+        # The writers below walk plain dicts and lists.
+        pedigree_tsv = as_plain(
+            build_pedigree_data(
+                args.in_path,
+                cmd,
+                size,
+                sibships,
+                pairs,
+                inb_summary,
+                mating_pairs,
+                relationship_summary,
+                aggregates,
+                sex_concordance,
+                max_degree=args.max_degree,
+                multiple_births=multiple_births,
+            )
+        )
+        individual_tsv = as_plain(build_individual_data(idf, args.in_path, cmd))
+        slim_yaml, extra_yaml = build_summary_data(pedigree_tsv, individual_tsv)
+
+    write_yaml(slim_yaml, paths["summary.yaml"])
+    write_yaml(extra_yaml, paths["summary.extra.yaml"])
     if args.tsv:
-        write_long_tsv(tsv_payload, out_dir / "summary.pedigree.tsv")
-        write_long_tsv(ind_data, out_dir / "summary.individual.tsv")
-        logger.info(
-            "wrote %s/{summary.pedigree.tsv, summary.individual.tsv}",
-            out_dir,
-        )
+        write_long_tsv(pedigree_tsv, paths["summary.pedigree.tsv"])
+        write_long_tsv(individual_tsv, paths["summary.individual.tsv"])
+    logger.info("wrote %s/{%s}", out_dir, Public(", ".join(path.name for path in paths.values())))
 
     if args.safe_attempt:
-        logger.info(
-            "safe-attempt: skipped %s/annotated.tsv.gz (per-individual)",
-            out_dir,
-        )
+        logger.info("safe-attempt: annotated.tsv.gz is not written (per-individual)")
     else:
         # Stable phase label (no per-run path) so the benchmark profiler can
         # aggregate this phase across repeats; out_dir is already in the

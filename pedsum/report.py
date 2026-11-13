@@ -1,15 +1,15 @@
-"""Report payload builders, safe-attempt redaction, and output writers."""
+"""Report payload builders and output writers."""
 
 from __future__ import annotations
 
 import gzip
 import math
 import os
+import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Union
 
@@ -19,12 +19,12 @@ import yaml
 from pedsum.base import VERSION, PedigreeError, logger
 from pedsum.checks import CHECK_GROUPS, CHECK_LABELS
 from pedsum.parse import plink_sex, read_aligned_columns
-from pedsum.redaction import SAFE_MIN_CELL
-from pedsum.schema import SECTION_SPECS, categorise_pedigree, split_individual_distributions, split_summary
+from pedsum.safe_log import Public
+from pedsum.schema import categorise_pedigree, split_individual_distributions, split_summary
 from pedsum.sections import INBREEDING_COLUMNS, Distribution, numeric_distribution
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Collection, Generator, Iterator
     from pathlib import Path
 
     from pedsum.checks import CheckResult, Finding
@@ -113,7 +113,7 @@ _SIZE_STRUCTURE_KEYS: tuple[str, ...] = (
 )
 
 
-def _meta(path: Path, cmd: str, n_total: int | None) -> dict:
+def meta_block(path: Path, cmd: str, n_total: int | None) -> dict:
     """The block every report starts with, in this key order: what ran on which input, and how many rows."""
     return {
         "input": str(path),
@@ -122,6 +122,16 @@ def _meta(path: Path, cmd: str, n_total: int | None) -> dict:
         "generated_at": _now_iso(),
         "n_total": n_total,
     }
+
+
+def safe_meta_block(path: Path, cmd: str, n_total: int | None) -> dict:
+    """``meta_block`` for a ``--safe-attempt`` file: the input and every path in the command by base name only.
+
+    A directory can name a person or a project, and the file is meant to
+    leave the machine it was written on.
+    """
+    words = [os.path.basename(word.rstrip(os.sep)) if os.sep in word else word for word in shlex.split(cmd)]
+    return meta_block(type(path)(path.name), shlex.join(words), n_total)
 
 
 def build_effective_size_data(
@@ -134,7 +144,7 @@ def build_effective_size_data(
 ) -> dict:
     """The ``effective_size.yaml`` payload: the summary's meta block, then the run status and every estimator."""
     return {
-        **_meta(path, cmd, n_total),
+        **meta_block(path, cmd, n_total),
         "status": status,
         "estimators_requested": requested,
         "effective_size": effective_size,
@@ -148,7 +158,7 @@ ASSORTATIVE_MATING_FIGURES = 4
 
 def build_assortative_mating_data(path: Path, cmd: str, n_total: int, assortative_mating: dict) -> dict:
     """The ``assortative_mating.yaml`` payload: the summary's meta block, then the Mate Correlation section."""
-    return {**_meta(path, cmd, n_total), "assortative_mating": assortative_mating}
+    return {**meta_block(path, cmd, n_total), "assortative_mating": assortative_mating}
 
 
 def build_pedigree_data(
@@ -173,7 +183,7 @@ def build_pedigree_data(
     section arrives as YAML-ready native types; a None section is absent.
     """
     return {
-        **_meta(path, cmd, size["n_total"]),
+        **meta_block(path, cmd, size["n_total"]),
         "max_degree_enumerated": max_degree,
         "size_structure": _size_structure(size),
         "sibship_size": sibships,
@@ -230,39 +240,10 @@ def build_individual_data(
 ) -> dict:
     """Canonical nested dict for the per-individual distribution report."""
     distributions = {col: numeric_distribution(idf[col]) for col in _NUMERIC_COLS if col in idf.columns}
-    return {**_meta(path, cmd, len(idf)), "distributions": distributions}
+    return {**meta_block(path, cmd, len(idf)), "distributions": distributions}
 
 
 _SUMMARY_META_KEYS = ("input", "command", "version", "generated_at", "n_total")
-
-
-def apply_safe_attempt(ped_data: dict, ind_data: dict, min_cell: int = SAFE_MIN_CELL) -> None:
-    """Best-effort small-cell redaction (in place). Not a safe-harbor.
-
-    Runs each summary section's ``SectionSpec.redact`` rule, removes the
-    extrema of every ``Distribution`` in the pedigree payload, and in each
-    per-individual distribution also nulls a small nonzero count.
-    """
-    n_total = int(ped_data["n_total"])
-    for spec in SECTION_SPECS:
-        value = ped_data.get(spec.name)
-        if spec.redact is not None and value is not None:
-            spec.redact(value, min_cell, n_total)
-    _strip_extrema(ped_data)
-    distributions = ind_data["distributions"]
-    for col, dist in distributions.items():
-        small_nz = 0 < (dist.nz or 0) < min_cell
-        distributions[col] = replace(dist.without_extrema(), nz=None if small_nz else dist.nz)
-
-
-def _strip_extrema(obj: dict | list) -> None:
-    """Replace every ``Distribution`` nested in ``obj`` by its copy without extrema."""
-    items = obj.items() if isinstance(obj, dict) else enumerate(obj)
-    for key, value in list(items):
-        if isinstance(value, Distribution):
-            obj[key] = value.without_extrema()
-        elif isinstance(value, (dict, list)):
-            _strip_extrema(value)
 
 
 def as_plain(payload: dict) -> dict:
@@ -380,10 +361,38 @@ def write_long_tsv(data: dict, path: Path) -> None:
         df.write_csv(tmp, separator="\t")
 
 
-def prepare_out_dir(path: Path) -> int:
+#: The extension of a ``--safe-attempt`` file, by the ordinary one. Statistics
+#: Denmark's list of transferable file types has ``txt`` and ``tab`` and has
+#: neither ``yaml`` nor ``tsv``; the content is the same text either way.
+SAFE_SUFFIX = {".yaml": ".txt", ".tsv": ".tab"}
+
+
+def output_name(name: str, *, safe: bool) -> str:
+    """The file name an output called ``name`` in an ordinary run has in this run.
+
+    A name without a ``SAFE_SUFFIX`` entry (``annotated.tsv.gz``) raises
+    ``KeyError`` under ``safe``: a ``--safe-attempt`` run has no such output.
+    """
+    if not safe:
+        return name
+    stem, suffix = os.path.splitext(name)
+    return stem + SAFE_SUFFIX[suffix]
+
+
+def id_log_name(command: str) -> str:
+    """The ``--id-log`` file of subcommand ``command``."""
+    return f"{command}.ids.local.log"
+
+
+def prepare_out_dir(path: Path, *, only: Collection[str] | None = None) -> int:
     """Create ``path`` as a directory if needed; refuse if it is a file.
 
-    Returns 0 on success, 1 if the path exists as a non-directory.
+    ``only`` is the ``--safe-attempt`` rule: the file names this run writes.
+    A directory holding anything else is refused before it is touched, since
+    an ordinary run's ``annotated.tsv.gz`` or ``summary.yaml`` beside the safe
+    files could be transferred in their place.
+
+    Returns 0 on success, 1 on a refusal.
     """
     if path.exists() and not path.is_dir():
         logger.error(
@@ -391,6 +400,17 @@ def prepare_out_dir(path: Path) -> int:
             path,
         )
         return 1
+    if only is not None and path.is_dir():
+        others = sorted(entry.name for entry in path.iterdir() if entry.name not in only)
+        if others:
+            logger.error(
+                "--safe-attempt writes only into a directory that holds nothing but its own files (%s); "
+                "--out %s also holds %s. Pass a new or empty directory",
+                Public(", ".join(sorted(only))),
+                path,
+                Public(", ".join(others[:5]) + (", ..." if len(others) > 5 else "")),
+            )
+            return 1
     path.mkdir(parents=True, exist_ok=True)
     return 0
 
@@ -536,14 +556,14 @@ def format_check_summary(path: Path, n_total: int, results: list[CheckResult]) -
     return "\n".join(lines) + "\n"
 
 
-def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
-    """Tab-separated log: one row per finding (check / id / row / detail / n_refs).
+def findings_frame(findings: list[Finding], labels: IdLabels | None) -> pl.DataFrame:
+    """One row per finding (check / id / row / detail / n_refs).
 
     ``labels`` is None when the id column did not parse, so no finding has an id.
     """
     # Missing id/row are nulls (not "") so the CSV writer emits a bare empty
     # field; polars quotes explicit empty strings as "".
-    df = pl.DataFrame(
+    return pl.DataFrame(
         {
             "check": [f.check for f in findings],
             "id": [None if f.id is None or labels is None else labels.label(f.id) for f in findings],
@@ -553,8 +573,12 @@ def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels
         },
         schema={"check": pl.String, "id": pl.String, "row": pl.String, "detail": pl.String, "n_refs": pl.Int64},
     )
+
+
+def write_validate_log(findings: list[Finding], out_path: Path, labels: IdLabels | None) -> None:
+    """``findings_frame`` as a tab-separated log."""
     with atomic_output(out_path) as tmp:
-        df.write_csv(tmp, separator="\t")
+        findings_frame(findings, labels).write_csv(tmp, separator="\t")
 
 
 def write_cleared_links(cleared: list[tuple[str, str, str, str]], out_path: Path) -> None:

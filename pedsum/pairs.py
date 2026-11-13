@@ -9,7 +9,6 @@ from pedigree_graph import RELATIONSHIPS, PedigreeGraph, PedigreeValidationError
 
 from pedsum.base import PedigreeError
 from pedsum.pedigree_ops import IdIndex
-from pedsum.redaction import null_below
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -105,7 +104,11 @@ def build_pedigree_graph(df: pl.DataFrame, labels: IdLabels | None = None) -> Pe
     except PedigreeValidationError as e:
         if e.code != "parent_in_both_roles":
             raise
-        raise PedigreeError(_both_roles_message(df, e.fields, labels)) from e
+        raise PedigreeError(
+            _both_roles_message(df, e.fields, labels),
+            public="an id is both a mother and a father, which pedigree-graph refuses; run validate on the "
+            "input without --allow-missing-sex or --no-sex-check to see which",
+        ) from e
 
 
 def _both_roles_message(df: pl.DataFrame, fields: Mapping[str, object], labels: IdLabels | None) -> str:
@@ -127,12 +130,3 @@ def _both_roles_message(df: pl.DataFrame, fields: Mapping[str, object], labels: 
         "refuses; validate keeps it only under --allow-missing-sex or --no-sex-check. Rerun validate without "
         "them: such an id BLOCKs there, and --drop-offending drops it"
     )
-
-
-def redact_relationship_pairs(pairs: dict, min_cell: int, n_total: int) -> None:
-    """``--safe-attempt``: null each small count, and each small ``by_degree`` count."""
-    for code in list(pairs):
-        if code == "by_degree":
-            null_below(pairs["by_degree"], list(pairs["by_degree"]), min_cell)
-        elif isinstance(pairs[code], int):
-            null_below(pairs, (code,), min_cell)

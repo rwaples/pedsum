@@ -1,0 +1,85 @@
+exit: 0
+artifacts: ['assortative_mating.txt']
+=== assortative_mating.txt ===
+input: <input>
+command: <command>
+version: <version>
+n_total: 200
+safe_attempt_min_cell: 3
+assortative_mating:
+  traits:
+  - name: dx
+    type: binary
+    type_source: inferred
+    rows:
+      status: intact
+      total: 200
+      bins:
+        with_value: 200
+        missing: 0
+  settings:
+    permutations: 19
+    bootstrap: 20
+    seed: 0
+    threads: N
+    ci_level: 0.95
+    ci_method: bootstrap
+    stratify_by: depth
+    birth_year_bin: null
+    min_stratum_networks: 2
+  inference:
+    se_method: cluster-robust sandwich over Mate Networks of the stacked two-step
+      estimating equations (thresholds, stratum means and variances, then rho), G/(G-1)
+      small-sample factor
+    ci_scale: Fisher z for correlations, log for the odds ratio
+    bootstrap_unit: mate_network
+    bootstrap_assumption: Mate Networks are independent. Dependence from remating
+      is kept; dependence between networks through ancestry or siblings is not modelled.
+    bootstrap_method: 'one_step: each draw refits the first step (thresholds, stratum
+      moments) and every closed-form estimator exactly on the resampled Mate Networks,
+      and takes one Newton step for rho from the observed estimate with the draw-weighted
+      score and the full-sample Hessian'
+    permutation_null: father trait vectors exchangeable within blocks
+    permutation_blocks: father_stratum x father_missingness_pattern
+    permutation_statistic: 'score_at_zero: the score of the latent-correlation log-likelihood
+      at rho = 0 with every margin refit on the permuted pairs (polychoric, tetrachoric,
+      polyserial, biserial); pearson: Pearson r (continuous x continuous)'
+    permutation_stopping: besag_clifford_closed
+    permutation_stop_h: 20
+  mating_pairs:
+    n_total: 99
+    n_mothers_multiple_mates: 24
+    n_fathers_multiple_mates: 19
+  mate_correlation:
+  - mother: dx
+    father: dx
+    n: 99
+    n_mate_networks: 56
+    n_fixed_fathers: 0
+    crude:
+      table:
+        status: blanked
+        total: 99
+      tetrachoric:
+        rho: null
+        reason: withheld
+      odds_ratio:
+        value: null
+        reason: withheld
+      phi:
+        r: null
+        reason: withheld
+    stratified:
+      tetrachoric:
+        rho: null
+        reason: withheld
+        n_strata_mothers: null
+        n_strata_fathers: null
+  notes:
+  - Mating Pairs are observed only through offspring; partnerships without a recorded
+    child are absent.
+  - Phenotypic correlation; tetrachoric/polychoric/polyserial assume bivariate-normal
+    liability, the other estimators describe the observed values.
+  - Censored age-dependent diagnoses are not corrected; a mate who has not yet been
+    diagnosed counts as unaffected.
+
