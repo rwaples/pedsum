@@ -106,7 +106,7 @@ def test_validation_config_carries_every_option():
         "validate", "--in", "p.tsv", "--out", "o",
         "--id-col", "i", "--sex-col", "s", "--mother-col", "m", "--father-col", "f",
         "--birth-year-col", "b", "--birth-year-min", "1900", "--birth-year-max", "2000", "--missing-parent-token", "0",
-        "--min-parent-age", "2", "--birth-date-col", "d",
+        "--min-parent-age", "2", "--max-parent-age", "70", "--birth-date-col", "d",
         "--allow-missing-sex", "--no-override-asserted-sex", "--no-sex-check", "--break-cycles",
         "--break-role-conflicts",
         "--max-children-mother", "20", "--max-children-father", "50",

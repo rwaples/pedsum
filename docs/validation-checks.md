@@ -60,7 +60,7 @@ All of these block.
 | `empty_pedigree` | The file has at least one row. |
 | `id_dtype` | Every row has an ID. Any non-missing text is a valid ID, and `001` and `1` are different IDs. |
 | `sex_tokens` | Every sex value is recognised: M/F in any case, Male/Female, or PLINK 1, 2, 0. Blank, `NA`, `NaN`, `N/A`, `.`, `?`, `None`, `null`, `-1`, `U` and `Unknown` are accepted as unknown sex. |
-| `birth_year_dtype` | The birth-year column parses as numbers. A fractional year is truncated to a whole year. Missing tokens and `-1` mean unknown. Runs only with `--birth-year-col`. |
+| `birth_year_dtype` | The birth-year column parses as numbers. A fractional year is truncated to a whole year. Missing tokens and `-1` mean unknown, and are the only ways to write it: any other negative value (such as `-1.5`), `inf`, and a value above 2147483647 (such as 2147483647.5) fail, and the detail names the value. Runs only with `--birth-year-col`. |
 | `birth_date_dtype` | Every known birth date is ISO `YYYY-MM-DD`. Runs only with `--birth-date-col`. |
 | `zygosity_tokens` | The zygosity column holds MZ or DZ in any case, or a missing value. Runs only with `--zygosity-col`. |
 
@@ -105,10 +105,10 @@ These run only when the matching column is named. All are keep or drop.
 | Check | What it tests |
 |---|---|
 | `birth_year_range` | Every known birth year is within `--birth-year-min` and `--birth-year-max` (default 1800 to next year). |
-| `birth_year_topology` | Each parent is at least `--min-parent-age` years older than the child (default 0), judged on the birth-year column. Used for a parent-child link where the two birth dates are not both known. A link is skipped unless both birth years are known; a missing year is not taken from a birth date. |
+| `birth_year_topology` | Each parent is at least `--min-parent-age` years older than the child (default 0) and, with `--max-parent-age`, at most that many years older, judged on birth years. A year difference overstates the age by up to 1, so a difference is flagged only above `--max-parent-age` + 1. If `birth_date_dtype` fails, every link is judged on birth years, and the note says so. A row with no year in the year column takes the year of its birth date. Used for a parent-child link where the two birth dates are not both known. A link is skipped unless both birth years are known. |
 | `birth_date_range` | Every known birth date has a year within the same range. |
 | `birth_date_year_consistency` | A row's birth date falls inside its birth year, when both are given. |
-| `birth_date_topology` | The same parent-age rule judged on birth dates to the day, for links where both dates are known. |
+| `birth_date_topology` | The same parent-age limits judged on birth dates to the day, in completed years, for links where both dates are known. |
 
 ## Multiple birth checks
 
@@ -116,7 +116,7 @@ Both are autofix.
 
 | Check | What it tests |
 |---|---|
-| `multiple_birth_sets` | With `--multiple-birth-col`: every member of a multiple-birth set shares both known parents with another member. A member that does not has its set cleared. A set that holds two or more groups of full sibs is cleared for every member. |
+| `multiple_birth_sets` | With `--multiple-birth-col`: every member of a multiple-birth set shares both known parents with another member. A member that does not has its set cleared. A set that holds two or more groups of full sibs is cleared for every member. A set whose full sibs were born apart is cleared for every member too: their known birth dates, sorted, have a gap of more than 7 days, or, when some date is unknown, their known birth years (a missing one taken from the date) span more than 1. Members cleared for another reason do not count. Unknown birth data clears nothing. |
 | `mz_links` | With `--zygosity-col`, which needs `--multiple-birth-col`: MZ marks form pairs of co-twins. A mark, MZ or DZ, is cleared when its row is in no set. An MZ mark is also cleared when it is the only MZ in its set, when the set has three or more MZ, or when the two co-twins have known and different sex. |
 
 ## Options that change what the checks do
@@ -130,8 +130,9 @@ Both are autofix.
 | `--no-override-asserted-sex` | Turns off the `sex_role_override` repair. |
 | `--no-sex-check` | Bypasses `parent_refs_sex_conflict`. If such a parent is kept, the other pedsum commands refuse the pedigree. |
 | `--missing-parent-token TOKEN` | Names an extra token that means a missing parent, such as 0 or 9999. Repeatable. It is an error if the token is also the ID of a row. |
+| `--min-parent-age N`, `--max-parent-age N` | Set the parent-age limits for `birth_year_topology` and `birth_date_topology`. The minimum defaults to 0, which flags only a child born before a parent. The maximum defaults to 0, which is off; 70 suits a human register. |
 | `--max-children-mother N`, `--max-children-father N` | Set the limits for `parent_child_count`. |
-| `--twin-max-days N` | Groups full sibs into multiple-birth sets, where each is born at most N days after the one before. N is the gap between adjacent births, not the span of the set. Needs `--birth-date-col`, and cannot be combined with `--multiple-birth-col`. |
+| `--twin-max-days N` | Groups full sibs into multiple-birth sets, where each is born at most N days after the one before. N is the gap between adjacent births, not the span of the set. N runs from 0 to 7: a larger N is a usage error (exit 2), since a later validate with `--multiple-birth-col` clears a set whose adjacent births are more than 7 days apart. Needs `--birth-date-col`, and cannot be combined with `--multiple-birth-col`. |
 
 ## Run order
 
@@ -146,19 +147,3 @@ Both are autofix.
 `acyclic`, `birth_year_range`, `birth_year_topology`, `birth_date_range`,
 `birth_date_year_consistency`, `birth_date_topology`, `multiple_birth_sets`,
 `mz_links`.
-
-## Known gaps
-
-A review reported these. They are not fixed.
-
-- **Mixed dates and years.** A parent with only a birth date and a child with
-  only a birth year are not compared by either topology check, so an
-  impossible order between them passes.
-- **Birth years that collide with unknown.** A value such as `-1.5` is
-  truncated to `-1`, which means unknown, and passes every check.
-- **Infinite or overflowing birth years.** `inf` passes `birth_year_dtype` and
-  fails only `birth_year_range`, which keeps the row instead of blocking.
-- **Multiple-birth sets and birth dates.** A supplied set is not checked for
-  birth compatibility. Two full sibs born ten years apart and marked MZ are
-  accepted and linked as MZ co-twins.
-- **No maximum parental age.** Only the minimum is checked.

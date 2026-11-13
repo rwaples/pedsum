@@ -68,14 +68,14 @@ def test_parent_int_parser_preserves_integer_tokens(values: list[int]) -> None:
     st.lists(
         st.one_of(
             st.integers(min_value=-1, max_value=3000).map(str),
-            st.floats(min_value=-1, max_value=3000, allow_nan=False, allow_infinity=False).map(str),
+            st.floats(min_value=0, max_value=3000, allow_nan=False, allow_infinity=False).map(str),
         ),
         min_size=1,
         max_size=100,
     )
 )
 def test_birth_year_parser_matches_int32_cast(tokens: list[str]) -> None:
-    """Birth-year parsing accepts numeric tokens and follows NumPy int32 casting."""
+    """Birth-year parsing accepts -1 and nonnegative numeric tokens and follows NumPy int32 casting."""
     series = pl.Series(tokens, dtype=pl.String)
     parsed = as_birth_year_col(series, "birth_year")
     expected = np.array([float(t) for t in tokens], dtype=np.float64).astype(np.int32)

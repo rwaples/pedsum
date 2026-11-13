@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from conftest import EXAMPLE, load_validate_tsv_gz, run_pedsum
+from conftest import EXAMPLE, load_validate_tsv_gz, run_check, run_pedsum
 from conftest import write_ped as _write_ped
 
 from pedsum.base import PedigreeError
+from pedsum.checks import CheckStatus
+from pedsum.parse import as_birth_year_col
 from pedsum.validate import ValidationConfig, load_and_validate
 
 
@@ -25,7 +27,7 @@ def test_validate_without_birth_year_col_skips_all_three(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "birth_year column parses as numeric ... SKIP" in r.stderr
     assert "birth years within sanity range ....... SKIP" in r.stderr
-    assert "parent age at birth >= min parent age . SKIP" in r.stderr
+    assert "parent age at birth within limits ..... SKIP" in r.stderr
 
 
 def test_birth_year_dtype_check_fails_for_garbage(tmp_path):
@@ -111,7 +113,7 @@ def test_birth_year_topology_check_fails_for_inversion(tmp_path):
     )
     assert r.returncode == 1, r.stderr
     assert "Traceback" not in r.stderr
-    assert "parent age at birth >= min parent age . FAIL" in r.stderr
+    assert "parent age at birth within limits ..... FAIL" in r.stderr
     log = (tmp_path / "out" / "validate.log").read_text()
     assert "birth_year_topology" in log
     # Both mother and father edges should be flagged.
@@ -263,3 +265,25 @@ def test_birth_year_missing_column_errors(tmp_path):
     assert res.returncode == 1
     assert "missing required columns" in res.stderr
     assert "does_not_exist" in res.stderr
+
+
+@pytest.mark.parametrize("token", ["-1.5", "-0.5", "-2", "-1950", "inf", "-inf", "2147483647.5", "2147483648", "1e12"])
+def test_birth_year_that_is_not_a_year_fails_dtype(token):
+    """Only -1 and the missing tokens mean unknown; a negative, non-finite or out-of-int32 value names itself."""
+    with pytest.raises(PedigreeError, match=f"'{token}'"):
+        as_birth_year_col(pl.Series(["1980", token]), "by")
+
+
+def test_unknown_birth_year_spellings_still_parse():
+    """-1, -1.0 and the missing tokens stay unknown; fractional years truncate."""
+    got = as_birth_year_col(pl.Series(["-1", "-1.0", "NA", "", None, "1988.7", "0"]), "by")
+    assert got.tolist() == [-1, -1, -1, -1, -1, 1988, 0]
+
+
+def test_infinite_birth_year_fails_dtype_without_a_cast_warning(recwarn):
+    """birth_year_dtype (a BLOCK Check) FAILs on inf, naming it, and the cast raises no RuntimeWarning."""
+    rows = [{"id": "1", "sex": "F", "mother": "-1", "father": "-1", "by": "inf"}]
+    result = run_check("birth_year_dtype", rows, ValidationConfig(birth_year_col="by"))
+    assert result.status == CheckStatus.FAIL
+    assert "'inf'" in result.findings[0].detail
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]

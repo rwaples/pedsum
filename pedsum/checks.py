@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from pedsum.base import PARENT_ROLES, SEX_UNKNOWN, ParentRole, PedigreeError, logger
+from pedsum.base import BIRTHS_APART_DAYS, PARENT_ROLES, SEX_UNKNOWN, ParentRole, PedigreeError, logger
 from pedsum.ids import parse_ids
 from pedsum.parse import (
     ZYGOSITY_MZ,
@@ -789,15 +789,19 @@ def _parent_ages(
     checked: Callable[[np.ndarray, np.ndarray], np.ndarray],
     age: Callable[[np.ndarray, np.ndarray], np.ndarray],
     shown: Label,
+    max_slack: int = 0,
 ) -> CheckResult:
-    """One Finding per parent-child edge whose parent was younger than ``--min-parent-age`` at the birth.
+    """One Finding per parent-child edge whose parent's age at the birth is outside the parent-age limits.
 
     ``checked(child_rows, parent_rows)`` picks the edges this Check owns, and
     ``age`` gives the parent's whole years at each of their births, negative
-    for a child born before its parent. The default age 0 flags only such a
-    child. ``shown(row)`` names a row's birth year or date in the detail.
+    for a child born before its parent. A parent younger than
+    ``--min-parent-age`` fails, and so does one older than
+    ``--max-parent-age`` plus ``max_slack`` when that is set (0 is off). The default limits
+    flag only a child born before a parent. ``shown(row)`` names a row's
+    birth year or date in the detail.
     """
-    min_age = ctx.config.min_parent_age
+    min_age, max_age = ctx.config.min_parent_age, ctx.config.max_parent_age
     ids, _, _ = ctx.require_id_parents()
     findings: list[Finding] = []
     for role, parent_rows in zip(PARENT_ROLES, ctx.parent_rows(), strict=True):
@@ -805,39 +809,49 @@ def _parent_ages(
         child_rows = np.flatnonzero(parent_rows != -1)
         child_rows = child_rows[checked(child_rows, parent_rows[child_rows])]
         ages = age(child_rows, parent_rows[child_rows])
-        for i in np.flatnonzero(ages < min_age):
+        too_old = (ages > max_age + max_slack) & bool(max_age)
+        for i in np.flatnonzero((ages < min_age) | too_old):
             row_idx = int(child_rows[i])
             parent_idx = int(parent_rows[row_idx])
             child = f"id={ctx.label(ids[row_idx])} {shown(row_idx)}"
             parent = f"{role} (id={ctx.label(parents[row_idx])}) {shown(parent_idx)}"
-            detail = f"{child} < {parent}"
-            if ages[i] >= 0:
-                detail = f"{child} is {int(ages[i])} year(s) after {parent}; --min-parent-age is {min_age}"
+            gap = f"{child} is {int(ages[i])} year(s) after {parent}"
+            if ages[i] < 0:
+                detail = f"{child} < {parent}"
+            elif too_old[i]:
+                slack = f" (more than {max_age + max_slack} on birth years)" if max_slack else ""
+                detail = f"{gap}; --max-parent-age is {max_age}{slack}"
+            else:
+                detail = f"{gap}; --min-parent-age is {min_age}"
             findings.append(Finding(id=int(ids[row_idx]), row=ctx.row(row_idx), detail=detail))
-    if findings or not min_age:
+    limits = [f"--{flag} {n}" for flag, n in (("min-parent-age", min_age), ("max-parent-age", max_age)) if n]
+    if findings or not limits:
         return _verdict(findings)
-    return CheckResult(CheckStatus.PASS, note=f"--min-parent-age {min_age}")
+    return CheckResult(CheckStatus.PASS, note=", ".join(limits))
 
 
 def _birth_year_topology(ctx: ValidationContext) -> CheckResult:
-    """``--min-parent-age`` on the birth years of each edge whose two birth dates are not both known.
+    """The parent-age limits on the birth years of each edge whose two birth dates are not both known.
 
-    Edges with an unknown birth year are skipped; ``birth_date_topology``
-    checks the edges with both dates known.
+    A row with no year in the year column takes the year of its birth date.
+    Edges with an unknown year are skipped; ``birth_date_topology`` checks
+    the edges with both dates known. A year difference overstates the age by
+    up to 1, so ``--max-parent-age`` flags only a difference above the limit
+    plus 1, as ``--min-parent-age`` flags only one below its limit.
     """
-    birth_year, birth_date = ctx.birth_year, ctx.birth_date
-    assert birth_year is not None
+    year_col, birth_date = ctx.birth_year, ctx.birth_date
+    assert year_col is not None
+    birth_year = _birth_years(year_col, birth_date)
 
     def checked(child: np.ndarray, parent: np.ndarray) -> np.ndarray:
         both = (birth_year[child] != -1) & (birth_year[parent] != -1)
         return both & ~_both_dated(birth_date, child, parent)
 
-    return _parent_ages(
-        ctx,
-        checked,
-        lambda child, parent: birth_year[child] - birth_year[parent],
-        lambda i: f"birth_year={int(birth_year[i])}",
-    )
+    def shown(i: int) -> str:
+        source = " (from birth_date)" if year_col[i] == -1 else ""
+        return f"birth_year={int(birth_year[i])}{source}"
+
+    return _parent_ages(ctx, checked, lambda child, parent: birth_year[child] - birth_year[parent], shown, max_slack=1)
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +934,7 @@ def _birth_date_year_consistency(ctx: ValidationContext) -> CheckResult:
 
 
 def _birth_date_topology(ctx: ValidationContext) -> CheckResult:
-    """``--min-parent-age`` on the birth dates of each edge whose two dates are known, to the day."""
+    """The parent-age limits on the birth dates of each edge whose two dates are known, to the day."""
     birth_date = ctx.birth_date
     assert birth_date is not None
     return _parent_ages(
@@ -947,14 +961,56 @@ def _zygosity_tokens(ctx: ValidationContext) -> CheckResult:
     return _verdict([])
 
 
+def _births_apart(ctx: ValidationContext, group: pl.DataFrame) -> pl.DataFrame:
+    """Each set whose full-sib ``group`` was born apart, with a ``births_apart`` reason.
+
+    ``group`` holds the ``row`` and ``set`` of each member that survives the
+    other clearing reasons. Sorted by birth date, the known dates are apart
+    when two adjacent ones are more than ``BIRTHS_APART_DAYS`` (7) days
+    apart, the largest gap ``--twin-max-days`` accepts. A group without
+    every date known is also apart when its known birth years (a missing one
+    taken from the date) span more than 1. Unknown birth data is never apart.
+    """
+    empty = pl.DataFrame(schema={"set": group.schema["set"], "births_apart": pl.String})
+    if ctx.birth_year is None and ctx.birth_date is None:
+        return empty
+    rows = group["row"].to_numpy()
+    births = group.with_columns(
+        year=pl.Series(_birth_years(ctx.birth_year, ctx.birth_date)[rows], dtype=pl.Int64).replace(-1, None),
+        date=pl.Series(ctx.birth_date[rows] if ctx.birth_date is not None else [None] * len(rows), dtype=pl.Date),
+    )
+    dates_apart = (
+        births.filter(pl.col("date").is_not_null())
+        .sort("set", "date")
+        .with_columns(before=pl.col("date").shift(1).over("set"))
+        .filter((pl.col("date") - pl.col("before")).dt.total_days() > BIRTHS_APART_DAYS)
+        .group_by("set", maintain_order=True)
+        .agg(
+            pl.format("birth dates {} and {} are more than {} days apart", "before", "date", pl.lit(BIRTHS_APART_DAYS))
+            .first()
+            .alias("births_apart")
+        )
+    )
+    years_apart = (
+        births.group_by("set")
+        .agg(all_dated=pl.col("date").is_not_null().all(), low=pl.col("year").min(), high=pl.col("year").max())
+        .filter(~pl.col("all_dated") & (pl.col("high") - pl.col("low") > 1))
+        .select("set", births_apart=pl.format("birth years {} and {} differ by more than 1", "low", "high"))
+    )
+    return pl.concat([dates_apart, years_apart.join(dates_apart, on="set", how="anti")])
+
+
 def _multiple_birth_sets(ctx: ValidationContext) -> CheckResult:
     """One Finding per set member whose set cell ``validate`` clears.
 
     A member stays when both its parents are known and shared with at least
-    one other member, and its set holds no other such group of full sibs
-    (which of the two deliveries the id means is then ambiguous). Sets
-    ``ctx.multiple_birth`` to the set codes left and
-    ``ctx.cleared_multiple_birth`` to the rows cleared.
+    one other member, its set holds no other such group of full sibs
+    (which of the two deliveries the id means is then ambiguous), and those
+    full sibs were not born apart (:func:`_births_apart`). Members cleared
+    for another reason never clear the rest. A birth column whose dtype
+    Check did not PASS is not read, and the note names it. Sets ``ctx.multiple_birth``
+    to the set codes left and ``ctx.cleared_multiple_birth`` to the rows
+    cleared.
     """
     column = ctx.config.multiple_birth_col
     if column is None:
@@ -970,6 +1026,8 @@ def _multiple_birth_sets(ctx: ValidationContext) -> CheckResult:
     members = members.with_columns(full_sibs=pl.col("known") & (pl.col("n_sibs") >= 2))
     n_sibships = members.filter("full_sibs").group_by("set").agg(n_sibships=pl.struct("m", "f").n_unique())
     members = members.join(n_sibships, on="set", how="left").with_columns(pl.col("n_sibships").fill_null(0))
+    group = members.filter(pl.col("full_sibs") & (pl.col("n_sibships") == 1)).select("row", "set")
+    members = members.join(_births_apart(ctx, group), on="set", how="left")
     reason = (
         pl.when(pl.col("n_set") == 1)
         .then(pl.lit("it is the only member of its set"))
@@ -979,6 +1037,8 @@ def _multiple_birth_sets(ctx: ValidationContext) -> CheckResult:
         .then(pl.lit("no other member of its set has the same mother and father"))
         .when(pl.col("n_sibships") > 1)
         .then(pl.lit("its set holds more than one group of full sibs"))
+        .when(pl.col("births_apart").is_not_null())
+        .then(pl.col("births_apart"))
     )
     cleared = members.with_columns(reason=reason).filter(pl.col("reason").is_not_null())
     tokens = ctx.df_raw[column].cast(pl.String).str.strip_chars()
@@ -1314,7 +1374,7 @@ CHECKS: tuple[Check, ...] = (
         "birth_year_topology",
         (*_IDS, "birth_year_dtype"),
         _birth_year_topology,
-        "parent age at birth >= min parent age",
+        "parent age at birth within limits",
         FailPolicy.KEEP_OR_DROP,
     ),
     Check(

@@ -11,6 +11,7 @@ from typing import NoReturn
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.base import (
+    BIRTHS_APART_DAYS,
     MIN_STRATUM_NETWORKS,
     TRAIT_KINDS,
     VERSION,
@@ -250,13 +251,25 @@ def _add_input_args(
         "flags only a child born before a parent. Needs --birth-date-col or --birth-year-col.",
     )
     p.add_argument(
+        "--max-parent-age",
+        type=_nonnegative_int,
+        default=0,
+        metavar="YEARS",
+        help="flag a parent more than YEARS years older than its child, by the same two checks and "
+        "on the same birth data as --min-parent-age. A year difference overstates the age by up to 1, "
+        "so on birth years only a difference above YEARS + 1 is flagged. 70 suits a human register; "
+        "leave it off for animals. The default 0 is off.",
+    )
+    p.add_argument(
         "--multiple-birth-col",
         default=None,
         metavar="NAME",
         help="optional column holding a multiple-birth set id shared by everyone born in one "
         "delivery (blank/NA for none), such as validate --twin-max-days's multiple_birth_set or a "
         "register's own id. A member whose parents are not both known and shared with another "
-        "member, or who is alone in a set, is a multiple_birth_sets finding; validate writes that "
+        "member, who is alone in a set, or whose full sibs in the set were born apart (sorted birth "
+        "dates more than 7 days apart, else birth years spanning more than 1), "
+        "is a multiple_birth_sets finding; validate writes that "
         "cell blank. validate also writes the sets it read in a multiple_birth_set column "
         "(numbered 1, 2, ...; missing tokens are no set, ids are compared without surrounding "
         "spaces). summarize reports the sets under demography.multiple_births (default: off)",
@@ -496,7 +509,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "year; -1/NA/blank for unknown). When set, validate runs three checks: "
         "birth_year_dtype (numeric parsing), birth_year_range (within "
         "[--birth-year-min, --birth-year-max]), and birth_year_topology "
-        "(child birth_year - parent birth_year >= --min-parent-age, default 0).",
+        "(--min-parent-age <= child birth_year - parent birth_year <= --max-parent-age + 1; a missing "
+        "year is taken from --birth-date-col).",
     )
     p_val.add_argument(
         "--birth-date-col",
@@ -506,7 +520,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "When set, validate runs birth_date_dtype (date parsing; an unparsable date blocks), "
         "birth_date_range (the year within [--birth-year-min, --birth-year-max]) and, with "
         "--birth-year-col, birth_date_year_consistency (the date falls in the birth year); "
-        "birth_date_topology applies --min-parent-age to the dates of every edge whose two "
+        "birth_date_topology applies --min-parent-age and --max-parent-age to the dates of every edge whose two "
         "dates are known.",
     )
     p_val.add_argument(
@@ -515,7 +529,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="N",
         help="annotate multiple births: full sibs (same mother and father) born at most N days "
-        "apart form a set, and validate.tsv.gz gets a multiple_birth_set column holding each "
+        "apart, N from 0 to 7, form a set, and validate.tsv.gz gets a multiple_birth_set column holding each "
         "member's set number (blank for none). Triplets are one set. Needs --birth-date-col, "
         "whose column must then be present. Zygosity is unknown, so a set is not an MZ "
         "annotation. Without this flag or --multiple-birth-col an input multiple_birth_set "
@@ -812,8 +826,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # --no-sex-concordance; absence of the flag is the off state.
     if getattr(args, "sex_concordance_permutations", 0) > 0:
         args.sex_concordance = True
+    _check_parent_ages(parser, args)
     args.check(args)
     return args
+
+
+def _check_parent_ages(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """A ``--min-parent-age`` above a set ``--max-parent-age`` would flag every parent-child link."""
+    if 0 < args.max_parent_age < args.min_parent_age:
+        parser.error(
+            f"--min-parent-age {args.min_parent_age} is above --max-parent-age {args.max_parent_age}: "
+            "no parent could pass both"
+        )
 
 
 def _check_zygosity(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -832,6 +856,11 @@ def _check_validate(p_val: argparse.ArgumentParser, parser: argparse.ArgumentPar
         p_val.error("--twin-max-days needs --birth-date-col: twins are full sibs born at most N days apart")
     if args.twin_max_days is not None and args.multiple_birth_col is not None:
         p_val.error("--twin-max-days and --multiple-birth-col both define the multiple-birth sets; pass one")
+    if args.twin_max_days is not None and args.twin_max_days > BIRTHS_APART_DAYS:
+        p_val.error(
+            f"--twin-max-days must be at most {BIRTHS_APART_DAYS}: a later validate --multiple-birth-col "
+            f"clears a set whose adjacent births are more than {BIRTHS_APART_DAYS} days apart"
+        )
     _check_zygosity(parser, args)
 
 

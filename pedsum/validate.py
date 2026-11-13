@@ -151,6 +151,8 @@ class ValidationConfig:
     birth_year_max: int | None = None
     # --min-parent-age: birth_year_topology and birth_date_topology want the parent at least this old.
     min_parent_age: int = 0
+    # --max-parent-age: the same two checks want the parent at most this old; 0 is off.
+    max_parent_age: int = 0
     # --missing-parent-token: more tokens that mean a missing parent in the
     # mother and father columns (ADR 0006).
     missing_parent_tokens: tuple[str, ...] = ()
@@ -193,6 +195,7 @@ class ValidationConfig:
             birth_year_min=args.birth_year_min,
             birth_year_max=args.birth_year_max,
             min_parent_age=args.min_parent_age,
+            max_parent_age=args.max_parent_age,
             # Cells are matched after stripping, so the tokens are too.
             missing_parent_tokens=tuple(t.strip() for t in args.missing_parent_token),
             allow_missing_sex=args.allow_missing_sex,

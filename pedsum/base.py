@@ -33,6 +33,9 @@ TRAIT_KINDS: tuple[TraitKind, ...] = ("continuous", "binary", "ordinal")
 #: A sex x stratum whose pairs span fewer Mate Networks than this is dropped from its assortative-mating cell.
 MIN_STRATUM_NETWORKS = 10
 
+#: Full sibs of one Multiple-Birth Set with adjacent birth dates more than this many days apart were born apart.
+BIRTHS_APART_DAYS = 7
+
 logger = logging.getLogger("pedigree_summary")
 
 

@@ -305,7 +305,9 @@ def as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
     Accepts integer- or float-valued tokens (``"1988"``, ``"1988.0"``) and
     the same missing tokens as parent IDs (empty/NA/NaN/N/A/./?/None/null).
     Float values are truncated to int (a birth year is by definition a
-    whole calendar year). Sentinel encoding matches
+    whole calendar year). ``-1`` and the missing tokens are the only
+    spellings of unknown: any other negative value, and a non-finite or
+    out-of-int32 one, raises. Sentinel encoding matches
     ``pedigree_graph.PedigreeGraph.birth_year``.
     """
     cleaned = _replace_missing_with(series, PARENT_MISSING_TOKENS, "-1")
@@ -317,6 +319,13 @@ def as_birth_year_col(series: pl.Series, name: str) -> np.ndarray:
             f"birth-year column {name!r} must be numeric (integer or float "
             f"calendar year, with -1/NA/blank for unknown); failed to parse: "
             f"unable to parse value(s) {samples} as numeric"
+        )
+    not_a_year = ((as_float < 0) & (as_float != -1)) | (as_float > 2**31 - 1)
+    if not_a_year.any():
+        samples = cleaned.filter(not_a_year).head(3).to_list()
+        raise PedigreeError(
+            f"birth-year column {name!r} holds value(s) {samples} that are not a calendar year: "
+            "a year is a finite number from 0 to 2147483647, and -1/NA/blank is unknown"
         )
     return as_float.to_numpy().astype(np.int32)
 

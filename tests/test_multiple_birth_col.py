@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import polars as pl
 import pytest
 import yaml
@@ -11,7 +13,7 @@ from pedsum.base import PedigreeError
 from pedsum.checks import CheckStatus
 from pedsum.multiple_births import compute_multiple_births
 from pedsum.parse import as_zygosity_col
-from pedsum.validate import ValidationConfig
+from pedsum.validate import ValidationConfig, ValidationContext, run_checks
 
 PARENTS = [
     {"id": "1", "sex": "F", "mother": "", "father": "", "set": "", "zyg": ""},
@@ -145,10 +147,14 @@ def test_validate_blanks_the_cleared_cells_and_its_output_passes(tmp_path):
             ["--multiple-birth-col", "set", "--birth-date-col", "d", "--twin-max-days", "1"],
             "--twin-max-days and --multiple-birth-col both define the multiple-birth sets",
         ),
+        (
+            ["--birth-date-col", "d", "--twin-max-days", "8"],
+            "--twin-max-days must be at most 7: a later validate --multiple-birth-col clears a set",
+        ),
     ],
 )
 def test_flag_combinations_that_are_usage_errors(tmp_path, flags, message):
-    """Zygosity needs given sets; given and computed sets exclude each other."""
+    """Zygosity needs given sets; given and computed sets exclude each other; --twin-max-days stops at 7."""
     ped = write_ped(tmp_path / "p.tsv", PARENTS)
     r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), *flags])
     assert r.returncode == 2
@@ -350,3 +356,103 @@ def _payload(n_same: int, n_opposite: int) -> dict:
 def test_full_sib_share_is_none_when_full_sibs_were_not_counted():
     """--max-degree 0 leaves FS uncounted; the share is None rather than a division by it."""
     assert _payload(1, 1)["full_sib_pair_fraction"] is None
+
+
+BIRTH_CONFIG = ValidationConfig(multiple_birth_col="set", zygosity_col="zyg", birth_year_col="by", birth_date_col="bd")
+
+
+def _born(row: dict, by: str = "", bd: str = "") -> dict:
+    return {**row, "by": by, "bd": bd}
+
+
+@pytest.mark.parametrize(
+    ("births", "why"),
+    [
+        ((("1980", ""), ("1990", "")), "birth years 1980 and 1990 differ by more than 1"),
+        ((("", "1980-01-01"), ("", "1980-01-09")), "birth dates 1980-01-01 and 1980-01-09 are more than 7 days apart"),
+        ((("", "1980-01-01"), ("1990", "")), "birth years 1980 and 1990 differ by more than 1"),
+    ],
+)
+def test_a_set_born_apart_is_cleared_whole_with_its_mz_marks(births, why):
+    """Members born more than 7 days (dates) or a year (else, years) apart: the set and its MZ marks are cleared."""
+    kids = [_born(_kid(str(10 + i), "F", "A", "MZ"), by, bd) for i, (by, bd) in enumerate(births)]
+    rows = [_born(p) for p in PARENTS] + kids
+    result = run_check("multiple_birth_sets", rows, BIRTH_CONFIG)
+    assert {f.detail.split(": ", 1)[1] for f in result.findings} == {why}
+    assert len(result.findings) == 2
+    assert run_check("mz_links", rows, BIRTH_CONFIG).status == CheckStatus.FAIL
+    assert {f.detail.split(" ", 1)[0] for f in run_check("mz_links", rows, BIRTH_CONFIG).findings} == {"id=10", "id=11"}
+
+
+@pytest.mark.parametrize(
+    "births",
+    [
+        (("1980", ""), ("1981", "")),
+        (("", "1980-12-31"), ("", "1981-01-01")),
+        (("", ""), ("1990", "")),
+        (("1980", "1980-01-01"), ("1981", "1980-01-02")),
+        (("", "1980-01-01"), ("", "1980-01-08")),
+    ],
+)
+def test_a_set_born_together_or_unknown_stays(births):
+    """7 days (dates) or a year (years) apart, or unknown birth data, clears nothing."""
+    kids = [_born(_kid(str(10 + i), "F", "A", "MZ"), by, bd) for i, (by, bd) in enumerate(births)]
+    rows = [_born(p) for p in PARENTS] + kids
+    assert run_check("multiple_birth_sets", rows, BIRTH_CONFIG).findings == []
+
+
+def test_a_member_cleared_for_its_parents_does_not_clear_the_full_sibs():
+    """A stray member with unknown parents born 10 years later is cleared alone; the twins keep their set."""
+    rows = [_born(p) for p in PARENTS] + [
+        _born(_kid("10", "F", "A"), "1980"),
+        _born(_kid("11", "F", "A"), "1980"),
+        _born(_kid("12", "M", "A", mother="", father=""), "1990"),
+    ]
+    result = run_check("multiple_birth_sets", rows, BIRTH_CONFIG)
+    assert [f.detail for f in result.findings] == ["id=12 multiple-birth set 'A' cleared: a parent is unknown"]
+
+
+@pytest.mark.parametrize(
+    ("max_days", "dates"),
+    [("3", ["1985-06-01", "1985-06-04", "1985-06-07"]), ("7", ["1985-06-01", "1985-06-08", "1985-06-15"])],
+)
+def test_sets_chained_by_twin_max_days_survive_validating_them_again(tmp_path, max_days, dates):
+    """--twin-max-days chains births into one set spanning more than N days; --multiple-birth-col on it clears nothing."""
+    parents = [
+        {"id": "1", "sex": "F", "mother": "", "father": "", "bd": "1960-01-01"},
+        {"id": "2", "sex": "M", "mother": "", "father": "", "bd": "1960-01-01"},
+    ]
+    kids = [{"id": str(10 + i), "sex": "F", "mother": "1", "father": "2", "bd": bd} for i, bd in enumerate(dates)]
+    ped = write_ped(tmp_path / "p.tsv", [*parents, *kids])
+    r = run_pedsum(["validate", "--in", str(ped), "--out", str(tmp_path / "out"), "--birth-date-col", "bd",
+                    "--twin-max-days", max_days])  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    assert load_validate_tsv_gz(tmp_path / "out")["multiple_birth_set"].to_list()[-3:] == ["1", "1", "1"]
+    r = run_pedsum(["validate", "--in", str(tmp_path / "out" / "validate.tsv.gz"), "--out", str(tmp_path / "again"),
+                    "--birth-date-col", "bd", "--multiple-birth-col", "multiple_birth_set"])  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    assert load_validate_tsv_gz(tmp_path / "again")["multiple_birth_set"].to_list()[-3:] == ["1", "1", "1"]
+
+
+def test_a_set_id_shared_by_many_rows_is_checked_without_pairing_them():
+    """200k full sibs in one placeholder set: the check sorts, not pairs, them, so it finishes in a few seconds."""
+    n = 200_000
+    kids = pl.DataFrame(
+        {
+            "id": [str(i) for i in range(10, n + 10)],
+            "sex": ["F"] * n,
+            "mother": ["1"] * n,
+            "father": ["2"] * n,
+            "set": ["X"] * n,
+            "zyg": [""] * n,
+            "by": [str(1900 + i % 100) for i in range(n)],
+            "bd": [""] * n,
+        }
+    )
+    df = pl.concat([pl.DataFrame([_born(p) for p in PARENTS], schema=kids.schema), kids])
+    start = time.perf_counter()
+    results, _ = run_checks(ValidationContext(df, BIRTH_CONFIG))
+    assert time.perf_counter() - start < 5
+    findings = results["multiple_birth_sets"].findings
+    assert len(findings) == n
+    assert findings[0].detail.endswith("birth years 1900 and 1999 differ by more than 1")
