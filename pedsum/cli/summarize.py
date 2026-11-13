@@ -125,7 +125,7 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             logger.warning(
                 "computing F on %s rows at max depth %s; its time grows with rows and steeply "
                 "with depth (README 'Deep pedigrees') — pass --no-inbreeding to skip",
-                Public(f"{n_indiv:,}"),
+                detail(f"{n_indiv:,}"),
                 detail(max_depth),
             )
         with timed("inbreeding (F + n_ancestors)"):

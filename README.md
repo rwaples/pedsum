@@ -1250,12 +1250,12 @@ Ne is written only when every table and count it is computed from is
 `intact`. A statistic of a `merged` or `blanked` table is `null`: a mean and
 a standard deviation can undo a merge. A statistic the data gives no value
 for is `null` too, so which keys a file holds depends on the options and
-the input's columns, never on the data. A continuous quantity such as `F`
-keeps its mean and standard deviation at `n >= N` and its quartiles at
-`n >= 4N`. The mean and standard deviation of `F` over the inbred are
-written only when the F histogram is `intact`, and the per-depth means of
-ancestor and descendant-path counts only when the depth-by-recorded-parents
-table is (for descendant paths, the depth-by-offspring table as well).
+the input's columns, never on the data. No mean or standard deviation of
+`F` is written by `summarize`: `F` takes few distinct values, so a mean
+beside a count can give back how many individuals hold each. The per-depth
+means of ancestor and descendant-path counts are written only when the
+depth-by-recorded-parents table is `intact` (for descendant paths, the
+depth-by-offspring table as well).
 
 **Pair counts.** A count of pairs is not a count of people, so it is gated
 on the people behind it. A relationship code in `relationship_pairs.by_code`
