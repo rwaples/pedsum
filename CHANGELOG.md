@@ -15,14 +15,32 @@
   table is written, and no histogram of a per-individual relative count or
   sibship size. Fixes seven leaks of the old redaction, among them shares
   that implied counts of 1, complements of nulled cells, and `max_F`.
+- A safe run writes no statistic of how descendants are spread over
+  founders: `effective_founders_by_descendant_paths`, the mean and sd of
+  `ecg`, and `ne_long_term_contributions`. Each is a concentration index
+  over per-founder contributions, which a minimum cell does not protect
+  from one dominant founder. The estimator's record is always `ne: null`,
+  `reason: not_released_in_safe_mode`.
 - **`effective-size --safe-attempt`** and **`assortative-mating
   --safe-attempt`** are new. Before, only `summarize` had the flag.
+- `assortative-mating --safe-attempt` withholds the counts that give the
+  distinct mothers and fathers (the parents with several mates, the
+  parents with both traits, each cell's Mate Networks) when fewer than the
+  minimum cell of individuals are a parent in no couple. `n_total` less
+  the mothers and the fathers was that count. It withholds a cell's Mate
+  Networks when the cell's couples never remate and fewer than the minimum
+  cell of mothers, or of fathers, are in none of them, and it withholds
+  the parents with both traits when they would give a withheld count of
+  Mate Networks.
 - **`--min-cell N`** sets the minimum cell (default 5, at least 3). Safe
   files record it as `safe_attempt_min_cell`.
 - **Safe files have new names**: `summary.txt`, `summary.extra.txt`,
-  `summary.pedigree.tab`, `summary.individual.tab`, `effective_size.txt`,
+  `summary.pedigree.tab`, `effective_size.txt`,
   `assortative_mating.txt`. The content is still YAML text and
   tab-separated text. A safe run writes no `.yaml`, `.tsv` or `.gz`.
+- **`summarize --safe-attempt --tsv` writes no individual table.** Safe
+  mode releases no per-individual statistic, so the table held only the
+  meta block.
 - **A safe run refuses a `--out` directory that holds any other file**
   (exit 1, nothing written), so an ordinary run's `annotated.tsv.gz` or
   `summary.yaml` cannot sit beside safe files.

@@ -51,7 +51,6 @@ supports:
       '4':
         male: 16
         female: 14
-  founders_contributing: 30
   reference:
     status: intact
     total: 200
@@ -113,7 +112,8 @@ effective_size:
       '4': 37.3982
     reference_column: ref
   ne_long_term_contributions:
-    ne: 46.9629
+    ne: null
+    reason: not_released_in_safe_mode
   ne_hill_overlapping:
     ne: 57.6128
     collapses_to_ne_v: true

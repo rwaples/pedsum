@@ -5,7 +5,7 @@ separate *source* payload of integer counts at full resolution
 (:func:`build_source`), and :func:`pedsum.disclosure.build_release` copies
 from it only the leaves :func:`summarize_spec` lists, each protected at the
 minimum cell. :func:`safe_outputs` then arranges that release, and nothing
-else, into the four output files.
+else, into the three output files.
 
 What the list leaves out, and why:
 
@@ -18,6 +18,10 @@ What the list leaves out, and why:
   tables are not.
 * Every extremum, and every number that repeats another (a fraction beside
   its count, a complement, a rollup).
+* Every concentration index over per-founder contributions: the effective
+  number of founders, and the mean and sd of equivalent complete
+  generations. Each narrows how the descendants are spread over the
+  founders, and no count gate short of a dominance rule closes that.
 """
 
 from __future__ import annotations
@@ -70,7 +74,6 @@ _BIRTHS: Path = ("pedigree", "demography", "multiple_births")
 _TWINS: Path = (*_BIRTHS, "twin_pairs_by_sex")
 _TWIN_DECADES: Path = (*_BIRTHS, "twin_pairs_by_birth_decade")
 _STATUS: Path = ("pedigree", "individuals", "reproduction", "by_status")
-_FOUNDERS: Path = ("pedigree", "founders", "founder_contribution")
 _PAIRS: Path = ("pedigree", "relatedness", "relationship_pairs")
 _INBREEDING: Path = ("pedigree", "relatedness", "inbreeding")
 _INBRED: Path = (*_INBREEDING, "inbred")
@@ -80,7 +83,6 @@ _BY_DEPTH: Path = ("pedigree", "strata", "depth_summary")
 _DEPTH_REPRODUCTIVE: Path = (*_BY_DEPTH, "reproductive")
 _DEPTH_INBRED: Path = (*_BY_DEPTH, "inbred")
 _DEPTH_PARENTS: Path = (*_BY_DEPTH, "parents_recorded")
-_ECG: Path = ("individual", "distributions", "ecg")
 
 _SEXES = (("female", SEX_FEMALE), ("male", SEX_MALE), ("unknown", SEX_UNKNOWN))
 _PARENT_CODES = ("MO", "FO")
@@ -316,15 +318,6 @@ def build_source(
         depth_summary["inbred"] = _cross(by_depth, inbred_cols)
         depth_summary["mean_F"] = _mean_by(by_depth, F)
 
-    # As ``sections.compute_aggregate_sections`` has it: 1 / sum(p_i^2) over the founders with descendants.
-    contribution = descendant_paths[founder & (descendant_paths > 0)].astype(np.float64)
-    share = contribution / contribution.sum() if len(contribution) else contribution
-    founders = {
-        "founder_contribution": {
-            "effective_founders_by_descendant_paths": float(1.0 / np.sum(share * share)) if len(share) else 0.0,
-        },
-    }
-
     # A parent-offspring pair is one recorded parent link, which the parents-known table already counts.
     codes = [code for code in RELATIONSHIPS if code not in _PARENT_CODES and code in pairs.counts]
     relatedness["relationship_pairs"] = {
@@ -339,7 +332,6 @@ def build_source(
     if "multiple_birth" in df.columns:
         demography["multiple_births"] = _multiple_births_source(df)
 
-    ecg = idf["ecg"].to_numpy()
     return {
         **{key: meta[key] for key in _META},
         "n_total": n,
@@ -351,14 +343,8 @@ def build_source(
             },
             "demography": demography,
             "individuals": {"reproduction": {"by_status": _split(reproductive, "reproductive", "terminal")}},
-            "founders": founders,
             "relatedness": relatedness,
             "strata": {"sex_summary": sex_summary, "depth_summary": depth_summary},
-        },
-        "individual": {
-            "distributions": {
-                "ecg": {"mean": float(ecg.mean()), "std": float(ecg.std(ddof=1)) if n > 1 else 0.0} if n else None
-            }
         },
     }
 
@@ -475,12 +461,6 @@ def _rules() -> tuple[Rule, ...]:
             ordered=False,
             requires=(_DEPTH_REPRODUCTIVE,),
         ),
-        Derived(
-            (*_FOUNDERS, "effective_founders_by_descendant_paths"),
-            "One summary of how evenly founders contribute, released only when at least the minimum cell of "
-            "founders have descendants and the parents-known table is intact.",
-            sources=(_PARENTS,),
-        ),
         Plain((*_PAIRS, "engine"), "Names the counting engine, a property of the software."),
         Table(
             (*_PAIRS, "by_code"),
@@ -517,12 +497,6 @@ def _rules() -> tuple[Rule, ...]:
             (*_INBREEDING, "sd_F_inbred"),
             "Sd of F over the inbred individuals, on the same condition as their mean.",
             sources=(_INBRED, _F_HIST),
-        ),
-        Derived(
-            _ECG,
-            "Mean and sd of equivalent complete generations, which is zero for every founder, released only "
-            "when the parents-known table is intact, so it is never a sum over a few non-founders.",
-            sources=(_PARENTS,),
         ),
     ]
     for name, what in (("reproductive", "whether they have offspring"), ("inbred", "whether F exceeds zero")):
@@ -735,27 +709,25 @@ _EXTRA: tuple[Path, ...] = (
     _BY_DEPTH,
     _TWIN_DECADES,
     *((*_CONCORDANCE, name, "eligible_by_sex") for name, _ in GROUPINGS),
-    ("individual",),
 )
 
 
 @dataclass(frozen=True)
 class SafeOutputs:
-    """The four safe output payloads, each holding released leaves only."""
+    """The three safe output payloads, each holding released leaves only."""
 
     slim: dict[str, Any]
     extra: dict[str, Any]
     pedigree_tsv: dict[str, Any]
-    individual_tsv: dict[str, Any]
 
 
 def safe_outputs(source: Mapping[str, Any], min_cell: int) -> SafeOutputs:
-    """Release ``source`` at ``min_cell`` and lay the release out as the two summary YAMLs and the two long TSVs.
+    """Release ``source`` at ``min_cell`` and lay the release out as the two summary YAMLs and the pedigree long TSV.
 
     Every value in the result is read from the release at a rule's path.
     The YAMLs split the leaves between them and both start with the meta
-    block, which records ``min_cell``. The TSV payloads are flat: the pedigree one has a section per
-    summary section, the individual one the per-individual statistics.
+    block, which records ``min_cell``. The TSV payload is flat, with a section per summary section.
+    There is no individual one, since no per-individual statistic is released.
     """
     release = build_release(source, summarize_spec(source), min_cell)
     meta = {key: release[key] for key in (*_META, *_N) if key in release} | {"safe_attempt_min_cell": min_cell}
@@ -776,7 +748,7 @@ def safe_outputs(source: Mapping[str, Any], min_cell: int) -> SafeOutputs:
             target = target.setdefault(key, {})
         target[rule.path[-1]] = node
     sections = {name: value for category in release.get("pedigree", {}).values() for name, value in category.items()}
-    return SafeOutputs(slim, extra, {**meta, **sections}, {**meta, **release.get("individual", {})})
+    return SafeOutputs(slim, extra, {**meta, **sections})
 
 
 _MISSING = object()

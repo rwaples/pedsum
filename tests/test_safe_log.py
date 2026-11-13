@@ -29,7 +29,7 @@ BY = ["--birth-year-col", "birth_year", "--birth-year-max", "9999999"]
 COMMANDS: dict[str, tuple[list[str], set[str]]] = {
     "summarize": (
         [*BY, "--sex-concordance", "--per-individual-burden", "--tsv"],
-        {"summary.txt", "summary.extra.txt", "summary.pedigree.tab", "summary.individual.tab"},
+        {"summary.txt", "summary.extra.txt", "summary.pedigree.tab"},
     ),
     "effective-size": ([*BY], {"effective_size.txt"}),
     "assortative-mating": (
@@ -565,7 +565,7 @@ def test_safe_names_come_from_one_map():
     """``output_name`` maps each ordinary name through ``SAFE_SUFFIX`` and has no name for a ``.gz``."""
     assert SAFE_SUFFIX == {".yaml": ".txt", ".tsv": ".tab"}
     assert output_name("summary.extra.yaml", safe=True) == "summary.extra.txt"
-    assert output_name("summary.individual.tsv", safe=True) == "summary.individual.tab"
+    assert output_name("summary.pedigree.tsv", safe=True) == "summary.pedigree.tab"
     assert output_name("summary.yaml", safe=False) == "summary.yaml"
     with pytest.raises(KeyError):
         output_name("annotated.tsv.gz", safe=True)
@@ -635,7 +635,7 @@ def test_a_safe_run_refuses_the_files_of_another_safe_run(pedigree, tmp_path):
     assert safe_run("effective-size", ped, out).returncode == 1
     res = run_pedsum(["summarize", "--in", str(ped), "--out", str(out), "--safe-attempt"])
     assert res.returncode == 1
-    assert "summary.individual.tab, summary.pedigree.tab" in res.stderr
+    assert "summary.pedigree.tab" in res.stderr
 
     logged = tmp_path / "logged"
     assert safe_run("effective-size", ped, logged, "--id-log").returncode == 0

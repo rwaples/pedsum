@@ -387,9 +387,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "+ per-individual columns). "
         "Pass --tsv to also write summary.pedigree.tsv and "
         "summary.individual.tsv. Under --safe-attempt the files are "
-        "summary.txt, summary.extra.txt, summary.pedigree.tab and "
-        "summary.individual.tab, annotated.tsv.gz is not written, and DIR "
-        "must hold no other file.",
+        "summary.txt, summary.extra.txt and, with --tsv, "
+        "summary.pedigree.tab; summary.individual.tsv and annotated.tsv.gz "
+        "are not written, and DIR must hold no other file.",
         birth_year_help="optional column name for birth year (integer or float "
         "calendar year; -1/NA/blank for unknown). When set, summarize "
         "validates it: numeric, within --birth-year-min/--birth-year-max, and "
@@ -475,6 +475,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="additionally write the long-form TSV summaries "
         "(summary.pedigree.tsv + summary.individual.tsv) inside --out. "
+        "Under --safe-attempt, summary.pedigree.tab only. "
         "Off by default; collaborators typically need only the YAML.",
     )
     _add_safe_args(p_sum)

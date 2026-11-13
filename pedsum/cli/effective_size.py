@@ -131,8 +131,9 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
     if isinstance(pg, int):
         return pg
     n_total = len(df)
-    with timed(f"effective size ({', '.join(requested)})"):
-        computed = compute_effective_size(pg, requested)
+    selected = requested if safe is None else [name for name in requested if name in safe.RELEASABLE]
+    with timed(f"effective size ({', '.join(selected)})"):
+        computed = compute_effective_size(pg, selected)
         if reference_rows is not None and "ne_individual_delta_f" in requested:
             computed["ne_individual_delta_f"] = compute_individual_delta_f_for_reference(
                 pg, reference_rows, args.reference_col

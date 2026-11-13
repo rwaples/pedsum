@@ -16,13 +16,17 @@ only decides whether an estimate is released, and is never written.
 What the list leaves out, and why:
 
 * Every extremum: the Hill cohort window's first and last birth year, its
-  parental-age percentile and table, the largest founder-contribution
-  change, the census ratio.
+  parental-age percentile and table, the census ratio.
 * Every moment of a per-individual offspring count (``v_mm``, ``Vk_m``,
   ``kbar_m``, ...): the offspring-count tables they summarise are not
   released, so by the taint rule neither are they.
 * Every number that repeats another: a mean of released counts, a count of
   the rows of a released table, a slope beside the Ne it gives.
+* ``ne_long_term_contributions``, whatever the data: it is a concentration
+  index over per-founder contributions, which narrows how the descendants
+  are spread over the founders, and no count gate short of a dominance rule
+  closes that. Its record is always ``reason: not_released_in_safe_mode``,
+  and a safe run does not compute it.
 
 A per-depth or per-cohort array is one leaf with its scalar, so both are
 released or neither: an aggregate over a withheld array would give back the
@@ -68,7 +72,6 @@ _ESTIMATES = "effective_size"
 _DEPTH: Path = ("supports", "depth")
 _SEX: Path = ("supports", "sex")
 _DEPTH_SEX: Path = ("supports", "depth_by_sex")
-_FOUNDERS: Path = ("supports", "founders_contributing")
 _REFERENCE_USE: Path = ("supports", "reference")
 _COHORT_SEX: Path = ("supports", "birth_cohort_by_sex")
 _PARENT_LINKS: Path = ("supports", "parent_links_with_birth_years")
@@ -84,14 +87,14 @@ _USED: Path = ("gates", "delta_f_used_by_depth")
 _REFERENCE: Path = ("gates", "reference_used")
 _REFERENCE_INBRED: Path = ("gates", "reference_inbred")
 _LAGGED: Path = ("gates", "reference_past_first_generation")
-_FOUNDER_GENOMES: Path = ("gates", "founder_genomes_contributing")
-_FOUNDERS_FLOOR: Path = ("gates", "founders_floor")
-_FOUNDER_CHILDREN: Path = ("gates", "founders_by_children_in_deepest_depth")
 _COHORT_FATHERS: Path = ("gates", "fathers_by_birth_cohort")
 _COHORT_MOTHERS: Path = ("gates", "mothers_by_birth_cohort")
 
 #: The ``reason`` of an estimator whose result was withheld. A constant, not data.
 WITHHELD = "withheld"
+
+#: The ``reason`` of an estimator the release list has no field of. A constant, not data.
+NOT_RELEASED = "not_released_in_safe_mode"
 
 _SEX_DEPENDENT = ("ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping")
 _USES_F = ("ne_inbreeding", "ne_individual_delta_f", "ne_group_coancestry")
@@ -194,17 +197,6 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
             "every depth the individuals used and the inbred among them are none or at least the minimum cell.",
         ),
     ),
-    "ne_long_term_contributions": (
-        _Group(
-            "estimate",
-            (_NE, _CODE),
-            (_DEPTH, _FOUNDERS, _FOUNDER_GENOMES, _FOUNDER_CHILDREN),
-            "Ne from the founders' contributions to the deepest depth, released only when every depth holds "
-            "at least the minimum cell of individuals, at least the minimum cell of founders contribute, and "
-            "each number of children a founder has in the deepest depth is shared by at least the minimum "
-            "cell of founders: over those children it is a moment of the founders' offspring counts.",
-        ),
-    ),
     "ne_hill_overlapping": (
         _Group(
             "collapsed",
@@ -248,6 +240,9 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
         ),
     ),
 }
+
+#: The estimators a safe run computes: the ones with a released field.
+RELEASABLE: tuple[str, ...] = tuple(name for name in ALL_EFFECTIVE_SIZE_ESTIMATORS if name in _GROUPS)
 
 #: Fields of a record that say how the run was set up, copied as they are.
 _OPTIONS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -346,20 +341,6 @@ def _related_families(pg: PedigreeGraph, depth: np.ndarray, genome: np.ndarray, 
     return _labelled(range(k), np.where(related, np.maximum(units, 1), 0).tolist())
 
 
-def _contributing_founders(pg: PedigreeGraph, depth: np.ndarray, k: int) -> np.ndarray:
-    """The rows of the founders that are ancestors of the deepest depth, the ones the contribution estimator sums over."""
-    mother, father = np.asarray(pg.mother_rows), np.asarray(pg.father_rows)
-    order = np.argsort(depth, kind="stable")
-    bounds = np.searchsorted(depth[order], np.arange(k + 1))
-    ancestor = depth == k - 1
-    for d in range(k - 1, 0, -1):
-        rows = order[bounds[d] : bounds[d + 1]]
-        rows = rows[ancestor[rows]]
-        for parent in (mother[rows], father[rows]):
-            ancestor[parent[parent >= 0]] = True
-    return np.flatnonzero(ancestor & (mother < 0) & (father < 0))
-
-
 def _counts(
     pg: PedigreeGraph,
     ran: Collection[str],
@@ -439,20 +420,6 @@ def _counts(
         gates["related_families_by_depth"] = _related_families(pg, depth, genome, k)
     if "ne_group_coancestry" in ran:
         gates["cotwins_by_depth"] = _by_depth(depth, ~genome, k)
-    if "ne_long_term_contributions" in ran and k:
-        founders = _contributing_founders(pg, depth, k)
-        contributing = supports["founders_contributing"] = int(founders.size)
-        # Parentless MZ co-twins are one founder genome.
-        lower = np.where(twin[founders] >= 0, np.minimum(twin[founders], founders), founders)
-        gates["founder_genomes_contributing"] = int(np.unique(lower).size)
-        deepest = np.flatnonzero((depth == k - 1) & genome)
-        parents = np.concatenate([mother[deepest], father[deepest]])
-        children, held = np.unique(np.bincount(parents[parents >= 0], minlength=n)[founders], return_counts=True)
-        gates["founders_by_children_in_deepest_depth"] = _labelled(children.tolist(), held.tolist())
-        # Depth 0 is the founders, so this count beside the depth table gives the founders that do not
-        # contribute, and beside a withheld depth table it bounds depth 0.
-        rest = supports["depth"]["0"] - contributing
-        gates["founders_floor"] = min(contributing, rest or contributing, *supports["depth"].values())
     return supports, gates
 
 
@@ -481,7 +448,7 @@ def build_source(
         "estimators_requested": list(requested),
         "supports": supports,
         "gates": gates,
-        _ESTIMATES: {name: _estimator_source(name, results[name]) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS},
+        _ESTIMATES: {name: _estimator_source(name, results[name]) for name in RELEASABLE},
     }
 
 
@@ -518,13 +485,6 @@ def _rules() -> tuple[Rule, ...]:
             "Individuals by depth and sex, the counts the sex-ratio and family-size estimators use; released "
             "whole, and only when no cell is small.",
         ),
-        Count(
-            _FOUNDERS,
-            "Founders that are ancestors of the deepest depth, the ones the contribution estimator sums over; "
-            "withheld when they, the founders that are not, or any depth is below the minimum cell, because "
-            "depth 0 is the founders and gives the other side by subtraction.",
-            support=_FOUNDERS_FLOOR,
-        ),
         Table(
             _REFERENCE_USE,
             "Individuals by whether the estimator averages over them under --reference-col; both classes at "
@@ -553,7 +513,6 @@ def _rules() -> tuple[Rule, ...]:
             (_COTWINS, "MZ co-twins a depth's genomes leave out, by depth"),
             (_INBRED, "Inbred individuals by depth"),
             (_RELATED, "A lower bound on the families, and on the shared parents, behind each depth's related pairs"),
-            (_FOUNDER_CHILDREN, "Contributing founders by their number of children in the deepest depth"),
             (_FATHERS, "Males with recorded offspring, by depth"),
             (_MOTHERS, "Females with recorded offspring, by depth"),
             (_USED, "Individuals past the founders, by depth"),
@@ -567,10 +526,9 @@ def _rules() -> tuple[Rule, ...]:
             (_REFERENCE, "Reference individuals past the founders, the ones the estimator averages over"),
             (_REFERENCE_INBRED, "Reference individuals whose F exceeds zero"),
             (_LAGGED, "Reference individuals more than one generation from the founders"),
-            (_FOUNDER_GENOMES, "Founder genomes that are ancestors of the deepest depth, MZ co-twins counted once"),
         )
     ]
-    for name in ALL_EFFECTIVE_SIZE_ESTIMATORS:
+    for name in RELEASABLE:
         rules += [
             Plain(
                 (_ESTIMATES, name, key),
@@ -648,8 +606,9 @@ def safe_payload(source: Mapping[str, Any], min_cell: int) -> dict[str, Any]:
 
     Every value is read from the release at a rule's path: the meta block,
     which records ``min_cell``, the supports, then one record per
-    estimator. A withheld estimate is null with ``reason: withheld``. The
-    gates are not laid out.
+    estimator. A withheld estimate is null with ``reason: withheld``, and
+    an estimator outside ``RELEASABLE`` has the same record whatever the
+    run. The gates are not laid out.
     """
     release = build_release(source, effective_size_spec(source), min_cell)
     estimates = release.get(_ESTIMATES, {})
@@ -659,11 +618,14 @@ def safe_payload(source: Mapping[str, Any], min_cell: int) -> dict[str, Any]:
         **{key: release[key] for key in _RUN if key in release},
         "supports": {
             path[-1]: release["supports"][path[-1]]
-            for path in (_DEPTH, _SEX, _DEPTH_SEX, _FOUNDERS, _REFERENCE_USE, _COHORT_SEX, _PARENT_LINKS)
+            for path in (_DEPTH, _SEX, _DEPTH_SEX, _REFERENCE_USE, _COHORT_SEX, _PARENT_LINKS)
             if path[-1] in release.get("supports", {})
         },
-        _ESTIMATES: {name: _record(name, estimates.get(name, {})) for name in ALL_EFFECTIVE_SIZE_ESTIMATORS},
+        _ESTIMATES: {
+            name: _record(name, estimates.get(name, {})) if name in _GROUPS else {"ne": None, "reason": NOT_RELEASED}
+            for name in ALL_EFFECTIVE_SIZE_ESTIMATORS
+        },
     }
 
 
-__all__ = ["WITHHELD", "build_source", "effective_size_spec", "safe_payload"]
+__all__ = ["NOT_RELEASED", "RELEASABLE", "WITHHELD", "build_source", "effective_size_spec", "safe_payload"]

@@ -24,10 +24,12 @@ from safe_assortative_helpers import (
     BY_ROLE,
     GROUP_LEVELS,
     GROUPS,
+    ROLES,
     body,
     cell_record,
     couple_rows,
     every_cell,
+    funnel_rows,
     half_width,
     load,
     mating_rows,
@@ -166,6 +168,9 @@ def test_links_are_true_and_cover_every_shared_total(wide):
     assert {(link.whole[0], link.parts[0][0]) for link in spec.links} == {
         (("n_total",), (*rows, "0")),
         (("n_total",), (*rows, "1")),
+        (("n_total",), ROLES),
+        (ROLES, (*BY_ROLE, "0")),
+        (ROLES, (*BY_ROLE, "1")),
         ((*rows, "0"), (*BY_ROLE, "0")),
         ((*rows, "1"), (*BY_ROLE, "1")),
         (("cells", "0x0", "n"), ("cells", "0x0", "table")),
@@ -592,16 +597,21 @@ def test_a1_network_counts_do_not_give_back_withheld_couple_counts(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("lacking", "n", "networks"),
-    [("b", [46, 46, 41, 41], [40, 40, 36, 36]), ("ab", [41, 41, 41, 41], [36, 36, 36, 36])],
+    ("lacking", "n", "networks", "fathers"),
+    [("b", [46, 46, 41, 41], [40, 40, 36, 36], None), ("ab", [41, 41, 41, 41], [36, 36, 36, 36], 40)],
 )
-def test_network_counts_do_not_count_the_rematings_of_a_group(tmp_path, lacking, n, networks):
+def test_network_counts_do_not_count_the_rematings_of_a_group(tmp_path, lacking, n, networks, fathers):
     """Six men remate, and one of the second mates is among five mothers who lack a trait.
 
     The couples less the networks are six in a cell that analyses those
     mothers and five in one that does not, and the fathers' six extra mates
     are known from the couples total and the distinct fathers. Either
     difference says that one of the five couples is a remating.
+
+    A cell that analyses every couple holds every extra mate, so its
+    networks are the distinct fathers: the fathers with both traits are
+    withheld with them. A cell without the five couples has networks the
+    fathers only bound.
     """
     couples, level = table_couples([[10, 10], [10, 10]])
     for i in range(6):
@@ -616,9 +626,49 @@ def test_network_counts_do_not_count_the_rematings_of_a_group(tmp_path, lacking,
     assert [cell["n_mate_networks"] for cell in source["cells"].values()] == networks
     written = load(tmp_path / "safe")[AM]
     assert written["mating_pairs"]["n_total"] == 46
-    assert written["within_person"]["fathers"]["n"] == 40
+    assert written["within_person"]["fathers"]["n"] == fathers
     assert [cell["n"] for cell in written["mate_correlation"]] == n
     assert [cell["n_mate_networks"] for cell in written["mate_correlation"]] == [None] * 4
+    assert pinned_protected(source, DEFAULT_MIN_CELL) == []
+
+
+BIRTH_YEAR_STRATA = (
+    *("--stratify-by", "birth_year", "--birth-year-col", "birth_year"),
+    *("--birth-year-bin", "30", "--min-stratum-networks", "5"),
+)
+
+
+@pytest.mark.parametrize(("only_dropped", "released"), [(2, False), (5, True)])
+def test_network_counts_do_not_count_the_mothers_of_dropped_couples_alone(tmp_path, only_dropped, released):
+    """Forty analysed couples never remate; the couples of one stratum of fathers are dropped for a constant trait.
+
+    Five of the dropped couples' mothers are also in an analysed couple and
+    ``only_dropped`` are in none. No trait is missing, so the mothers with
+    both traits are every mother, and less the networks of a cell whose
+    couples never remate they are the mothers of dropped couples alone.
+    """
+    couples, level = table_couples([[10, 10], [10, 10]])
+    dropped = [(couples[i][0], 60_000 + i) for i in range(5)] + [(800 + i, 61_000 + i) for i in range(only_dropped)]
+    level |= {800 + i: i % 2 for i in range(only_dropped)} | {father: 0 for _, father in dropped}
+    b = {person: value if person >= 60_000 else (person // 3) % 2 for person, value in level.items()}
+    rows = couple_rows(couples + dropped, children=True, a=level, b=b)
+    for row in rows:
+        if 60_000 <= row["id"] < 100_000:
+            row["birth_year"] = 1900
+    source = run(write_ped(tmp_path / "ped.tsv", rows), tmp_path / "safe", *AB, *BIRTH_YEAR_STRATA)
+    assert source is not None
+    assert at(source, GROUPS) == {"0": 5 + only_dropped, "15": 40}
+    assert [cell["n_mate_networks"] for cell in source["cells"].values()] == [40] * 4
+    written = load(tmp_path / "safe")[AM]
+    assert written["mating_pairs"]["n_total"] == 45 + only_dropped
+    assert written["mating_pairs"]["n_mothers_multiple_mates"] == 5
+    assert {sex: record["n"] for sex, record in written["within_person"].items()} == {
+        "mothers": 40 + only_dropped,
+        "fathers": 45 + only_dropped,
+    }
+    assert [cell["n"] for cell in written["mate_correlation"]] == [40] * 4
+    assert [cell["n_mate_networks"] for cell in written["mate_correlation"]] == [40 if released else None] * 4
+    assert all(cell["crude"]["tetrachoric"]["rho"] is not None for cell in written["mate_correlation"])
     assert pinned_protected(source, DEFAULT_MIN_CELL) == []
 
 
@@ -735,7 +785,93 @@ def test_oracle_catches_a_person_count_released_beside_few_rematings(tmp_path):
     leaky = ReleaseSpec(
         tuple(Count(rule.path, rule.reason) if rule.path == n else rule for rule in spec.rules), spec.links
     )
-    assert pinned_protected(source, DEFAULT_MIN_CELL, leaky) == [("fathers", 2)]
+    # Every cell analyses every couple, so the distinct fathers are its withheld Mate Networks too.
+    networks = [(("cells", key, "n_mate_networks"), None) for key in source["cells"]]
+    assert pinned_protected(source, DEFAULT_MIN_CELL, leaky) == [*networks, ("fathers", 2)]
+
+
+def _parent_counts(written: dict[str, Any]) -> list[Any]:
+    """The counts of a file that say how many distinct mothers and fathers the couples have."""
+    section = written[AM]
+    return [
+        *(section["mating_pairs"][f"n_{sex}_multiple_mates"] for sex in ("mothers", "fathers")),
+        *(section["within_person"][sex]["n"] for sex in ("mothers", "fathers")),
+        *(cell["n_mate_networks"] for cell in section["mate_correlation"]),
+    ]
+
+
+@pytest.mark.parametrize("leaves", [1, 4])
+def test_few_individuals_in_no_couple_withhold_the_counts_of_distinct_parents(tmp_path, leaves):
+    """Nobody remates and no trait is missing, so the individuals less twice the couples are those in no couple.
+
+    The row total stays, as the other reports of the pedigree write it. The
+    parents with several mates, the parents with both traits and the Mate
+    Networks are withheld; each of them alone, beside the couples total,
+    gives the distinct mothers and fathers.
+    """
+    rows = funnel_rows(leaves)
+    source = run(write_ped(tmp_path / "ped.tsv", rows), tmp_path / "safe", *AB)
+    assert source is not None
+    assert at(source, ROLES) == {"mothers": 31, "fathers": 31, "others": leaves}
+    written = load(tmp_path / "safe")
+    assert written["n_total"] == len(rows) == 62 + leaves
+    assert written[AM]["mating_pairs"]["n_total"] == 31
+    assert _parent_counts(written) == [None] * 8
+    assert all(record["reason"] == WITHHELD for record in written[AM]["within_person"].values())
+    cells = written[AM]["mate_correlation"]
+    assert [cell["n"] for cell in cells] == [31] * 4
+    assert all(cell["crude"]["pearson"]["r"] is not None for cell in cells), "the estimates rest on the couples"
+    assert small_counts(written, DEFAULT_MIN_CELL) == []
+    system, targets = reader_system(source, DEFAULT_MIN_CELL)
+    assert (ROLES, "others") in targets
+    low, high = system.value_range((ROLES, "others"))
+    assert low == leaves, "the couples bound the mothers and the fathers from above"
+    assert high >= low + DEFAULT_MIN_CELL
+    assert pinned_protected(source, DEFAULT_MIN_CELL) == []
+
+    spec = assortative_mating_spec(source)
+    several = [("mating_pairs", f"n_{sex}_multiple_mates") for sex in ("mothers", "fathers")]
+    without_roles = ReleaseSpec(
+        tuple(
+            Derived(rule.path, rule.reason, sources=rule.sources[:1]) if rule.path in several else rule
+            for rule in spec.rules
+        ),
+        spec.links,
+    )
+    leaky = {
+        "several mates": without_roles,
+        "both traits": _without_support(spec, *(("within_person", sex, "n") for sex in ("mothers", "fathers"))),
+        "networks": _without_support(spec, *(("cells", key, "n_mate_networks") for key in source["cells"])),
+    }
+    for route, stripped in leaky.items():
+        assert (ROLES, "others") in pinned_protected(source, DEFAULT_MIN_CELL, stripped), route
+
+
+def test_enough_individuals_in_no_couple_or_none_release_the_counts_of_distinct_parents(tmp_path):
+    """Five individuals in no couple are a cell of the minimum size, and none is an empty cell: both release."""
+    rows = funnel_rows(5)
+    source = run(write_ped(tmp_path / "ped.tsv", rows), tmp_path / "safe", *AB)
+    assert source is not None
+    assert at(source, ROLES) == {"mothers": 31, "fathers": 31, "others": 5}
+    released = [0, 0, 31, 31, 31, 31, 31, 31]
+    assert _parent_counts(load(tmp_path / "safe")) == released
+    assert pinned_protected(source, DEFAULT_MIN_CELL) == []
+    assert _parent_counts(safe_payload(source, 6)) == [None] * 8
+
+    # No accepted pedigree has nobody outside its couples (the last child is a parent of nobody), so the empty
+    # cell is the same source with those five rows taken out of every count of individuals.
+    none = copy.deepcopy(source)
+    none["n_total"] -= 5
+    at(none, ROLES)["others"] = 0
+    for index in none["traits"]:
+        at(none, (*BY_ROLE, index))["others"]["with_value"] -= 5
+        none["supports"]["trait_rows"][index]["with_value"] -= 5
+    payload = safe_payload(none, DEFAULT_MIN_CELL)
+    assert payload["n_total"] == 62
+    assert _parent_counts(payload) == released
+    system, targets = reader_system(none, DEFAULT_MIN_CELL)
+    assert (ROLES, "others") not in targets
+    assert system.value_range((ROLES, "others")) == (0, 0)
 
 
 def test_a_father_alone_in_his_permutation_block_is_not_counted(tmp_path):

@@ -5,7 +5,7 @@ Two pedigrees carry most tests. ``tests/data/safe_attempt/adversarial.tsv``
 them male, two individuals born 40 years before the rest, and one father
 30 years older than his child: an ordinary run shows audit leak 6 on it.
 ``wide_rows`` is a random-mating pedigree in which every count an estimator
-rests on is large, so a safe run releases all eight estimates.
+rests on is large, so a safe run releases every estimate on its release list.
 """
 
 from __future__ import annotations
@@ -35,7 +35,14 @@ from pedsum.cli import effective_size as cli
 from pedsum.cli.parser import parse_args
 from pedsum.disclosure import DEFAULT_MIN_CELL, Derived, build_release, protect_payload
 from pedsum.memory import EXIT_MEMORY_LIMIT, GiB, MemoryWatchdog
-from pedsum.safe_effective_size import WITHHELD, build_source, effective_size_spec, safe_payload
+from pedsum.safe_effective_size import (
+    NOT_RELEASED,
+    RELEASABLE,
+    WITHHELD,
+    build_source,
+    effective_size_spec,
+    safe_payload,
+)
 from pedsum.sections import compute_effective_size
 
 if TYPE_CHECKING:
@@ -121,6 +128,11 @@ def load(out_dir: Path) -> dict[str, Any]:
     return yaml.safe_load(written_output(out_dir, "effective_size.yaml").read_text())
 
 
+def releasable(records: dict[str, Any]) -> dict[str, Any]:
+    """The records of the estimators on the release list; the others have one fixed record."""
+    return {name: record for name, record in records.items() if name in RELEASABLE}
+
+
 def body(payload: dict[str, Any]) -> str:
     """The supports and estimates of a payload as text, without the meta block's paths and times."""
     return yaml.safe_dump({key: payload[key] for key in ("supports", ES) if key in payload})
@@ -163,10 +175,6 @@ def sex_split_system(source: dict[str, Any], min_cell: int, spec: ReleaseSpec | 
 
             cells = [(DEPTH_SEX, (depth, "male")), (DEPTH_SEX, (depth, "female"))]
             add_nonlinear(system, cells, [(m, n - m) for m in range(n + 1)], consistent)
-    founders = ("supports", "founders_contributing")
-    if at(release, founders) is not None:
-        # Not a sum of cells, so not a link: the contributing founders are among the founders, who are depth 0.
-        system.add({(DEPTH, "0"): 1, (founders, None): -1}, 0, cap)
     return system, hidden
 
 
@@ -360,7 +368,7 @@ def test_leak_6_no_parental_age_table_and_no_birth_year_window(plain, safe):
 def test_d7_no_extremum_and_no_offspring_count_moment(plain, wide):
     """With every estimate released, the file still has no extremum and no moment of per-individual counts."""
     _, written, ordinary = wide
-    assert all(record["ne"] is not None and "reason" not in record for record in written[ES].values())
+    assert all(record["ne"] is not None and "reason" not in record for record in releasable(written[ES]).values())
     names = {path[-1] for path, _ in leaves(written)} | {key for path, _ in leaves(written) for key in path}
     dropped = {
         *("max_delta_final", "asymptote_reached", "census_ratio", "cohort_window", "age_table", "reference_generation"),
@@ -381,7 +389,7 @@ def test_d7_no_extremum_and_no_offspring_count_moment(plain, wide):
 def test_released_estimates_are_the_ordinary_ones(wide):
     """A released value is the ordinary run's value, scalars and arrays alike."""
     _, written, ordinary = wide
-    for name, record in written[ES].items():
+    for name, record in releasable(written[ES]).items():
         theirs = ordinary[ES][name]
         assert record["ne"] == theirs["ne"], name
     assert (
@@ -466,15 +474,6 @@ def test_gates_agree_with_a_brute_force_count_with_mz_twins():
     depth = np.asarray(graph.depth)
     mother, father = np.asarray(graph.mother_rows), np.asarray(graph.father_rows)
     n = len(rows)
-    ancestors = set(np.flatnonzero(depth == depth.max()).tolist())
-    frontier = set(ancestors)
-    while frontier:
-        frontier = {int(p) for row in frontier for p in (mother[row], father[row]) if p >= 0} - ancestors
-        ancestors |= frontier
-    contributing = sum(mother[row] < 0 and father[row] < 0 for row in ancestors)
-    assert supports["founders_contributing"] == gates["founder_genomes_contributing"] == contributing
-    rest = supports["depth"]["0"] - contributing
-    assert gates["founders_floor"] == min(contributing, rest or contributing, *supports["depth"].values())
 
     fathers = {int(row) for row in father if row >= 0}
     by_depth = [sum(depth[row] == d for row in fathers) for d in range(int(depth.max()) + 1)]
@@ -581,62 +580,6 @@ def test_delta_f_parts_follow_their_own_counts(wide):
     assert lagged["ne"] is not None
 
 
-@pytest.mark.parametrize(("contributing", "smaller"), [(4, 4), (10, 2)])
-def test_few_founders_on_either_side_withhold_the_contribution_ne(wide, contributing, smaller):
-    """Four contributing founders, or two that do not contribute, withhold the count and the estimate over it."""
-    source, written, _ = wide
-    assert written["supports"]["founders_contributing"] == source["gates"]["founders_floor"] == 12
-    assert written[ES]["ne_long_term_contributions"]["ne"] is not None
-    edited = copy.deepcopy(source)
-    edited["supports"]["founders_contributing"] = contributing
-    edited["gates"]["founders_floor"] = smaller
-    payload = safe_payload(edited, DEFAULT_MIN_CELL)
-    assert payload["supports"]["founders_contributing"] is None
-    assert payload[ES]["ne_long_term_contributions"] == {"ne": None, "reason": WITHHELD}
-
-    edited = copy.deepcopy(source)
-    edited["gates"]["founder_genomes_contributing"] = 4
-    assert safe_payload(edited, DEFAULT_MIN_CELL)[ES]["ne_long_term_contributions"]["reason"] == WITHHELD
-
-
-def test_founder_count_does_not_give_back_a_withheld_depth(tmp_path):
-    """Three founders and two children at minimum cell 3: the depth table is withheld, and the founders with it.
-
-    The generated-pedigree oracle found this: a released count of founders
-    is the size of depth 0, and the total less that is the other depth.
-    """
-    rows = [{"id": i + 1, "sex": "MFM"[i], "mother": -1, "father": -1} for i in range(3)]
-    rows += [{"id": 4, "sex": "F", "mother": 2, "father": 1}, {"id": 5, "sex": "M", "mother": 2, "father": 3}]
-    source = run(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--min-cell", "3")
-    assert source is not None
-    assert source["supports"]["depth"] == {"0": 3, "1": 2}
-    assert source["supports"]["founders_contributing"] == 3
-    written = load(tmp_path / "out")
-    assert written["supports"]["depth"] == {"status": "blanked", "total": 5}
-    assert written["supports"]["founders_contributing"] is None
-    assert pinned_sensitive(source, 3) == []
-
-
-def test_founders_that_do_not_contribute_set_the_floor(tmp_path):
-    """Founders with no descendant in the deepest depth are the other side of the contributing count."""
-    rows = [
-        *wide_rows(),
-        *(
-            {"id": 900 + i, "sex": "MF"[i % 2], "mother": -1, "father": -1, "birth_year": 1900, "ref": 0}
-            for i in range(2)
-        ),
-    ]
-    source = run(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--estimators", "ne_long_term_contributions")
-    assert source is not None
-    assert source["supports"]["depth"]["0"] == 14
-    assert source["supports"]["founders_contributing"] == 12
-    assert source["gates"]["founders_floor"] == 2
-    written = load(tmp_path / "out")
-    assert written["supports"]["depth"]["bins"]["0"] == 14
-    assert written["supports"]["founders_contributing"] is None
-    assert written[ES]["ne_long_term_contributions"] == {"ne": None, "reason": WITHHELD}
-
-
 def _one_father_rows(child_sexes: str) -> list[dict]:
     """One father born 1900, a mother born 1950 for each child, and the children, born 1980: paternal half sibs."""
     n = len(child_sexes)
@@ -729,40 +672,37 @@ def test_e2_related_pairs_need_enough_families_and_enough_shared_parents(tmp_pat
     assert (load(tmp_path / "out")[ES]["ne_coancestry"].get("reason") != WITHHELD) is released
 
 
-def test_e2_contribution_ne_is_not_a_moment_of_few_founders_offspring_counts(tmp_path):
-    """Review finding E2: with founders and their children only, the contribution Ne is 8 n^2 / sum of k^2.
+def test_contribution_ne_is_never_released(tmp_path, wide, wide_ped):
+    """Plan D17: the contribution Ne has one fixed record, and nothing a safe run counts exists for it.
 
-    Six founders, five children and ``ne: 6.6667`` give a sum of squared
-    offspring counts of 30, which only 5, 1, 1, 1, 1, 1 has: one founder is
-    a parent of every child. The estimate needs every offspring count to
-    be shared by the minimum cell of founders.
+    The wide pedigree is one the estimate used to be released on. The
+    record is the same when the estimator is the only one asked for, when
+    it is not asked for, and on the review's E2 pedigree, where the estimate
+    was a moment of six founders' offspring counts.
     """
-    source = run(
-        write_ped(tmp_path / "p.tsv", _one_father_rows("MFMFM")),
-        tmp_path / "out",
-        "--estimators",
-        "ne_long_term_contributions",
-    )
-    assert source is not None
-    assert source[ES]["ne_long_term_contributions"]["estimate"]["ne"] == pytest.approx(8 * 5**2 / 30)
-    assert source["gates"]["founders_by_children_in_deepest_depth"] == {"1": 5, "5": 1}
-    assert load(tmp_path / "out")[ES]["ne_long_term_contributions"] == {"ne": None, "reason": WITHHELD}
+    fixed = {"ne": None, "reason": NOT_RELEASED}
+    source, written, plain = wide
+    assert plain[ES]["ne_long_term_contributions"]["ne"] is not None
+    assert written[ES]["ne_long_term_contributions"] == fixed
+    assert "ne_long_term_contributions" in written["estimators_requested"]
+    assert "ne_long_term_contributions" not in source[ES]
+    assert not [key for table in ("supports", "gates") for key in source[table] if "founder" in key]
+    assert "founders_contributing" not in written["supports"]
 
+    computed: list[str] = []
 
-def test_e2_contribution_ne_is_released_when_founders_share_their_offspring_counts(tmp_path, wide):
-    """Five couples with two children each: every founder has two children, and the estimate is released."""
-    rows = [{"id": i + 1, "sex": "MF"[i % 2], "mother": -1, "father": -1} for i in range(10)]
-    rows += [
-        {"id": 11 + i, "sex": "MF"[i % 2], "mother": 2 * (i // 2) + 2, "father": 2 * (i // 2) + 1} for i in range(10)
-    ]
-    source = run(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--estimators", "ne_long_term_contributions")
-    assert source is not None
-    assert source["gates"]["founders_by_children_in_deepest_depth"] == {"2": 10}
-    assert load(tmp_path / "out")[ES]["ne_long_term_contributions"] == {"ne": 20.0}
+    def reasons(records: dict[str, dict]) -> None:
+        computed.append(records["ne_long_term_contributions"]["reason"])
 
-    deep, written, _ = wide
-    assert deep["gates"]["founders_by_children_in_deepest_depth"] == {"0": 12}
-    assert written[ES]["ne_long_term_contributions"]["ne"] is not None
+    for ped, flags in (
+        (wide_ped, ("--estimators", "ne_long_term_contributions")),
+        (wide_ped, ("--estimators", "ne_inbreeding")),
+        (write_ped(tmp_path / "e2.tsv", _one_father_rows("MFMFM")), ()),
+    ):
+        out_dir = tmp_path / f"out{len(computed)}"
+        run(ped, out_dir, *flags, records=reasons)
+        assert load(out_dir)[ES]["ne_long_term_contributions"] == fixed
+    assert computed == ["not_requested"] * 3
 
 
 def test_e2_group_coancestry_does_not_count_a_depths_mz_cotwins(tmp_path):
@@ -801,7 +741,7 @@ def test_an_estimate_with_no_count_behind_it_is_withheld(wide):
     """A source that lacks a support (a stop before the counts were taken) withholds every estimate."""
     source, _, _ = wide
     edited = copy.deepcopy(source) | {"supports": {}, "gates": {}}
-    records = safe_payload(edited, DEFAULT_MIN_CELL)[ES]
+    records = releasable(safe_payload(edited, DEFAULT_MIN_CELL)[ES])
     assert all(record["ne"] is None and record["reason"] == WITHHELD for record in records.values())
     assert all(
         value is None or key in ("reason", "collapses_to_ne_v", "vk_scaled")
@@ -849,7 +789,7 @@ def test_estimator_selection_limits_the_supports(wide_ped, tmp_path):
     written = load(tmp_path)
     assert set(written["supports"]) == {"depth"}
     assert written[ES]["ne_coancestry"]["ne"] is not None
-    others = {name: record for name, record in written[ES].items() if name != "ne_coancestry"}
+    others = {name: record for name, record in releasable(written[ES]).items() if name != "ne_coancestry"}
     assert all(record == {"ne": None, "reason": "not_requested"} for record in others.values())
 
 
@@ -957,8 +897,9 @@ def test_stop_at_the_memory_limit_goes_through_the_release_list(tmp_path, monkey
     assert written["supports"] == {}
     assert all(
         record == {"ne": None, "reason": "memory_limit", "rss_gib": 2.0, "limit_gib": 1.0}
-        for record in written[ES].values()
+        for record in releasable(written[ES]).values()
     )
+    assert written[ES]["ne_long_term_contributions"] == {"ne": None, "reason": NOT_RELEASED}
 
 
 # ---------------------------------------------------------------------------

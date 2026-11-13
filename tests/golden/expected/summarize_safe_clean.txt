@@ -1,5 +1,5 @@
 exit: 0
-artifacts: ['summary.extra.txt', 'summary.individual.tab', 'summary.pedigree.tab', 'summary.txt']
+artifacts: ['summary.extra.txt', 'summary.pedigree.tab', 'summary.txt']
 === summary.extra.txt ===
 input: <input>
 command: <command>
@@ -100,21 +100,6 @@ pedigree:
           bins:
             male: 85
             female: 69
-individual:
-  distributions:
-    ecg:
-      mean: 2.05
-      std: 1.2868
-
-=== summary.individual.tab ===
-section	key	subkey	value
-meta	input		<input>
-meta	command		<command>
-meta	version		<version>
-meta	n_total		200
-meta	safe_attempt_min_cell		5
-distributions	ecg	mean	2.05
-distributions	ecg	std	1.2868
 
 === summary.pedigree.tab ===
 section	key	subkey	value
@@ -218,7 +203,6 @@ offspring_sex_concordance	paternal_offspring_group	test.permutations.p_raw	0.176
 offspring_sex_concordance	paternal_offspring_group	test.permutations.p_holm	0.3529
 reproduction	by_status	status	blanked
 reproduction	by_status	total	200
-founder_contribution	effective_founders_by_descendant_paths		24.4957
 relationship_pairs	engine		rust_relatives_per_person
 relationship_pairs	by_code	status	blanked
 relationship_pairs	by_code	total	7131
@@ -394,9 +378,6 @@ pedigree:
       by_status:
         status: blanked
         total: 200
-  founders:
-    founder_contribution:
-      effective_founders_by_descendant_paths: 24.4957
   relatedness:
     relationship_pairs:
       engine: rust_relatives_per_person

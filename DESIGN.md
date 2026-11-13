@@ -222,6 +222,16 @@ relaxation is not enough, since it accepts systems that one integer
 solution fits. The oracle covers the relations a spec declares; the
 release list and the one-copy rule are what keep the undeclared ones few.
 
+**No founder-contribution statistic (D17).** Three statistics are
+concentration indices over per-founder contributions:
+`effective_founders_by_descendant_paths`, the mean and sd of equivalent
+complete generations, and `ne_long_term_contributions`. Each narrows how
+the descendants are spread over the founders, and no gate short of a
+dominance rule closes that, so none is on a release list and a safe run
+computes none of them. The estimator's record is
+`reason: not_released_in_safe_mode` whatever the run, so the key set of
+`effective_size.txt` does not depend on the data.
+
 **Pair counts, not histograms (D11).** A relationship pair count is a
 weighted sum over a per-individual table: `FS` is the sum of `k(k-1)/2`
 over sibships of size `k`, and `MO + FO` is the total offspring count. A
@@ -260,7 +270,20 @@ The pass does not say which ancestor a cousin pair shares, so those rows
 are bounds and can withhold a code that an exact count would release,
 mostly in a small pedigree with few founders. In `assortative-mating` the
 unit is the couple, backed by the smaller of its distinct mothers and
-fathers.
+fathers. The individuals are also a gate table of three parts whose total
+is the released `n_total`: the couples' mothers, their fathers and everyone
+else. When the third part is below the minimum cell and not zero, the
+counts that fix the first two are withheld: the parents with several
+mates, the parents with both traits and each cell's Mate Networks. The
+counts of couples stay, since without those three they only bound the
+mothers and the fathers from above. Two more floors rest on the same
+counts. The Mate Networks of a cell whose couples never remate are its
+distinct mothers and its distinct fathers, so where someone remates
+elsewhere they are withheld when the mothers, or the fathers, in no couple
+of the cell are fewer than the minimum cell: in a stratified run those are
+the parents of dropped thin-stratum couples alone. The Mate Networks of a
+cell that holds every extra mate are the distinct parents of one sex, so
+the parents of that sex with both traits take the cell's networks floor.
 
 **Structural zeros and tables that wait (review S1, S2).** No individual
 of the deepest depth has offspring, none of depth 0 or 1 is inbred, and

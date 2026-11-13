@@ -52,11 +52,14 @@ if TYPE_CHECKING:
 def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog) -> int:
     """``summarize``: write the summary YAMLs, ``annotated.tsv.gz`` and, under ``--tsv``, the long TSVs.
 
-    A ``--safe-attempt`` run writes the safe names of the YAMLs and TSVs and no ``annotated.tsv.gz``.
+    A ``--safe-attempt`` run writes the safe names of the YAMLs and of the pedigree TSV, and neither the
+    individual TSV nor ``annotated.tsv.gz``.
     """
     names = ["summary.yaml", "summary.extra.yaml"]
     if args.tsv:
-        names += ["summary.pedigree.tsv", "summary.individual.tsv"]
+        names.append("summary.pedigree.tsv")
+        if not args.safe_attempt:
+            names.append("summary.individual.tsv")
     paths = prepare_outputs(args, *names)
     if isinstance(paths, int):
         return paths
@@ -147,12 +150,12 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             comp_labels,
             sex_source,
         )
-        ecg = pl.Series("ecg", equivalent_complete_generations(df, mother_rows, father_rows))
-        if args.safe_attempt:
-            idf = idf.with_columns(ecg)
-        else:
+        if not args.safe_attempt:
             founder_summary, n_founder_anc = compute_founder_summary(idf, mother_rows, father_rows)
-            idf = idf.with_columns(pl.Series("n_founder_ancestors", n_founder_anc), ecg)
+            idf = idf.with_columns(
+                pl.Series("n_founder_ancestors", n_founder_anc),
+                pl.Series("ecg", equivalent_complete_generations(df, mother_rows, father_rows)),
+            )
 
     if args.safe_attempt:
         # Imported here so an ordinary run does not pay for loading the release list.
@@ -176,8 +179,8 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             sex_concordance=sex_concordance,
         )
         outputs = safe_summary.safe_outputs(source, args.min_cell)
-        slim_yaml, extra_yaml = outputs.slim, outputs.extra
-        pedigree_tsv, individual_tsv = outputs.pedigree_tsv, outputs.individual_tsv
+        slim_yaml, extra_yaml, pedigree_tsv = outputs.slim, outputs.extra, outputs.pedigree_tsv
+        individual_tsv = None
         logger.info("safe-attempt: release list applied (min cell = %d)", Public(args.min_cell))
     else:
         with timed("sibship sizes"):
@@ -242,7 +245,8 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
     write_yaml(extra_yaml, paths["summary.extra.yaml"])
     if args.tsv:
         write_long_tsv(pedigree_tsv, paths["summary.pedigree.tsv"])
-        write_long_tsv(individual_tsv, paths["summary.individual.tsv"])
+        if individual_tsv is not None:
+            write_long_tsv(individual_tsv, paths["summary.individual.tsv"])
     logger.info("wrote %s/{%s}", out_dir, Public(", ".join(path.name for path in paths.values())))
 
     if args.safe_attempt:

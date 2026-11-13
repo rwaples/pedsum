@@ -35,7 +35,6 @@ from pedsum.disclosure import (
     build_release,
     protect_payload,
 )
-from pedsum.report import output_name
 from pedsum.safe_summary import NOT_COMPUTED, build_source, safe_outputs, summarize_spec
 
 ADVERSARIAL = Path(__file__).parent / "data" / "safe_attempt" / "adversarial.tsv"
@@ -43,7 +42,7 @@ FULL = [
     *("--multiple-birth-col", "set", "--birth-year-col", "birth_year"),
     *("--sex-concordance", "--per-individual-burden", "--tsv"),
 ]
-OUTPUTS = ("summary.yaml", "summary.extra.yaml", "summary.pedigree.tsv", "summary.individual.tsv")
+OUTPUTS = ("summary.yaml", "summary.extra.yaml", "summary.pedigree.tsv")
 
 SIZE = ("pedigree", "structure", "size_structure")
 DEPTH = (*SIZE, "depth")
@@ -214,10 +213,26 @@ def safe(tmp_path_factory) -> tuple[dict[str, Any], Path]:
 # ---------------------------------------------------------------------------
 
 
-def test_safe_run_writes_the_four_reports_and_no_individual_table(safe):
-    """The safe run writes the two reports and, under --tsv, the two long tables, and never annotated.tsv.gz."""
+def test_safe_tsv_run_writes_the_two_reports_and_the_pedigree_table_only(safe):
+    """A safe --tsv run writes no individual table and no annotated.tsv.gz."""
     _, out_dir = safe
-    assert sorted(path.name for path in out_dir.iterdir()) == sorted(output_name(name, safe=True) for name in OUTPUTS)
+    assert sorted(path.name for path in out_dir.iterdir()) == [
+        "summary.extra.txt",
+        "summary.pedigree.tab",
+        "summary.txt",
+    ]
+
+
+def test_safe_run_refuses_a_leftover_individual_table(tmp_path):
+    """The individual table of an earlier version is a foreign file to a safe run."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "summary.individual.tab").write_text("section\tkey\tvalue\n")
+    args = ["summarize", "--in", str(ADVERSARIAL), "--out", str(out_dir), *FULL, "--safe-attempt"]
+    res = run_pedsum(args)
+    assert res.returncode == 1
+    assert "summary.individual.tab" in res.stderr
+    assert [path.name for path in out_dir.iterdir()] == ["summary.individual.tab"]
 
 
 def test_every_rule_has_a_reason(safe):
@@ -318,6 +333,29 @@ def test_no_released_count_is_below_the_minimum_cell(safe):
     assert small_counts(out_dir, DEFAULT_MIN_CELL) == []
 
 
+def test_no_statistic_of_founder_contributions_is_released(tmp_path):
+    """Plan D17: the effective number of founders and the ECG mean and sd are in no safe file.
+
+    The golden input is a pedigree on which a safe run used to release
+    both. The ordinary run still reports them.
+    """
+    ped = Path(__file__).parent / "golden" / "inputs" / "traits.tsv"
+    summarize(ped, tmp_path / "plain", "--tsv", safe=False)
+    plain = load(tmp_path / "plain")
+    contribution = _pedigree(plain)["founders"]["founder_contribution"]
+    assert contribution["effective_founders_by_descendant_paths"] > DEFAULT_MIN_CELL
+    assert plain["summary.extra.yaml"]["individual"]["distributions"]["ecg"]["mean"] > 0
+
+    source = summarize(ped, tmp_path / "safe", "--tsv")
+    assert source is not None
+    assert "individual" not in source
+    assert "founders" not in source["pedigree"]
+    written = load(tmp_path / "safe")
+    assert all("individual" not in payload and "founders" not in payload["pedigree"] for payload in written.values())
+    assert all(word not in text(tmp_path / "safe") for word in ("ecg", "effective_founders", "founder_contribution"))
+    assert not (tmp_path / "safe" / "summary.individual.tab").exists()
+
+
 def test_tables_hold_integer_counts(safe):
     """Every released bin and cell is an int: no share stands in for a count."""
     _, out_dir = safe
@@ -337,7 +375,7 @@ def test_safe_build_is_idempotent(safe):
     assert source == before
 
 
-def test_the_yamls_split_the_release_and_the_tsvs_repeat_it(safe):
+def test_the_yamls_split_the_release_and_the_tsv_repeats_it(safe):
     """Apart from the meta block, no leaf is in both YAMLs, and every TSV value is a YAML leaf."""
     source, _ = safe
     outputs = safe_outputs(source, DEFAULT_MIN_CELL)
@@ -347,9 +385,7 @@ def test_the_yamls_split_the_release_and_the_tsvs_repeat_it(safe):
     assert extra
     assert not slim & extra
     yaml_leaves = {(path[-1], leaf) for payload in (outputs.slim, outputs.extra) for path, leaf in leaves(payload)}
-    tsv_leaves = {
-        (path[-1], leaf) for payload in (outputs.pedigree_tsv, outputs.individual_tsv) for path, leaf in leaves(payload)
-    }
+    tsv_leaves = {(path[-1], leaf) for path, leaf in leaves(outputs.pedigree_tsv)}
     assert tsv_leaves == yaml_leaves
 
 

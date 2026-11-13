@@ -51,7 +51,6 @@ supports:
       '4':
         male: 16
         female: 14
-  founders_contributing: 30
   birth_cohort_by_sex:
     status: intact
     total: 200
@@ -131,7 +130,8 @@ effective_size:
       '3': 90.657
       '4': 37.3982
   ne_long_term_contributions:
-    ne: 46.9629
+    ne: null
+    reason: not_released_in_safe_mode
   ne_hill_overlapping:
     ne: 288.0639
     T_m: 5.0

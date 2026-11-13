@@ -10,7 +10,9 @@ sex's mates-per-person histogram is modelled beside it: the couples are its
 first moment, the distinct persons its total. The individuals with and
 without each trait are split into mothers, fathers and everyone else, tied
 to the couples whose mate lacks the trait, and a cell's Mate Networks are
-bounded by its couples and the extra mates.
+bounded by its couples and the extra mates. The individuals are the distinct
+mothers, the distinct fathers and everyone else, and each sex is at least
+the Mate Networks of any cell, released or withheld.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ PAIRS = ("mating_pairs", "n_total")
 GROUPS = ("gates", "couples_by_cells")
 GROUP_LEVELS = ("gates", "couples_by_cells_levels")
 BY_ROLE = ("gates", "trait_rows_by_role")
+ROLES = ("gates", "individuals_by_role")
 
 #: Integer leaves that are not counts of units: run options, replicate counts, and counts of strata.
 NOT_COUNTS = {
@@ -94,6 +97,34 @@ def table_couples(table: list[list[int]], start: int = 1) -> tuple[list[tuple[in
                 level[mother], level[father] = m_level, f_level
                 person += 1
     return couples, level
+
+
+def funnel_rows(leaves: int, width: int = 16, seed: int = 5) -> list[dict]:
+    """Generations of couples that halve until one is left, which has ``leaves`` children; nobody remates.
+
+    Every child of an earlier couple is a parent in the next generation, so
+    the ``leaves`` are the only individuals in no couple. Each individual
+    has a value of the continuous traits ``a`` and ``b``.
+    """
+    rng = np.random.default_rng(seed)
+    rows: list[dict] = []
+
+    def person(sex: str, mother: int, father: int, year: int) -> int:
+        rows.append(
+            {"id": len(rows) + 1, "sex": sex, "mother": mother, "father": father, "birth_year": year}
+            | {name: f"{rng.normal():.3f}" for name in ("a", "b")}
+        )
+        return len(rows)
+
+    couples = [(person("F", -1, -1, 1900), person("M", -1, -1, 1900)) for _ in range(width)]
+    year = 1930
+    while len(couples) > 1:
+        children = [person("FM"[i % 2], mother, father, year) for i, (mother, father) in enumerate(couples)]
+        couples = list(zip(children[::2], children[1::2], strict=True))
+        year += 30
+    for i in range(leaves):
+        person("FM"[i % 2], *couples[0], year)
+    return rows
 
 
 def mating_rows(
@@ -267,8 +298,9 @@ def reader_system(
     The targets are every protected cell of a withheld table, every withheld
     count, every small group of couples (by the cells that analyse them),
     every small level of such a group, every small class of a
-    mates-per-person histogram and every small part of a trait's rows among
-    the mothers, the fathers and everyone else.
+    mates-per-person histogram, every small part of a trait's rows among
+    the mothers, the fathers and everyone else, and a small number of
+    individuals in no couple.
     """
     spec = spec or assortative_mating_spec(source)
     rules = {rule.path: rule for rule in spec.rules}
@@ -367,13 +399,19 @@ def reader_system(
         system.add({name: 1} | dict.fromkeys(members, -1) | ({} if analysed else {unknown_stratum: -1}), 0, 0)
         targets.append(name)
 
-    for link in spec.links:
-        if link.parts[0][0][:2] != BY_ROLE:
-            continue
+    for role, count in at(source, ROLES).items():
+        system.var((ROLES, role), 0, cap)
+        if role == "others" and 0 < count < min_cell:
+            targets.append((ROLES, role))
+    system.add({(("n_total",), None): 1} | {(ROLES, role): -1 for role in at(source, ROLES)}, 0, 0)
+
+    by_state = [link for link in spec.links if link.whole[0] != ROLES and link.parts[0][0][:2] == BY_ROLE]
+    for link in by_state:
         for part in link.parts:
             system.var(part, 0, cap)
             if 0 < at(source, part[0])[part[1][0]][part[1][1]] < min_cell:
                 targets.append(part)
+    for link in (*by_state, *(link for link in spec.links if link.whole[0] == ROLES and link.whole[1])):
         system.add({link.whole: 1} | dict.fromkeys(link.parts, -1), 0, 0)
 
     extra_mates: dict[Hashable, int] = {}
@@ -387,6 +425,12 @@ def reader_system(
         persons = {(sex, k): 1 for k in classes}
         extra = {(sex, k): k - 1 for k in classes}
         extra_mates |= extra
+        system.add(persons | {(ROLES, sex): -1}, 0, 0)
+        # A Mate Network holds at least one mother and one father.
+        for key in cells:
+            networks = ("cells", key, "n_mate_networks")
+            if networks in protected:
+                system.add(persons | {(networks, None): -1}, 0, cap)
         system.add({(sex, k): k for k in classes} | dict.fromkeys(everyone, -1), 0, 0)
         several = at(release, ("mating_pairs", f"n_{sex}_multiple_mates"))
         if several is not None:

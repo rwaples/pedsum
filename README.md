@@ -413,7 +413,8 @@ Flags:
   typically need only the YAML outputs.
 - `--safe-attempt` — write only a fixed list of aggregate results, each
   protected at `--min-cell N` (default 5, at least 3), as `summary.txt`
-  and `summary.extra.txt` (`.tab` for the `--tsv` tables), into a `--out`
+  and `summary.extra.txt` (with `--tsv`, `summary.pedigree.tab` and no
+  individual table), into a `--out`
   that holds no other file. `--id-log` writes the log lines that name an
   ID to `summarize.ids.local.log`. Best effort, **not a guarantee**:
   review the output before it leaves a secure environment. See
@@ -632,7 +633,9 @@ the `estimators_requested`, and one record per estimator under
 With `--safe-attempt` the file is `effective_size.txt`. It holds the
 counts each estimator rests on, protected at `--min-cell`, and an estimate
 only when all of its counts are at least that. A per-depth or per-cohort
-array is written whole or not at all. A stop at the memory limit writes
+array is written whole or not at all. `ne_long_term_contributions` is
+never written: its record is always `reason: not_released_in_safe_mode`.
+A stop at the memory limit writes
 the same file name, with no estimate that needs a count. See
 [Safe output](#safe-output---safe-attempt).
 
@@ -734,7 +737,15 @@ file, `DIR/assortative_mating.yaml`, with the run metadata and an
 With `--safe-attempt` the file is `assortative_mating.txt`. The couples
 table of a cell is protected at `--min-cell`, and an estimate is written
 only when the table it is fitted to is intact. One small group of couples
-withholds every cell's `n` and estimate. See
+withholds every cell's `n` and estimate. When fewer than `--min-cell`
+individuals are a parent in no couple, the counts that give the distinct
+mothers and fathers are withheld (`n_mothers_multiple_mates`,
+`n_fathers_multiple_mates`, each `within_person` `n` and each cell's
+`n_mate_networks`): `n_total` less the mothers and the fathers would be
+that small count. A cell's `n_mate_networks` is also withheld when its
+couples never remate and fewer than `--min-cell` mothers, or fathers, are
+in none of them, and a `within_person` `n` is withheld when it would give
+a withheld `n_mate_networks`. See
 [Safe output](#safe-output---safe-attempt).
 
 pedsum reads and types the traits, assigns strata and writes the YAML.
@@ -1255,6 +1266,14 @@ the smaller of its distinct mothers and its distinct fathers.
   pair counts are sums over those tables and the two together would give
   back a merged tail;
 - the table of related pairs at the same depth;
+- a statistic of how the descendants are spread over the founders:
+  `effective_founders_by_descendant_paths`, the mean and standard deviation
+  of equivalent complete generations (`ecg`), and the
+  `ne_long_term_contributions` estimate. Each is a concentration index over
+  per-founder contributions, and a minimum cell does not stop one founder
+  from dominating it. `effective-size` writes that estimator's record as
+  `ne: null`, `reason: not_released_in_safe_mode` on every safe run, and
+  does not compute it;
 - the Hill estimator's parental-age table;
 - a number that repeats another: a fraction beside its count, a
   complement, a rollup;
@@ -1269,7 +1288,7 @@ A safe run writes no `.yaml`, `.tsv` or `.gz` file.
 | `summarize` | `summary.yaml` | `summary.txt` |
 | `summarize` | `summary.extra.yaml` | `summary.extra.txt` |
 | `summarize --tsv` | `summary.pedigree.tsv` | `summary.pedigree.tab` |
-| `summarize --tsv` | `summary.individual.tsv` | `summary.individual.tab` |
+| `summarize --tsv` | `summary.individual.tsv` | not written |
 | `effective-size` | `effective_size.yaml` | `effective_size.txt` |
 | `assortative-mating` | `assortative_mating.yaml` | `assortative_mating.txt` |
 
@@ -1620,7 +1639,8 @@ ancestor once per path. A founder has 0, a child of two founders 1, and
 a child with one known founder parent 0.5. It measures pedigree depth
 the way ENDOG, optiSel (`equiGen`), purgeR (`pop_t`) and visPedigree
 (`ECG`) do, and its distribution is under
-`individual.distributions.ecg` in `summary.extra.yaml`.
+`individual.distributions.ecg` in `summary.extra.yaml`. A `--safe-attempt`
+run does not write it.
 
 ### Column preservation
 

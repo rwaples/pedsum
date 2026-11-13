@@ -53,6 +53,14 @@ parts a reader could subtract out:
 * The individuals with and without a trait are the mothers, the fathers
   and everyone else. The cells' counts give the parents' share, so the
   table is withheld when any of the three parts is small.
+
+The individuals are themselves a table of three parts with a released
+total: the couples' mothers, their fathers and everyone else. A pedigree in
+which fewer than the minimum cell are in no couple withholds the three
+counts that say how many distinct mothers and fathers there are: the
+parents with several mates, the parents with both traits, and each cell's
+Mate Networks. The counts of couples stay: without those three they bound
+the mothers and the fathers from above only.
 """
 
 from __future__ import annotations
@@ -95,6 +103,7 @@ _TRAIT_FIELDS = ("name", "type", "type_source", "levels")
 _TRAIT_ROWS: Path = ("supports", "trait_rows")
 _ROWS_BY_ROLE: Path = ("gates", "trait_rows_by_role")
 _ROWS_SUPPORT: Path = ("gates", "trait_rows_support")
+_ROLES: Path = ("gates", "individuals_by_role")
 _GROUP_LEVELS: Path = ("gates", "couples_by_cells_levels")
 _STATES = ("with_value", "missing")
 _PAIRS: Path = ("mating_pairs", "n_total")
@@ -380,12 +389,15 @@ def _cell_source(
 
 
 def _within_person_source(
-    sex: str, record: Mapping[str, Any], persons: np.ndarray, traits: Sequence[Trait], n_couples: int, pairs_floor: int
+    sex: str, record: Mapping[str, Any], persons: np.ndarray, traits: Sequence[Trait], n_couples: int, floor: int
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """One sex's within-person leaves and gates, over the distinct ``persons`` of the couples.
 
-    ``pairs_floor`` is the support of the couples total: where nobody
-    remates the persons with both traits are a count of couples.
+    ``floor`` is the smallest of the support of the couples total, the
+    individuals in no couple, and the networks floor of each cell whose
+    Mate Networks the distinct persons would give: where nobody remates the
+    persons with both traits are a count of couples, and where no trait is
+    missing they are every mother or every father.
     """
     first, second = (trait.values[persons] for trait in traits)
     both = ~np.isnan(first) & ~np.isnan(second)
@@ -396,7 +408,7 @@ def _within_person_source(
     out = {"estimator": name, "n": n, "estimate": _estimate(name, record)}
     # A person is in one couple per mate, so the couples less the persons counts the rematings; beside the
     # couples total, one remating would be one person.
-    gates: dict[str, Any] = {"n_floor": min(_floor(n, n_couples - n), pairs_floor)}
+    gates: dict[str, Any] = {"n_floor": min(_floor(n, n_couples - n), floor)}
     k_first, k_second = (_n_levels(trait) for trait in traits)
     first, second = first[both], second[both]
     if k_first is not None and k_second is not None:
@@ -417,6 +429,11 @@ def _rows_by_role(trait: Trait, persons: Mapping[str, np.ndarray]) -> dict[str, 
         role[rows] = code
     counts = np.bincount(role * 2 + missing, minlength=2 * (len(persons) + 1)).reshape(-1, 2)
     return {name: _labelled(row, _STATES) for name, row in zip((*persons, "others"), counts, strict=True)}
+
+
+def _individuals_by_role(by_role: Mapping[str, Mapping[str, int]]) -> dict[str, int]:
+    """The individuals who are a mother of the couples, a father of them, or neither."""
+    return {role: sum(cells.values()) for role, cells in by_role.items()}
 
 
 def _rows_support(by_role: Mapping[str, Mapping[str, int]]) -> dict[str, int]:
@@ -512,9 +529,12 @@ def build_source(
     group_support = every.support(group, sets.size)
     group_levels = _group_levels(every, analysed_by, traits)
     persons = {sex: np.unique(rows) for sex, rows in (("mothers", kept.mothers), ("fathers", kept.fathers))}
+    rows_by_role = {str(i): _rows_by_role(trait, persons) for i, trait in enumerate(traits)}
+    roles = _individuals_by_role(rows_by_role["0"])
     # A person is in one couple per mate, so the couples less the persons are the mates beyond each person's first.
     extra_mates = sum(len(kept) - rows.size for rows in persons.values())
     beyond = {key: cell["n"] - cell["n_mate_networks"] for key, cell in cells.items() if "n_mate_networks" in cell}
+    pinned = dict.fromkeys(persons, len(every))
     for (key, cell), (i, j) in zip(cells.items(), np.ndindex(len(traits), len(traits)), strict=True):
         gate = cell_gates[key]
         floor = _floor(cell["n"], group_support[sets != 0])
@@ -523,7 +543,19 @@ def build_source(
             # The couples beyond one per network count rematings: a single one would be one person of the cell,
             # and a difference of one from another cell's would be one remating among the couples they differ by.
             gaps = [abs(beyond[key] - other) for other in (*beyond.values(), extra_mates)]
-            gate["networks_floor"] = min(floor, _floor(cell["n_mate_networks"], beyond[key], *gaps))
+            # A network holds a mother and a father, so the networks of couples who never remate are both, and
+            # the mothers or fathers of the sample beyond them are the ones no couple of the cell holds. Where
+            # nobody remates at all those are couples of the other groups, which the cell's floor covers.
+            outside = [rows.size - cell["n"] for rows in persons.values()] if extra_mates and not beyond[key] else []
+            gate["networks_floor"] = min(
+                floor, _floor(cell["n_mate_networks"], beyond[key], *gaps, roles["others"], *outside)
+            )
+            # Where every extra mate of the sample is in the cell, its networks are no fewer than the couples
+            # less those mates, and no more than either sex: the distinct persons of a sex they equal give them.
+            if beyond[key] == extra_mates:
+                for sex, rows in persons.items():
+                    if rows.size == cell["n_mate_networks"]:
+                        pinned[sex] = min(pinned[sex], gate["networks_floor"])
         if "table" in cell:
             # A withheld n withholds the table's total, which is the same number. A small level of a group
             # withholds the table: its margin less another table's is that group's levels.
@@ -534,7 +566,6 @@ def build_source(
                 for row, cols in gate["table_support"].items()
             }
 
-    rows_by_role = {str(i): _rows_by_role(trait, persons) for i, trait in enumerate(traits)}
     gates: dict[str, Any] = {
         "couples_by_cells": _labelled(np.bincount(group, minlength=sets.size), sets.tolist()),
         "couples_by_cells_support": _labelled(group_support, sets.tolist()),
@@ -542,6 +573,7 @@ def build_source(
         "mating_pairs_floor": _floor(len(every), every.support(), group_support),
         "trait_rows_by_role": rows_by_role,
         "trait_rows_support": {index: _rows_support(by_role) for index, by_role in rows_by_role.items()},
+        "individuals_by_role": roles,
         "cells": cell_gates,
     }
     mating_pairs: dict[str, Any] = {"n_total": len(every)}
@@ -579,7 +611,12 @@ def build_source(
         source["within_person"], gates["within_person"] = {}, {}
         for sex, record in payload["within_person"].items():
             source["within_person"][sex], gates["within_person"][sex] = _within_person_source(
-                sex, record, persons[sex], traits, len(kept), gates["mating_pairs_floor"]
+                sex,
+                record,
+                persons[sex],
+                traits,
+                len(kept),
+                min(_floor(gates["mating_pairs_floor"], roles["others"]), pinned[sex]),
             )
     return source
 
@@ -613,7 +650,11 @@ def _cell_rules(key: str, cell: Mapping[str, Any], gates: Mapping[str, Any]) -> 
             "with the cell's count of couples, which it equals when nobody remates, and when the couples "
             "exceed the networks by fewer than the minimum cell, or by that few more or fewer than in "
             "another cell or than the extra mates of the whole sample: those differences count the few "
-            "people who remated, in the cell or among the couples two cells differ by.",
+            "people who remated, in the cell or among the couples two cells differ by. Withheld too when "
+            "fewer than the minimum cell of individuals are in no couple: the networks of couples who never "
+            "remate are their mothers and their fathers. For the same reason, withheld when the cell's "
+            "couples never remate, someone else does, and fewer than the minimum cell of mothers, or of "
+            "fathers, are in no couple of the cell.",
             support=(*gate, "networks_floor"),
         ),
         Count(
@@ -714,7 +755,10 @@ def _within_person_rules(sex: str, gates: Mapping[str, Any]) -> list[Rule]:
             f"The distinct {sex} of the couples with a value of both traits, withheld when the couples exceed "
             "them by fewer than the minimum cell: beside the couples total that difference counts rematings. "
             "Withheld with the couples total too: where nobody remates it is a count of couples, a sum of "
-            "the same groups.",
+            "the same groups. Withheld when fewer than the minimum cell of individuals are in no couple: "
+            f"where no trait is missing it is every one of the {sex}. Withheld with the Mate Networks of a "
+            f"cell that holds every extra mate and as many networks as there are {sex}: the couples and the "
+            f"{sex} bound those networks from both sides.",
             support=(*gate, "n_floor"),
         ),
     ]
@@ -799,6 +843,15 @@ def assortative_mating_spec(source: Mapping[str, Any]) -> ReleaseSpec:
     gates = source["gates"]
     rules.append(
         Table(
+            _ROLES,
+            "The individuals who are a mother of the couples, a father of them, or neither. A reader who "
+            "knew the distinct mothers and fathers would have the third part from the number of individuals, "
+            f"so a small part withholds the counts that give them. {_GATE}",
+            ordered=False,
+        )
+    )
+    rules.append(
+        Table(
             _GROUPS,
             "Couples by the set of cells that analyse them, a set named by its bits; the cells' counts and "
             f"the couples total are sums of these groups. {_GATE}",
@@ -814,8 +867,9 @@ def assortative_mating_spec(source: Mapping[str, Any]) -> ReleaseSpec:
                 ("mating_pairs", f"n_{sex}_multiple_mates"),
                 f"The {sex} with more than one mate, released only when every number of mates is held by no "
                 f"{one} or by at least the minimum cell of them, so that the couples total beside it "
-                "describes no small group of them.",
-                sources=(histogram,),
+                "describes no small group of them, and only when the individuals in no couple are none or at "
+                f"least the minimum cell: where it is zero the couples total is the number of {sex}.",
+                sources=(histogram, _ROLES),
             ),
         ]
     rules += [
@@ -829,6 +883,16 @@ def assortative_mating_spec(source: Mapping[str, Any]) -> ReleaseSpec:
     links: list[Link] = list(
         shared_total("Every individual either has a value of the trait or lacks one.", _N, *trait_rows)
     )
+    links += shared_total("Every individual is a mother of the couples, a father of them, or neither.", _N, _ROLES)
+    links += [
+        Link(
+            (_ROLES, role),
+            tuple(((*_ROWS_BY_ROLE, index), (role, state)) for state in _STATES),
+            "The individuals of a role either have a value of the trait or lack one.",
+        )
+        for index in traits
+        for role in gates["individuals_by_role"]
+    ]
     links += [
         Link(
             ((*_TRAIT_ROWS, index), state),
