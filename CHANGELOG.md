@@ -23,6 +23,14 @@
   `reason: not_released_in_safe_mode`.
 - **`effective-size --safe-attempt`** and **`assortative-mating
   --safe-attempt`** are new. Before, only `summarize` had the flag.
+- `effective-size --safe-attempt` withholds mean F per depth, and the
+  per-depth estimates over F (`ne_inbreeding`, `ne_group_coancestry`, the
+  `ne_per_gen` of `ne_individual_delta_f`), unless each depth's inbred
+  individuals are none or at least the minimum cell in every bin of the F
+  histogram. A depth's mean F times its size is its F sum, which gave how
+  many of its inbred held each of two F values. Inbred means
+  `F > 1e-9`, as in `summarize`. `supports.birth_cohort_by_sex` is
+  written as `null` when the Hill estimator keeps no cohort.
 - `assortative-mating --safe-attempt` withholds the counts that give the
   distinct mothers and fathers (the parents with several mates, the
   parents with both traits, each cell's Mate Networks) when fewer than the
@@ -32,6 +40,12 @@
   cell of mothers, or of fathers, are in none of them, and it withholds
   the parents with both traits when they would give a withheld count of
   Mate Networks.
+- `summarize --safe-attempt` withholds a sex-concordance grouping whose
+  eligible counts differ from the full sibships' or from the parents-known
+  counts by 1 to `--min-cell` − 1, and withholds mean F per depth unless
+  the inbred count and the F buckets are intact. A contingency cell that
+  is nonzero with a support of 0 now withholds its table, as it does a
+  1-D table and a scalar count.
 - **`--min-cell N`** sets the minimum cell (default 5, at least 3). Safe
   files record it as `safe_attempt_min_cell`.
 - **Safe files have new names**: `summary.txt`, `summary.extra.txt`,

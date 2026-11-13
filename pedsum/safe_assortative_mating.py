@@ -192,6 +192,11 @@ def _labelled(values: Sequence[int] | np.ndarray, labels: Sequence[Any] | None =
     return {str(label): value for label, value in zip(labels or range(len(values)), values, strict=True)}
 
 
+# A table over the pedigree's rows finds the couples' people faster than a sort does, and is kept to
+# pedigrees of at most this many rows per couple so that memory stays proportional to the couples.
+_TABLE_ROWS_PER_COUPLE = 8
+
+
 @dataclass(frozen=True)
 class _Couples:
     """Mating Pairs as rows: couple ``p`` is ``(mothers[p], fathers[p])``, over a pedigree of ``n_rows``."""
@@ -218,16 +223,26 @@ class _Couples:
             self._distinct(group, self.mothers, n_groups), self._distinct(group, self.fathers, n_groups)
         ).astype(np.int64)
 
+    def _nodes(self) -> tuple[np.ndarray, np.ndarray, int]:
+        """The couples' mothers and fathers as dense ids, and how many people they are."""
+        if self.n_rows <= _TABLE_ROWS_PER_COUPLE * len(self):
+            seen = np.zeros(self.n_rows, dtype=bool)
+            seen[self.mothers] = True
+            seen[self.fathers] = True
+            node = np.cumsum(seen) - 1
+            return node[self.mothers], node[self.fathers], int(seen.sum())
+        people, node = np.unique(np.concatenate([self.mothers, self.fathers]), return_inverse=True)
+        return node[: len(self)], node[len(self) :], people.size
+
     def network_labels(self) -> tuple[np.ndarray, int]:
-        """Each couple's Mate Network, and the number of rows a label is below."""
-        shape = (self.n_rows, self.n_rows)
-        graph = coo_array((np.ones(len(self), dtype=bool), (self.mothers, self.fathers)), shape=shape)
-        _, labels = connected_components(graph, directed=False)
-        return labels[self.mothers], self.n_rows
+        """Each couple's Mate Network, and the number of networks, which every label is below."""
+        mothers, fathers, n_people = self._nodes()
+        graph = coo_array((np.ones(len(self), dtype=bool), (mothers, fathers)), shape=(n_people, n_people))
+        n_networks, labels = connected_components(graph, directed=False)
+        return labels[mothers], n_networks
 
     def n_networks(self) -> int:
-        labels, _ = self.network_labels()
-        return int(np.unique(labels).size)
+        return self.network_labels()[1]
 
 
 def _mating_pairs(df: pl.DataFrame) -> _Couples:

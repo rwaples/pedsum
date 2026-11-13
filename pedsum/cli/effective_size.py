@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 #: Estimators that need every row's sex resolved (pedigree-graph raises
 #: ``MissingMetadataError`` for them otherwise). The others run on a pedigree
 #: with unknown sex, so ``effective-size`` refuses only when one is selected.
-_SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping"})
+SEX_DEPENDENT_ESTIMATORS = frozenset({"ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping"})
 
 
 def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatchdog) -> int:
@@ -102,7 +102,7 @@ def run_effective_size(args: argparse.Namespace, cmd: str, watchdog: MemoryWatch
         return loaded
     df, labels = loaded
 
-    needs_sex = [name for name in requested if name in _SEX_DEPENDENT_ESTIMATORS]
+    needs_sex = [name for name in requested if name in SEX_DEPENDENT_ESTIMATORS]
     if needs_sex and (df["sex"].to_numpy() == SEX_UNKNOWN).any():
         logger.error(
             "effective size needs resolved sex for every row to run %s; supply "

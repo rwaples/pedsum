@@ -849,3 +849,13 @@ def test_a_link_with_no_parts_is_a_structural_zero():
 
     assert pinned(column) == []
     assert pinned(column, deepest) == [middle]
+
+
+def test_f5_a_nonzero_cell_with_no_support_is_small_in_every_table_kind():
+    """A count of 10 backed by no unit is withheld as a contingency cell, as it is as a bin and as a scalar."""
+    grid = ContingencyTable(("a", "b"), ("x", "y"), ((10, 10), (10, 10)), support=((0, 9), (9, 9)))
+    out = protect(grid, 5)
+    assert (out.status, out.counts, out.total) == (Status.BLANKED, None, 40)
+    flat = FreqTable((("ax", 10), ("ay", 10), ("bx", 10), ("by", 10)), ordered=False, support=(0, 9, 9, 9))
+    assert protect(flat, 5).status is Status.BLANKED
+    assert protect_count(10, 5, 0).value is None

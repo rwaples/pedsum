@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import yaml
 from conftest import property_budget, run_pedsum, write_ped
@@ -44,7 +45,13 @@ from test_safe_summary import _cell_sum, at, leaves
 import pedsum.assortative_mating as ordinary_module
 from pedsum.assortative_mating import VALUE_KEYS
 from pedsum.disclosure import DEFAULT_MIN_CELL, Count, Derived, ReleaseSpec
-from pedsum.safe_assortative_mating import WITHHELD, WORD_LEVELS, assortative_mating_spec, safe_payload
+from pedsum.safe_assortative_mating import (
+    WITHHELD,
+    WORD_LEVELS,
+    _Couples,
+    assortative_mating_spec,
+    safe_payload,
+)
 
 TWO = ("--trait", "dx", "score", "--permutations", "39", "--seed", "3")
 ORDINAL = ("--trait", "grade", "dx", "--trait-type", "grade=ordinal", "--permutations", "39")
@@ -1137,3 +1144,30 @@ def test_oracle_generated_pedigrees(seed, founders, per_generation, generations,
     rows = mating_rows(seed, founders, per_generation, generations, missing, remating)
     with tempfile.TemporaryDirectory() as tmp:
         _oracle_run(rows, traits, strata, Path(tmp))
+
+
+@given(
+    st.lists(st.tuples(st.integers(0, 39), st.integers(0, 39)), max_size=30, unique=True),
+    st.sampled_from((40, 10_000)),
+)
+def test_network_labels_partition_the_couples_as_union_find_does(pairs, n_rows):
+    """Over a pedigree of any size, on either side of the table threshold, the labels are union-find's partition."""
+    parent = list(range(40))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            i = parent[i]
+        return i
+
+    for mother, father in pairs:
+        parent[find(mother)] = find(father)
+    expected = [find(mother) for mother, _ in pairs]
+
+    couples = _Couples(
+        np.array([m for m, _ in pairs], dtype=np.int64), np.array([f for _, f in pairs], dtype=np.int64), n_rows
+    )
+    labels, n_labels = couples.network_labels()
+    assert labels.shape == (len(pairs),)
+    assert n_labels == couples.n_networks() == len(set(expected))
+    assert all(0 <= label < n_labels for label in labels.tolist())
+    assert len(set(zip(labels.tolist(), expected, strict=True))) == n_labels, "the same partition of the couples"

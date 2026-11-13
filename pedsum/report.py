@@ -124,14 +124,38 @@ def meta_block(path: Path, cmd: str, n_total: int | None) -> dict:
     }
 
 
+#: The options whose value is a path, as ``pedsum.cli.parser`` declares them (``type=Path``).
+PATH_OPTIONS = frozenset({"--in", "--out"})
+
+
+def _base_name(path: str) -> str:
+    return os.path.basename(path.rstrip(os.sep)) or path
+
+
+def _paths_by_base_name(words: list[str]) -> list[str]:
+    """``words`` with the value of every path option, given as the next word or after ``=``, cut to its base name."""
+    out: list[str] = []
+    value_of_path_option = False
+    for word in words:
+        option, eq, value = word.partition("=")
+        if value_of_path_option:
+            out.append(_base_name(word))
+        elif eq and option in PATH_OPTIONS:
+            out.append(f"{option}={_base_name(value)}")
+        else:
+            out.append(word)
+        value_of_path_option = word in PATH_OPTIONS
+    return out
+
+
 def safe_meta_block(path: Path, cmd: str, n_total: int | None) -> dict:
     """``meta_block`` for a ``--safe-attempt`` file: the input and every path in the command by base name only.
 
     A directory can name a person or a project, and the file is meant to
-    leave the machine it was written on.
+    leave the machine it was written on.  Only the values of ``PATH_OPTIONS``
+    are paths; any other word is recorded as given, slash or not.
     """
-    words = [os.path.basename(word.rstrip(os.sep)) if os.sep in word else word for word in shlex.split(cmd)]
-    return meta_block(type(path)(path.name), shlex.join(words), n_total)
+    return meta_block(type(path)(path.name), shlex.join(_paths_by_base_name(shlex.split(cmd))), n_total)
 
 
 def build_effective_size_data(

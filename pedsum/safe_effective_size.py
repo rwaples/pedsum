@@ -10,8 +10,8 @@ that release, and nothing else, into the file.
 The counts are of two kinds. A *support* is a count the ordinary output
 reports and a reader needs (individuals per depth and sex, the Hill
 cohorts); it is released, protected at the minimum cell. A *gate* is a
-count nothing reports (parents per depth, inbred individuals per depth); it
-only decides whether an estimate is released, and is never written.
+count nothing reports (parents per depth, inbred individuals per depth and
+F bin); it only decides whether an estimate is released, and is never written.
 
 What the list leaves out, and why:
 
@@ -36,13 +36,15 @@ withheld entry.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
-from pedsum.base import SEX_FEMALE, SEX_MALE
+from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE
+from pedsum.cli.effective_size import SEX_DEPENDENT_ESTIMATORS
 from pedsum.disclosure import (
     Contingency,
     Count,
@@ -55,7 +57,7 @@ from pedsum.disclosure import (
     shared_total,
 )
 from pedsum.safe_summary import family_ids
-from pedsum.sections import equivalent_complete_generations
+from pedsum.sections import F_HIST_EDGES, equivalent_complete_generations
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
@@ -80,6 +82,7 @@ _PARENTS: Path = ("gates", "parents_with_birth_years")
 _GENOMES: Path = ("gates", "genomes_by_depth")
 _COTWINS: Path = ("gates", "cotwins_by_depth")
 _INBRED: Path = ("gates", "inbred_by_depth")
+_INBRED_F: Path = ("gates", "inbred_f_by_depth")
 _RELATED: Path = ("gates", "related_families_by_depth")
 _FATHERS: Path = ("gates", "fathers_by_depth")
 _MOTHERS: Path = ("gates", "mothers_by_depth")
@@ -96,7 +99,6 @@ WITHHELD = "withheld"
 #: The ``reason`` of an estimator the release list has no field of. A constant, not data.
 NOT_RELEASED = "not_released_in_safe_mode"
 
-_SEX_DEPENDENT = ("ne_sex_ratio", "ne_variance_family_size", "ne_hill_overlapping")
 _USES_F = ("ne_inbreeding", "ne_individual_delta_f", "ne_group_coancestry")
 _USES_KINSHIP = ("ne_coancestry", "ne_group_coancestry")
 
@@ -137,10 +139,11 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
         _Group(
             "estimate",
             (_NE, _CODE, _Field("mean_f_per_gen", "depths"), _Field("ne_per_gen", _TRANSITIONS)),
-            (_DEPTH, _INBRED),
+            (_DEPTH, _INBRED, _INBRED_F),
             "Mean F per depth and the Ne values computed from that series, released whole and only when every "
-            "depth holds at least the minimum cell of individuals and its inbred are none or at least the "
-            "minimum cell, so no mean is a sum over a few inbred individuals.",
+            "depth holds at least the minimum cell of individuals and its inbred, in each bin of the F "
+            "histogram, are none or at least the minimum cell, so no mean is a sum over a few inbred "
+            "individuals or gives the split of a depth's inbred between two F values.",
         ),
     ),
     "ne_coancestry": (
@@ -192,9 +195,10 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
         _Group(
             "per_depth",
             (_Field("ne_per_gen", "depths"),),
-            (_USED, _INBRED),
+            (_USED, _INBRED, _INBRED_F),
             "Ne per depth from the mean individual increase in inbreeding, released whole and only when at "
-            "every depth the individuals used and the inbred among them are none or at least the minimum cell.",
+            "every depth the individuals used and the inbred among them, in each bin of the F histogram, are "
+            "none or at least the minimum cell.",
         ),
     ),
     "ne_hill_overlapping": (
@@ -232,7 +236,7 @@ _GROUPS: dict[str, tuple[_Group, ...]] = {
         _Group(
             "estimate",
             (_NE, _CODE, _Field("mean_group_coancestry_per_gen", "depths"), _Field("ne_per_gen", _TRANSITIONS)),
-            (_DEPTH, _GENOMES, _RELATED, _INBRED, _COTWINS),
+            (_DEPTH, _GENOMES, _RELATED, _INBRED, _INBRED_F, _COTWINS),
             "Group coancestry per depth and the Ne values computed from that series, released whole and on "
             "the conditions of both the mean kinship and the mean F it is the sum of. Among unrelated "
             "individuals it is 1 / (2 x genomes), which beside the depth table counts the depth's MZ "
@@ -307,6 +311,20 @@ def _by_depth(depth: np.ndarray, mask: np.ndarray | None, k: int) -> dict[str, i
     return _labelled(range(k), np.bincount(rows, minlength=k).tolist())
 
 
+def _inbred_gates(F: np.ndarray, depth: np.ndarray, k: int) -> dict[str, Any]:
+    """The inbred individuals of each depth, and the same individuals by the bin of ``summarize``'s F histogram.
+
+    A depth's mean F times its size is the sum of its F values. When the
+    depth's inbred hold two F values, that sum gives how many hold each, so
+    the mean is released only when no bin of a depth is small.
+    """
+    by_bin = {f"<{hi:g}": _by_depth(depth, (lo < F) & (hi >= F), k) for lo, hi in pairwise(F_HIST_EDGES)}
+    return {
+        "inbred_by_depth": _by_depth(depth, F > INBRED_TOL, k),
+        "inbred_f_by_depth": {str(d): {label: counts[str(d)] for label, counts in by_bin.items()} for d in range(k)},
+    }
+
+
 def _same_depth_sibs(parent: np.ndarray, depth: np.ndarray, rows: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
     """The ``rows`` sharing the recorded ``parent`` with another at their own depth, and the parents shared, by depth."""
     known = rows[parent[rows] >= 0]
@@ -359,7 +377,7 @@ def _counts(
     supports: dict[str, Any] = {"depth": _by_depth(depth, None, k)}
     gates: dict[str, Any] = {"genomes_by_depth": _by_depth(depth, genome, k)}
 
-    if any(name in ran for name in _SEX_DEPENDENT):
+    if any(name in ran for name in SEX_DEPENDENT_ESTIMATORS):
         sex = np.asarray(pg.sex)
         male, female = sex == SEX_MALE, sex == SEX_FEMALE
         is_father, is_mother = np.zeros(n, dtype=bool), np.zeros(n, dtype=bool)
@@ -384,6 +402,7 @@ def _counts(
             supports["parent_links_with_birth_years"] = links
             gates["parents_with_birth_years"] = parents
             years = hill.get("cohort_years")
+            supports["birth_cohort_by_sex"] = None
             if years is not None:
                 used_m, used_f = hill["N1_m_per_cohort"], hill["N1_f_per_cohort"]
                 cohorts = {
@@ -402,8 +421,9 @@ def _counts(
                     gates[key] = {str(year): by_year.get(year, 0) for year in years}
 
     if any(name in ran for name in _USES_F):
-        inbred = np.asarray(pg.inbreeding()) > 0
-        gates["inbred_by_depth"] = _by_depth(depth, inbred, k)
+        F = np.asarray(pg.inbreeding())
+        inbred = F > INBRED_TOL
+        gates |= _inbred_gates(F, depth, k)
         if "ne_individual_delta_f" in ran:
             delta_f = results["ne_individual_delta_f"]
             gates["delta_f_used_by_depth"] = _labelled(delta_f["depths"], delta_f["n_used_per_gen"])
@@ -520,6 +540,12 @@ def _rules() -> tuple[Rule, ...]:
             (_COHORT_MOTHERS, "Females with recorded offspring, by birth cohort used"),
         )
     ]
+    rules.append(
+        Contingency(
+            _INBRED_F,
+            f"Inbred individuals by depth and by the bin of the F histogram their F falls in. {_GATE}",
+        )
+    )
     rules += [
         Count(path, f"{what}. {_GATE}")
         for path, what in (
@@ -555,7 +581,7 @@ def effective_size_spec(source: Mapping[str, Any]) -> ReleaseSpec:
     written, so a reader has no cell of it to combine.
     """
     supports = source["supports"]
-    splits = [path for path in (_DEPTH, _SEX, _COHORT_SEX, _REFERENCE_USE) if path[-1] in supports]
+    splits = [path for path in (_DEPTH, _SEX, _COHORT_SEX, _REFERENCE_USE) if supports.get(path[-1]) is not None]
     links = list(shared_total("Every individual is counted once in each of these tables.", _N, *splits))
     links += [
         Link(
@@ -566,7 +592,7 @@ def effective_size_spec(source: Mapping[str, Any]) -> ReleaseSpec:
         for depth, cells in supports.get("depth_by_sex", {}).items()
     ]
     for table in (_DEPTH_SEX, _COHORT_SEX):
-        rows = supports.get(table[-1], {})
+        rows = supports.get(table[-1]) or {}
         links += [
             Link((_SEX, sex), tuple((table, (row, sex)) for row in rows), "A column of the table is one sex.")
             for sex in supports.get("sex", {})

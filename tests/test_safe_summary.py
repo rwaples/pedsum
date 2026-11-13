@@ -147,7 +147,7 @@ def sensitive(cell, source: dict[str, Any], spec: ReleaseSpec, min_cell: int) ->
     rule = next(rule for rule in spec.rules if rule.path == path)
     value = at(source, path)
     if isinstance(rule, Count):
-        return True
+        return rule.support is not None or 0 < value < min_cell
     if isinstance(rule, Table):
         count = value[label]
         support = count if rule.support is None else at(source, rule.support)[label]
@@ -173,7 +173,9 @@ def pinned_sensitive(source: dict[str, Any], min_cell: int, spec: ReleaseSpec | 
     spec = spec or summarize_spec(source)
     protected = protect_payload(source, spec, min_cell)
     release = build_release(source, spec, min_cell)
-    system, hidden = system_from_release(spec, protected, min_cell, cap=max(source["n_total"], 3) ** 2)
+    system, hidden = system_from_release(
+        spec, protected, min_cell, cap=max(source["n_total"], 3) ** 2, unwritten=lambda path: path[0] == "gates"
+    )
     for stats_path, table_path in MOMENTS.items():
         stats = at(release, stats_path)
         if stats and "mean" in stats:
@@ -282,6 +284,7 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
     inbred = (*pedigree, "relatedness", "inbreeding", "inbred")
     f_hist = (*pedigree, "relatedness", "inbreeding", "F_hist")
     births = (*pedigree, "demography", "multiple_births")
+    concordance = (*pedigree, "demography", "offspring_sex_concordance")
     by_sex, by_depth = (*pedigree, "strata", "sex_summary"), (*pedigree, "strata", "depth_summary")
     expected = {
         *((n, table) for table in (sex, parents, DEPTH, sex_source, status, inbred, f_hist)),
@@ -295,6 +298,11 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
         (parents, (*by_depth, "reproductive")),
         (parents, DEPTH_PARENTS),
         (DEPTH, DEPTH_PARENTS),
+        *((parents, (*concordance, name, "eligible_by_sex")) for name in GROUPINGS),
+        *(
+            ((*concordance, name, "eligible_by_sex"), (*concordance, GROUPINGS[0], "eligible_by_sex"))
+            for name in GROUPINGS[1:]
+        ),
     }
     assert {(link.whole[0], link.parts[0][0]) for link in spec.links if link.parts} == expected
 
@@ -1011,3 +1019,110 @@ def test_safe_meta_names_paths_by_base_name_only(tmp_path):
         assert (
             meta["command"] == f"pedsum {command} --in ped.tsv --out {command} --safe-attempt {' '.join(flags)}".strip()
         )
+
+
+def test_f1_depth_mean_f_is_not_released_beside_a_merged_f_histogram(safe):
+    """Ten at F = 0.125 and two at 0.25, all at depth 2: the depth's mean F times its size is the withheld F sum."""
+    source, _ = safe
+    edited = copy.deepcopy(source)
+    inbreeding = edited["pedigree"]["relatedness"]["inbreeding"]
+    n = sum(inbreeding["inbred"].values())
+    inbreeding["inbred"] = {"inbred": 12, "not_inbred": n - 12}
+    inbreeding["F_hist"] = {"0": n - 12, "<0.0625": 0, "<0.125": 10, "<0.25": 2, "<1": 0}
+    inbreeding["mean_F_inbred"], inbreeding["sd_F_inbred"] = 0.1458, 0.0487
+    depth_summary = edited["pedigree"]["strata"]["depth_summary"]
+    depth_summary["inbred"] = {
+        "0": {"inbred": 0, "not_inbred": n - 20},
+        "2": {"inbred": 12, "not_inbred": 8},
+    }
+    depth_summary["mean_F"] = {"0": 0.0, "2": 0.0875}
+    outputs = safe_outputs(edited, DEFAULT_MIN_CELL)
+    assert outputs.extra["pedigree"]["relatedness"]["inbreeding"]["F_hist"]["status"] == "merged"
+    assert outputs.slim["pedigree"]["relatedness"]["inbreeding"]["mean_F_inbred"] is None
+    released = outputs.extra["pedigree"]["strata"]["depth_summary"]
+    assert released["inbred"]["cells"]["2"] == {"inbred": 12, "not_inbred": 8}
+    assert released["mean_F"] is None
+
+
+def _two_father_families(n: int, start: int) -> list[dict[str, Any]]:
+    """``n`` mothers, each with a son by one father and a daughter by another."""
+    rows: list[dict[str, Any]] = []
+    for k in range(n):
+        mother = start + 5 * k
+        rows += [_person(mother, "F"), _person(mother + 1, "M"), _person(mother + 2, "M")]
+        rows += [_person(mother + 3, "M", mother, mother + 1), _person(mother + 4, "F", mother, mother + 2)]
+    return rows
+
+
+def _concordance_blocks(out_dir: Path) -> dict[str, dict[str, Any]]:
+    """Each grouping's released block, the slim report's leaves and the extra report's together."""
+    written = load(out_dir)
+    path = ("pedigree", "demography", "offspring_sex_concordance")
+    slim, extra = at(written["summary.yaml"], path), at(written["summary.extra.yaml"], path)
+    return {name: slim[name] | extra[name] for name in GROUPINGS}
+
+
+GROUPINGS = ("sibship", "maternal_offspring_group", "paternal_offspring_group")
+GATES = ("gates", "offspring_sex_concordance")
+
+
+def _without_concordance_support(spec: ReleaseSpec) -> ReleaseSpec:
+    """``spec`` with each grouping's tables released on their own cells alone."""
+    rules = tuple(
+        replace(rule, support=None) if "offspring_sex_concordance" in rule.path and hasattr(rule, "support") else rule
+        for rule in spec.rules
+    )
+    return ReleaseSpec(rules, spec.links)
+
+
+def test_f2_one_family_between_nested_groupings_withholds_them(tmp_path):
+    """Forty full sibships and one mother with a son and a daughter by two fathers.
+
+    The maternal grouping holds the sibships and that one family, so its
+    groups and offspring by sex less the sibships' would be 1, 1 and 1.
+    The two children are also the individuals with both parents (122) who
+    are in no eligible sibship or paternal group (120).
+    """
+    rows = _couples(40, 3) + _two_father_families(1, 201)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    concordance = at(source, ("pedigree", "demography", "offspring_sex_concordance"))
+    counts = {
+        name: (concordance[name]["n_groups_eligible"], concordance[name]["eligible_by_sex"]) for name in GROUPINGS
+    }
+    assert counts == {
+        "sibship": (40, {"male": 60, "female": 60}),
+        "maternal_offspring_group": (41, {"male": 61, "female": 61}),
+        "paternal_offspring_group": (40, {"male": 60, "female": 60}),
+    }
+    assert at(source, (*SIZE, "parents_known"))["both"] == 122
+
+    withheld = {"n_groups_eligible": None, "eligible_by_sex": {"status": "blanked", "total": None}, "test": None}
+    assert _concordance_blocks(tmp_path / "out") == dict.fromkeys(GROUPINGS, withheld)
+    assert all("gates" not in payload for payload in load(tmp_path / "out").values())
+    assert "not_eligible" not in text(tmp_path / "out")
+
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+    alone = pinned_sensitive(source, DEFAULT_MIN_CELL, _without_concordance_support(summarize_spec(source)))
+    assert ((*GATES, "maternal_offspring_group", "beyond_sibship_by_sex"), "male") in alone
+    assert ((*GATES, "sibship", "not_eligible"), None) in alone
+
+
+@pytest.mark.parametrize("n_families", [0, 5])
+def test_f2_nested_groupings_that_differ_by_nothing_or_enough_are_released(tmp_path, n_families):
+    """With no two-father family, or five, every difference between the groupings is 0 or at least the minimum cell."""
+    rows = _couples(40, 3) + _two_father_families(n_families, 201)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    blocks = _concordance_blocks(tmp_path / "out")
+    released = {
+        name: (block["n_groups_eligible"], block["eligible_by_sex"].get("bins")) for name, block in blocks.items()
+    }
+    wider = 60 + n_families
+    assert released == {
+        "sibship": (40, {"male": 60, "female": 60}),
+        "maternal_offspring_group": (40 + n_families, {"male": wider, "female": wider}),
+        "paternal_offspring_group": (40, {"male": 60, "female": 60}),
+    }
+    assert all(block["test"] is not None for block in blocks.values())
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []

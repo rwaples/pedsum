@@ -30,7 +30,7 @@ from test_safe_summary import _cell_sum, at, leaves, sensitive
 from test_size_structure_properties import acyclic_pedigree_frames
 
 from pedsum import safe_effective_size
-from pedsum.base import SEX_FEMALE, SEX_MALE
+from pedsum.base import INBRED_TOL, SEX_FEMALE, SEX_MALE
 from pedsum.cli import effective_size as cli
 from pedsum.cli.parser import parse_args
 from pedsum.disclosure import DEFAULT_MIN_CELL, Derived, build_release, protect_payload
@@ -123,6 +123,12 @@ def run(ped: Path, out_dir: Path, *flags: str, safe: bool = True, edit=None, rec
     return captured[0] if safe else None
 
 
+def fill_f_bins(source: dict[str, Any]) -> None:
+    """Empty every small cell of the F-bin gate, so the tests of the other counts see the estimates over F."""
+    for bins in source["gates"].get("inbred_f_by_depth", {}).values():
+        bins.update({label: 0 for label, count in bins.items() if count < DEFAULT_MIN_CELL})
+
+
 def load(out_dir: Path) -> dict[str, Any]:
     """The ``effective_size.yaml`` of a run."""
     return yaml.safe_load(written_output(out_dir, "effective_size.yaml").read_text())
@@ -211,9 +217,15 @@ def wide_ped(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="module")
 def wide(wide_ped, tmp_path_factory) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """The safe source, the safe file and the ordinary file of the wide pedigree."""
+    """The safe source, the safe file and the ordinary file of the wide pedigree.
+
+    Random mating leaves fewer than the minimum cell in a top F bin at
+    depths 2 and 4, which withholds every per-depth estimate over F
+    (``test_e1_a_small_top_f_bin_withholds_the_wide_pedigree``). The source
+    is built with those cells emptied.
+    """
     out_dir = tmp_path_factory.mktemp("wide_out")
-    source = run(wide_ped, out_dir / "safe", *BY)
+    source = run(wide_ped, out_dir / "safe", *BY, edit=fill_f_bins)
     assert source is not None
     run(wide_ped, out_dir / "plain", *BY, safe=False)
     return source, load(out_dir / "safe"), load(out_dir / "plain")
@@ -580,6 +592,98 @@ def test_delta_f_parts_follow_their_own_counts(wide):
     assert lagged["ne"] is not None
 
 
+def _two_f_value_rows(full_sib_children: int) -> list[dict]:
+    """Depth 2 holds ten children of half sibs (F 0.125) and ``full_sib_children`` children of full sibs (F 0.25)."""
+    rows = [{"id": i, "sex": sex, "mother": -1, "father": -1} for i, sex in zip(range(1, 6), "MFFMF", strict=True)]
+    rows += [
+        {"id": 6, "sex": "M", "mother": 2, "father": 1},
+        {"id": 7, "sex": "F", "mother": 3, "father": 1},
+        {"id": 8, "sex": "M", "mother": 5, "father": 4},
+        {"id": 9, "sex": "F", "mother": 5, "father": 4},
+        {"id": 10, "sex": "M", "mother": 5, "father": 4},
+    ]
+    rows += [{"id": 11 + i, "sex": "MF"[i % 2], "mother": 7, "father": 6} for i in range(10)]
+    rows += [{"id": 21 + i, "sex": "MF"[i % 2], "mother": 9, "father": 8} for i in range(full_sib_children)]
+    return rows
+
+
+@pytest.mark.parametrize(("full_sib_children", "released"), [(2, False), (5, True)])
+def test_e1_mean_f_needs_every_f_bin_of_a_depth_at_the_minimum_cell(tmp_path, full_sib_children, released):
+    """Review finding E1: twelve inbred at one depth passed the count gate, and their mean F gave the 10/2 split.
+
+    Mean F times the depth's size is the F sum, 10 x 0.125 + 2 x 0.25. The
+    per-depth Ne of the individual increase in inbreeding is over the same
+    F values and goes with it; five children of full sibs fill their bin.
+    """
+    ped = write_ped(tmp_path / "p.tsv", _two_f_value_rows(full_sib_children))
+    source = run(ped, tmp_path / "out")
+    assert source is not None
+    n = 10 + full_sib_children
+    assert source["gates"]["inbred_by_depth"]["2"] == n
+    assert source["gates"]["inbred_f_by_depth"]["2"] == {
+        "<0.0625": 0,
+        "<0.125": 10,
+        "<0.25": full_sib_children,
+        "<1": 0,
+    }
+    mean_f = (10 * 0.125 + full_sib_children * 0.25) / n
+    assert source[ES]["ne_inbreeding"]["estimate"]["mean_f_per_gen"]["2"] == pytest.approx(mean_f)
+
+    written = load(tmp_path / "out")
+    assert "gates" not in written
+    assert "inbred_f_by_depth" not in body(written)
+    inbreeding, delta_f = written[ES]["ne_inbreeding"], written[ES]["ne_individual_delta_f"]
+    if released:
+        assert inbreeding["mean_f_per_gen"]["2"] == pytest.approx(mean_f, abs=HALF_WIDTH)
+        assert delta_f["ne_per_gen"] is not None
+    else:
+        assert inbreeding == {"ne": None, "reason": WITHHELD, "mean_f_per_gen": None, "ne_per_gen": None}
+        assert delta_f["ne_per_gen"] is None
+        assert written[ES]["ne_group_coancestry"]["mean_group_coancestry_per_gen"] is None
+
+
+def test_e1_a_small_top_f_bin_withholds_the_wide_pedigree(wide_ped, tmp_path):
+    """One individual of depth 2 in the (0.125, 0.25] bin withholds mean F, and the estimates not over F stay."""
+    source = run(wide_ped, tmp_path / "out")
+    assert source is not None
+    assert source["gates"]["inbred_f_by_depth"]["2"] == {"<0.0625": 0, "<0.125": 22, "<0.25": 1, "<1": 0}
+    written = load(tmp_path / "out")[ES]
+    assert written["ne_inbreeding"] == {"ne": None, "reason": WITHHELD, "mean_f_per_gen": None, "ne_per_gen": None}
+    assert written["ne_individual_delta_f"]["ne_per_gen"] is None
+    assert written["ne_individual_delta_f"]["ne"] is not None
+    assert written["ne_group_coancestry"]["reason"] == WITHHELD
+    assert written["ne_coancestry"]["ne"] is not None
+
+
+def test_e2_birth_cohort_table_key_does_not_depend_on_the_data(wide, tmp_path):
+    """Review finding E2: with no cohort kept by Hill the supports lacked ``birth_cohort_by_sex``; now it is null."""
+    _, with_cohorts, _ = wide
+    rows = [row | {"birth_year": 1900 + row["id"]} for row in wide_rows(per_generation=20, generations=2)]
+    source = run(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", *BY)
+    assert source is not None
+    assert source[ES]["ne_hill_overlapping"]["collapses_to_ne_v"] is False
+    assert source["supports"]["birth_cohort_by_sex"] is None
+
+    written = load(tmp_path / "out")
+    assert written["supports"]["birth_cohort_by_sex"] is None
+    assert with_cohorts["supports"]["birth_cohort_by_sex"] is not None
+    assert list(written["supports"]) == list(with_cohorts["supports"])
+    assert set(written[ES]["ne_hill_overlapping"]) == set(with_cohorts[ES]["ne_hill_overlapping"]) | {"reason"}
+
+
+def test_e3_inbred_gates_use_the_inbred_tolerance():
+    """Review finding E3: an F in (0, INBRED_TOL] is rounding, not inbreeding, here as in ``summarize``."""
+    F = np.array([0.0, 1e-12, 5e-10, INBRED_TOL, 2e-9, 0.0625, 0.125, 0.25])
+    gates = safe_effective_size._inbred_gates(F, np.zeros(len(F), dtype=np.int64), 1)
+    assert gates["inbred_by_depth"] == {"0": 4}
+    assert gates["inbred_f_by_depth"] == {"0": {"<0.0625": 2, "<0.125": 1, "<0.25": 1, "<1": 0}}
+
+
+def test_e4_one_list_of_sex_dependent_estimators():
+    """Review finding E4: the safe module reads the CLI's list, not a copy of it."""
+    assert safe_effective_size.SEX_DEPENDENT_ESTIMATORS is cli.SEX_DEPENDENT_ESTIMATORS
+
+
 def _one_father_rows(child_sexes: str) -> list[dict]:
     """One father born 1900, a mother born 1950 for each child, and the children, born 1980: paternal half sibs."""
     n = len(child_sexes)
@@ -823,7 +927,7 @@ def test_reference_col_sets_the_reference_supports(wide_ped, tmp_path):
     rows = wide_rows()
     last = [row for row in rows if row["ref"]][-3:]
     few = [row | {"ref": int(row in last)} for row in rows]
-    source = run(write_ped(tmp_path / "few.tsv", few), tmp_path / "few", *flags)
+    source = run(write_ped(tmp_path / "few.tsv", few), tmp_path / "few", *flags, edit=fill_f_bins)
     assert source is not None
     assert source["supports"]["reference"]["used"] == 3
     written = load(tmp_path / "few")

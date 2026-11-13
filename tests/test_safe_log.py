@@ -503,6 +503,53 @@ def test_an_unexpected_exception_prints_its_type_only(pedigree, tmp_path, monkey
     assert leaked(res.stderr, tokens(pedigree)) == []
 
 
+class Panic(BaseException):
+    """Stands in for PyO3's ``PanicException``, which is not an ``Exception``."""
+
+
+def test_a_base_exception_prints_its_type_only_and_an_ordinary_run_raises_it(pedigree, tmp_path, monkeypatch):
+    """A Rust panic reaches ``main`` as a ``BaseException``; a safe run scrubs it like any other."""
+    from pedsum.cli import summarize
+
+    def boom(*_args, **_kwargs):
+        raise Panic(f"index out of bounds at {pedigree[3]['id']}")
+
+    monkeypatch.setattr(summarize, "group_mating_pairs", boom)
+    ped = write_ped(tmp_path / "ped.tsv", pedigree)
+    res = safe_run("summarize", ped, tmp_path / "out")
+    assert res.returncode == 1
+    assert f"stopped on an unexpected Panic: {WITHHELD}" in res.stderr
+    assert "Traceback" not in res.stderr
+    assert leaked(emitted(res, tmp_path / "out"), tokens(pedigree)) == []
+
+    res = safe_run("summarize", ped, tmp_path / "out", "--id-log")
+    assert res.returncode == 1
+    id_log = (tmp_path / "out" / "summarize.ids.local.log").read_text()
+    assert f"Panic: index out of bounds at {pedigree[3]['id']}" in id_log
+    assert leaked(res.stderr, tokens(pedigree)) == []
+
+    with pytest.raises(Panic, match=pedigree[3]["id"]):
+        run_pedsum(["summarize", "--in", str(ped), "--out", str(tmp_path / "plain")])
+
+
+@pytest.mark.parametrize("exception", [KeyboardInterrupt, SystemExit])
+def test_an_interrupt_and_an_exit_leave_a_safe_run_as_they_would_an_ordinary_one(
+    exception, pedigree, tmp_path, monkeypatch
+):
+    """Ctrl-C and ``sys.exit`` pass through the safe handler with their own exit behaviour."""
+    from pedsum.cli import main, summarize
+
+    def stop(*_args, **_kwargs):
+        raise exception(3)
+
+    monkeypatch.setattr(summarize, "group_mating_pairs", stop)
+    ped = write_ped(tmp_path / "ped.tsv", pedigree)
+    with pytest.raises(exception) as caught:
+        main(["summarize", "--in", str(ped), "--out", str(tmp_path / "out"), "--safe-attempt"])
+    assert caught.value.args == (3,)
+    logging.getLogger().handlers.clear()
+
+
 def test_a_missing_count_and_the_row_total_are_not_logged(pedigree, tmp_path):
     """Neither the count of rows without a trait value nor the total it would be subtracted from is printed."""
     sparse = [dict(row) for row in pedigree]

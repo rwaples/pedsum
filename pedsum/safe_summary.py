@@ -70,6 +70,17 @@ _PARENTS: Path = (*_SIZE, "parents_known")
 _DEPTH: Path = (*_SIZE, "depth")
 _SEX_SOURCE: Path = (*_SIZE, "sex_source")
 _CONCORDANCE: Path = ("pedigree", "demography", "offspring_sex_concordance")
+#: Root of the gate tables: counts the release is tested against and linked to, written to no output.
+_GATES = "gates"
+_CONCORDANCE_GATES: Path = (_GATES, "offspring_sex_concordance")
+#: The grouping every other grouping's eligible offspring include: full sibs share each parent.
+_NARROWEST = GROUPINGS[0][0]
+#: The parents-known classes a grouping's offspring come from, by the parent columns that define it.
+_SCOPE: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("mother", "father"): ("both",),
+    ("mother",): ("both", "mother_only"),
+    ("father",): ("both", "father_only"),
+}
 _BIRTHS: Path = ("pedigree", "demography", "multiple_births")
 _TWINS: Path = (*_BIRTHS, "twin_pairs_by_sex")
 _TWIN_DECADES: Path = (*_BIRTHS, "twin_pairs_by_birth_decade")
@@ -87,6 +98,7 @@ _DEPTH_PARENTS: Path = (*_BY_DEPTH, "parents_recorded")
 _SEXES = (("female", SEX_FEMALE), ("male", SEX_MALE), ("unknown", SEX_UNKNOWN))
 _PARENT_CODES = ("MO", "FO")
 _RECORDED = ("both", "mother_only", "father_only")
+_PARENT_CELLS = (*_RECORDED, "founder_with_descendants", "founder_without_descendants")
 
 #: Names the pair counter of a safe run in its report.
 PAIR_ENGINE = "rust_relatives_per_person"
@@ -327,14 +339,18 @@ def build_source(
     }
 
     demography: dict[str, Any] = {"mating_pairs": {"n_pairs": len(mating.sizes)}}
+    gates: dict[str, Any] = {}
     if sex_concordance is not None:
-        demography["offspring_sex_concordance"] = _concordance_source(sex_concordance)
+        concordance = _concordance_source(sex_concordance)
+        demography["offspring_sex_concordance"] = concordance
+        gates["offspring_sex_concordance"] = _concordance_gates(concordance, size_structure["parents_known"])
     if "multiple_birth" in df.columns:
         demography["multiple_births"] = _multiple_births_source(df)
 
     return {
         **{key: meta[key] for key in _META},
         "n_total": n,
+        _GATES: gates,
         "pedigree": {
             "structure": {
                 "max_degree_enumerated": max_degree,
@@ -384,6 +400,34 @@ def _concordance_source(section: Mapping[str, Any]) -> dict[str, Any]:
             "eligible_by_sex": {"male": n_male, "female": n_eligible - n_male},
             "test": test,
         }
+    return out
+
+
+def _concordance_gates(concordance: Mapping[str, Any], parents_known: Mapping[str, int]) -> dict[str, Any]:
+    """What each grouping's eligible counts differ by from the counts they are nested with, and the support that gives.
+
+    A grouping's eligible offspring are among the individuals with its
+    parent recorded, and include the eligible offspring of the full
+    sibships. Each difference is a count a reader gets by subtraction, so
+    the smallest nonzero one is the support of the grouping's counts.
+    """
+    narrow = concordance[_NARROWEST]
+    out: dict[str, Any] = {}
+    for name, parent_cols in GROUPINGS:
+        block = concordance[name]
+        by_sex = block["eligible_by_sex"]
+        gate: dict[str, Any] = {
+            "not_eligible": sum(parents_known[cell] for cell in _SCOPE[parent_cols]) - sum(by_sex.values())
+        }
+        differences = [gate["not_eligible"]]
+        if name != _NARROWEST:
+            gate["beyond_sibship_by_sex"] = {sex: by_sex[sex] - narrow["eligible_by_sex"][sex] for sex in by_sex}
+            differences += gate["beyond_sibship_by_sex"].values()
+            differences.append(abs(block["n_groups_eligible"] - narrow["n_groups_eligible"]))
+        smallest = min((d for d in differences if d > 0), default=None)
+        gate["groups_support"] = block["n_groups_eligible"] if smallest is None else smallest
+        gate["by_sex_support"] = {sex: count if smallest is None else smallest for sex, count in by_sex.items()}
+        out[name] = gate
     return out
 
 
@@ -524,8 +568,10 @@ def _rules() -> tuple[Rule, ...]:
         Derived(
             (*_BY_DEPTH, "mean_F"),
             "Mean F per depth, released whole and only when at every depth the inbred are none or at least "
-            "the minimum cell.",
-            sources=((*_BY_DEPTH, "inbred"),),
+            "the minimum cell, and only with the inbred count and unmerged F buckets: a depth's mean times "
+            "its size is its F sum, which over the only inbred depth is the withheld mean F of the inbred "
+            "and splits a merged bucket.",
+            sources=(_DEPTH_INBRED, _INBRED, _F_HIST),
         ),
         Derived(
             (*_BY_DEPTH, "mean_distinct_ancestors"),
@@ -549,9 +595,36 @@ def _rules() -> tuple[Rule, ...]:
     for name, _ in GROUPINGS:
         groups: Path = (*_CONCORDANCE, name, "n_groups_eligible")
         by_sex: Path = (*_CONCORDANCE, name, "eligible_by_sex")
+        gate: Path = (*_CONCORDANCE_GATES, name)
         rules += [
-            Count(groups, "Offspring groups the test uses, each a distinct family, withheld when 1 to 4."),
-            Table(by_sex, f"Offspring the test uses, by sex, both classes {_GATE}.", ordered=False),
+            Count(
+                groups,
+                "Offspring groups the test uses, each a distinct family, withheld when 1 to 4, and when the "
+                "grouping differs from the full sibships or from the individuals with its parent recorded by "
+                "1 to 4 groups or offspring of a sex: the groupings are nested, so that difference is a count.",
+                support=(*gate, "groups_support"),
+            ),
+            Table(
+                by_sex,
+                f"Offspring the test uses, by sex, both classes {_GATE}, withheld with its total on the same "
+                "condition as the group count.",
+                ordered=False,
+                support=(*gate, "by_sex_support"),
+            ),
+            Count(
+                (*gate, "not_eligible"),
+                "Gate, never written: the individuals with the grouping's parent recorded whom the test does not use.",
+            ),
+        ]
+        if name != _NARROWEST:
+            rules.append(
+                Table(
+                    (*gate, "beyond_sibship_by_sex"),
+                    "Gate, never written: the offspring the grouping uses beyond those of the full sibships, by sex.",
+                    ordered=False,
+                )
+            )
+        rules += [
             Derived(
                 (*_CONCORDANCE, name, "test"),
                 "The test's statistics over all eligible groups, released only when the groups and both "
@@ -691,6 +764,29 @@ def summarize_spec(source: Mapping[str, Any]) -> ReleaseSpec:
             )
             for depth in depths[:2]
         ]
+    if "offspring_sex_concordance" in source[_GATES]:
+        narrow: Path = (*_CONCORDANCE, _NARROWEST, "eligible_by_sex")
+        for name, parent_cols in GROUPINGS:
+            by_sex: Path = (*_CONCORDANCE, name, "eligible_by_sex")
+            gate: Path = (*_CONCORDANCE_GATES, name)
+            outside = tuple((_PARENTS, cell) for cell in _PARENT_CELLS if cell not in _SCOPE[parent_cols])
+            links.append(
+                Link(
+                    (_PARENTS, None),
+                    ((by_sex, None), ((*gate, "not_eligible"), None), *outside),
+                    "The offspring a grouping uses are among the individuals with its parent recorded.",
+                )
+            )
+            if name != _NARROWEST:
+                links += [
+                    Link(
+                        (by_sex, sex),
+                        ((narrow, sex), ((*gate, "beyond_sibship_by_sex"), sex)),
+                        "Full sibs share each parent, so an eligible sibship's offspring are eligible in both "
+                        "single-parent groupings.",
+                    )
+                    for sex in ("male", "female")
+                ]
     decades = source["pedigree"]["demography"].get("multiple_births", {}).get("twin_pairs_by_birth_decade")
     if decades:
         links += _margins(_TWIN_DECADES, decades, None, {mix: (_TWINS, mix) for mix in SEX_MIX})
@@ -734,7 +830,7 @@ def safe_outputs(source: Mapping[str, Any], min_cell: int) -> SafeOutputs:
     slim: dict[str, Any] = dict(meta)
     extra: dict[str, Any] = dict(meta)
     for rule in _RULES:
-        if len(rule.path) == 1:
+        if len(rule.path) == 1 or rule.path[0] == _GATES:
             continue
         node: Any = release
         for key in rule.path:

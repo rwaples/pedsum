@@ -613,7 +613,12 @@ Under `--safe-attempt` each grouping writes its count of eligible groups,
 its eligible offspring by sex as a table, and its test (the observed and
 excess concordance, direction, `z`, the p-values and the permutation
 record). The test is written only
-when the counts it rests on are intact at `--min-cell`. The largest
+when the counts it rests on are intact at `--min-cell`. The groupings are
+nested: the offspring of an eligible full sibship are eligible in both
+single-parent groupings, and every eligible offspring has the grouping's
+parent recorded. A grouping's counts are withheld when they differ from
+the full sibships' counts, or from the parents-known counts, by 1 to
+`--min-cell` − 1 groups or offspring of a sex. The largest
 group's pair share, the `all_resolved` sensitivity, the distributions and
 the `by_group_size` rows are not written (see
 [Safe output](#safe-output---safe-attempt)).
@@ -633,7 +638,13 @@ the `estimators_requested`, and one record per estimator under
 With `--safe-attempt` the file is `effective_size.txt`. It holds the
 counts each estimator rests on, protected at `--min-cell`, and an estimate
 only when all of its counts are at least that. A per-depth or per-cohort
-array is written whole or not at all. `ne_long_term_contributions` is
+array is written whole or not at all. Mean F per depth, and the per-depth
+estimates over F (`ne_inbreeding`, `ne_group_coancestry`, the `ne_per_gen`
+of `ne_individual_delta_f`), are written only when every depth's inbred
+individuals are none or at least `--min-cell` in each bin of the F
+histogram; a pedigree with a few highly inbred individuals at one depth
+has them withheld. The `supports` keys follow the options: a table with
+nothing to count is `null`. `ne_long_term_contributions` is
 never written: its record is always `reason: not_released_in_safe_mode`.
 A stop at the memory limit writes
 the same file name, with no estimate that needs a count. See

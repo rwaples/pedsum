@@ -29,8 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     with safe_log.scrubbing():
         try:
             return _run(args, cmd)
-        except Exception as e:
-            # An uncaught exception's message can quote a row, and the interpreter would print it.
+        except KeyboardInterrupt, SystemExit:
+            raise
+        except BaseException as e:
+            # An uncaught exception's message can quote a row, and the interpreter would print it.  A Rust panic
+            # in pedigree-graph arrives as PyO3's PanicException, a BaseException.
             logger.error("stopped on an unexpected %s: %s", safe_log.Public(type(e).__name__), traceback.format_exc())
             return 1
         finally:

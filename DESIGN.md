@@ -298,6 +298,19 @@ ancestor and descendant-path counts are weighted sums of the
 depth-by-recorded-parents row of depth 1 (in a two-depth pedigree, for the
 founders' descendant paths), so they name that table as a source.
 
+**Nested populations (review F1, F2).** The mean F of a depth times the
+depth's size is its F sum, so the per-depth mean F also names the inbred
+table and the F histogram as sources. The eligible offspring of the three
+sex-concordance groupings are nested: a full sibship's are eligible in
+both single-parent groupings, and each grouping's are among the
+individuals with its parent recorded. The differences are gate tables
+under `gates` in the source, which have rules and `Link`s so the oracle
+sees them, and which `safe_outputs` writes to no file. The smallest
+nonzero difference is the `support` of the grouping's group count and
+by-sex table, so a difference of 1 to min_cell - 1 withholds both, the
+by-sex total included. The difference in group counts has no `Link`: one
+mother's two sibships are one maternal group, so it is not a sum of cells.
+
 **Logs (D8).** `cli.main` runs a safe command inside
 `safe_log.scrubbing()`, which installs a log record factory, so every
 handler, including tqdm's redirect and pytest's capture, sees scrubbed

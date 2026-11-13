@@ -283,7 +283,11 @@ def _protect_contingency(table: ContingencyTable, min_cell: int) -> ProtectedCon
             for count_row, support_row in zip(counts, table.support, strict=True)
         )
     total = sum(cell for row in counts for cell in row)
-    any_small = any(0 < gate < min_cell for row in gates for gate in row)
+    any_small = any(
+        count > 0 and gate < min_cell
+        for count_row, gate_row in zip(counts, gates, strict=True)
+        for count, gate in zip(count_row, gate_row, strict=True)
+    )
     # As for a merged bin: the total's distinct support is only known to be at least its largest cell's.
     total_gate = total if table.support is None else max((cell for row in gates for cell in row), default=0)
     released_total = None if total > 0 and total_gate < min_cell else total

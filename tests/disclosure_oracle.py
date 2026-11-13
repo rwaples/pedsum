@@ -201,14 +201,20 @@ def _table_cells(path: Path, table: Protected) -> list[CellRef]:
 
 
 def system_from_release(
-    spec: ReleaseSpec, protected: Mapping[Path, Protected], min_cell: int, cap: int = DEFAULT_CAP
+    spec: ReleaseSpec,
+    protected: Mapping[Path, Protected],
+    min_cell: int,
+    cap: int = DEFAULT_CAP,
+    unwritten: Callable[[Path], bool] = lambda path: False,
 ) -> tuple[System, list[CellRef]]:
     """The system a reader can write down from a protected payload, and the cells that were withheld.
 
     Every source cell of every table is an unknown. A released bin fixes
     its cell, a merged bin and a released total fix a sum, and each
     ``spec.links`` entry ties cells of different tables, or with no parts
-    fixes a cell at zero.
+    fixes a cell at zero. A table or count at an ``unwritten`` path is in
+    no output file, whatever its status: the reader knows its cells only
+    through the links, and all of them count as withheld.
     """
     system = System()
     hidden: list[CellRef] = []
@@ -216,6 +222,11 @@ def system_from_release(
     for path, table in protected.items():
         cells = _table_cells(path, table)
         totals[path] = dict.fromkeys(cells, 1)
+        if unwritten(path):
+            for cell in cells:
+                system.var(cell, 0, cap)
+            hidden += cells
+            continue
         if isinstance(table, ProtectedCount):
             if table.value is None:
                 system.var((path, None), 1, min_cell - 1)
