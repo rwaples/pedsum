@@ -75,8 +75,7 @@ pairs by birth decade.
 
 A statistic is written only when the tables and counts its rule names are
 intact. A statistic of a merged or blanked table is `null`. The rule names the
-main inputs, not every input: the adjusted p-value of one sex-concordance
-grouping also depends on the other groupings, which its rule does not check.
+main inputs, not every input a reader could combine with it.
 
 Decimal values are rounded to four places.
 
@@ -117,10 +116,12 @@ under inbreeding an ancestor who is also a closer relative is counted again.
 | `n_total` | The number of individuals. Withheld when 1 to N−1. |
 | `max_degree_enumerated` | The `--max-degree` option. Always written. |
 
-The recorded command is not protected. The `--in` and `--out` values are
-reduced to their base names, and everything else is written as typed: the
-file name itself, column names, and tokens given to options. Do not put an
-identifying name in any of them.
+The recorded command is only partly protected. The `--in` and `--out` values
+and every absolute path (a word or `--opt=value` value that starts with `/` or
+`~`) are reduced to their base names, whatever option they follow. Everything
+else is written as typed: the file name itself, relative paths given to other
+options, column names, and tokens such as `N/A`. Do not put an identifying name
+in any of them.
 
 ### Whole-pedigree tables
 
@@ -170,13 +171,6 @@ Each is written whole, and only when no cell is small.
 | `sex_summary.reproductive` | sex by has offspring | Only with the depth-by-offspring table intact. |
 | `sex_summary.inbred` | sex by inbred | Absent with `--no-inbreeding`. Only with the depth-by-inbred table intact. |
 
-### Per-depth means
-
-| Value | Rule |
-|---|---|
-| `depth_summary.mean_distinct_ancestors` | Absent with `--no-inbreeding`. Only when the depth, parents-known and depth-by-recorded-parents tables are intact. |
-| `depth_summary.mean_descendant_paths` | The same tables, and the depth-by-offspring table intact. |
-
 ### Offspring sex concordance
 
 Written with `--sex-concordance`, or with `--sex-concordance-permutations`
@@ -189,16 +183,21 @@ maternal offspring groups and paternal offspring groups.
 | `n_groups_eligible` | The offspring groups the test uses. Withheld when 1 to N−1. |
 | `eligible_by_sex` | The offspring the test uses, by sex. Both classes at least N, or blanked with its total. |
 | `test` | Only when the group count and the by-sex table are released. No per-group or per-size row is written. |
+| `holm` | The Holm-adjusted p-values `p_analytical_holm`, `p_holm` and `permutations.p_holm`. Only when the group count and the by-sex table of every grouping are released, else `null`. |
 
 The `test` block holds the observed and excess pair concordance, the
-direction, z, the analytical and adjusted p-values and their source, the mean
+direction, z, the analytical p-value and `p_source`, the mean
 and standard deviation of the groups' male proportions, and the permutation
 settings and p-values. A test that was not computed reads `not_computed`.
 
 A grouping's group count and by-sex table are also withheld when its
 offspring differ by 1 to N−1 from a set they are nested in: the offspring of
 the full sibships, the individuals with that parent recorded, or the
-individuals of a sex.
+individuals of a sex. The full
+sibships' group count and by-sex table are also withheld when the couples
+(`mating_pairs.n_pairs`) outnumber the eligible full sibships by 1 to N−1,
+and a maternal or paternal grouping's when the reproductive females or males
+(`sex_summary.reproductive`) outnumber its eligible groups by 1 to N−1.
 
 ### Multiple births
 
@@ -213,6 +212,19 @@ Written with `--multiple-birth-col`.
 The unit here is a delivery, not a family. Two twin deliveries to one couple
 count twice.
 
+The `FS` and `MZ` pair counts are released too, so a reader can subtract
+the twin pairs from them. The full-sib pairs (`FS` plus `MZ`, since linked
+MZ co-twins leave `FS`) are the twin pairs that are full sibs and the
+full-sib pairs beyond them, and the twin pairs are those that are full sibs
+and those that are not. With `--zygosity-col`, the same-sex twin pairs are
+those linked as MZ and the rest, and `MZ` is those linked pairs and the MZ
+pairs outside the table, such as in triplets. These parts are written
+nowhere. When the full-sib pairs beyond the twin pairs come from 1 to N−1
+families, or any other part is 1 to N−1, `twin_pairs_by_sex` and
+`twin_pairs_by_birth_decade` are withheld with their totals, and Weinberg's
+share with them. The pair table by code stays: it holds every relationship,
+so the twin tables are the smaller loss.
+
 ## What is never written
 
 - An explicit minimum or maximum, such as `max_F`. Table labels still show the
@@ -224,6 +236,9 @@ count twice.
   tables, and the two together would give back a merged tail.
 - The table of related pairs at the same depth.
 - Any mean or standard deviation of the inbreeding coefficient.
+- A per-depth mean of a per-individual count: `mean_distinct_ancestors` and
+  `mean_descendant_paths`. Such a count takes few values, so its mean times
+  the depth size can give back how many individuals hold each value.
 - A statistic of how descendants are spread over founders:
   `effective_founders_by_descendant_paths` and the mean and standard deviation
   of equivalent complete generations.
@@ -242,7 +257,7 @@ count twice.
 | `annotated.tsv.gz` | not written |
 
 `summary.extra.txt` holds the sex-source table, the F histogram, the per-depth
-tables and means, the twin pairs by decade and the concordance by-sex tables.
+tables, the twin pairs by decade and the concordance by-sex tables.
 `summary.txt` holds the rest. Both repeat the run description.
 `summary.pedigree.tab` holds the same released values as the two text files in
 one flat table, so writing it adds no information.
@@ -288,21 +303,12 @@ the output directory, for use inside the secure environment only.
   export of the same data, with a report run under other options, or with
   totals published elsewhere. Differences between two transferred reports can
   disclose what neither does alone.
-- **The recorded command is not protected.** See
-  [Run description](#run-description).
-- **No dominance rule.** A count or mean that passes the minimum cell can still
-  be shaped by one very large family. Sib pair counts and
-  `mean_descendant_paths` at depth 0 are examples.
-- **Means of small integer counts.** `mean_distinct_ancestors` and
-  `mean_descendant_paths` are means of counts beside a depth size, the same
-  shape as the F means that were removed. They are gated on the
-  depth-by-recorded-parents table, which covers depth 1; deeper depths have
-  not been checked.
+- **The recorded command is only partly protected.** Relative paths and
+  tokens are written as typed. See [Run description](#run-description).
+- **No dominance rule.** A count that passes the minimum cell can still be
+  shaped by one very large family. Sib pair counts are an example.
 - **Statistics gate on named inputs only.** See [Statistics](#statistics).
 - **Approximate pair support.** See [Pair counts](#pair-counts).
-- **Unchecked candidates.** Twin-pair counts are not linked to the full-sib
-  pair count, and the sibship `n_groups_eligible` sits beside
-  `mating_pairs.n_pairs` with no declared link.
 - **Rare classes blank tables at any size.** The gates act on cell sizes, not
   on the size of the pedigree. Almost every leak found so far needed a group
   of one to four people, which is likelier in a small pedigree, but a large

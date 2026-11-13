@@ -48,6 +48,17 @@ def multiple_birth_sets(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def twin_pairs(df: pl.DataFrame) -> pl.DataFrame:
+    """The sets of two of :func:`multiple_birth_sets`, with the lower row of each as ``row`` and the other as ``co_twin``."""
+    rows = (
+        df.with_row_index("row")
+        .filter(pl.col("multiple_birth") >= 0)
+        .group_by("multiple_birth")
+        .agg(row=pl.col("row").min().cast(pl.Int64), co_twin=pl.col("row").max().cast(pl.Int64))
+    )
+    return multiple_birth_sets(df).filter(pl.col("size") == 2).join(rows, on="multiple_birth")
+
+
 def compute_multiple_births(df: pl.DataFrame, pairs: dict) -> dict:
     """The section for ``df`` (a validated frame with ``multiple_birth``) and its relationship pair counts.
 

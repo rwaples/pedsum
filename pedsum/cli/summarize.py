@@ -86,19 +86,21 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
 
     # One cheap pass, but path counts can double with each level of a deep
     # pedigree and overflow int64; counting first fails before the expensive
-    # phases rather than after them.
-    try:
-        with timed("descendants"):
-            n_desc = pg.descendant_path_counts()
-    except ResourceError as e:
-        if e.code != "arithmetic_overflow":
-            raise
-        logger.error(
-            "descendant path counts overflow int64 at max depth %s, so summarize cannot "
-            "report n_descendant_paths for this pedigree; see README 'Deep pedigrees'",
-            detail(max_depth),
-        )
-        return 1
+    # phases rather than after them. No safe output reads them.
+    n_desc = None
+    if not args.safe_attempt:
+        try:
+            with timed("descendants"):
+                n_desc = pg.descendant_path_counts()
+        except ResourceError as e:
+            if e.code != "arithmetic_overflow":
+                raise
+            logger.error(
+                "descendant path counts overflow int64 at max depth %s, so summarize cannot "
+                "report n_descendant_paths for this pedigree; see README 'Deep pedigrees'",
+                detail(max_depth),
+            )
+            return 1
 
     with timed("size+structure"):
         size, comp_labels = compute_size_structure(df, mother_rows, father_rows)
@@ -130,7 +132,7 @@ def run_summarize(args: argparse.Namespace, cmd: str, _watchdog: MemoryWatchdog)
             )
         with timed("inbreeding (F + n_ancestors)"):
             F_vec = pg.inbreeding()
-            n_anc = pg.distinct_ancestor_counts()
+            n_anc = None if args.safe_attempt else pg.distinct_ancestor_counts()
     else:
         logger.info("inbreeding: skipped (--no-inbreeding)")
         F_vec = n_anc = None

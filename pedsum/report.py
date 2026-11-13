@@ -132,15 +132,24 @@ def _base_name(path: str) -> str:
     return os.path.basename(path.rstrip(os.sep)) or path
 
 
+def _is_absolute(word: str) -> bool:
+    return word.startswith(("/", "~"))
+
+
 def _paths_by_base_name(words: list[str]) -> list[str]:
-    """``words`` with the value of every path option, given as the next word or after ``=``, cut to its base name."""
+    """``words`` with every path cut to its base name.
+
+    A path is the value of a path option, given as the next word or after
+    ``=``, or any word or ``=`` value that is absolute (starts with ``/`` or
+    ``~``), whatever option it follows.
+    """
     out: list[str] = []
     value_of_path_option = False
     for word in words:
         option, eq, value = word.partition("=")
-        if value_of_path_option:
+        if value_of_path_option or _is_absolute(word):
             out.append(_base_name(word))
-        elif eq and option in PATH_OPTIONS:
+        elif eq and (option in PATH_OPTIONS or _is_absolute(value)):
             out.append(f"{option}={_base_name(value)}")
         else:
             out.append(word)
@@ -152,8 +161,9 @@ def safe_meta_block(path: Path, cmd: str, n_total: int | None) -> dict:
     """``meta_block`` for a ``--safe-attempt`` file: the input and every path in the command by base name only.
 
     A directory can name a person or a project, and the file is meant to
-    leave the machine it was written on.  Only the values of ``PATH_OPTIONS``
-    are paths; any other word is recorded as given, slash or not.
+    leave the machine it was written on. The values of ``PATH_OPTIONS`` and
+    every absolute word are paths; any other word is recorded as given,
+    slash or not.
     """
     return meta_block(type(path)(path.name), shlex.join(_paths_by_base_name(shlex.split(cmd))), n_total)
 

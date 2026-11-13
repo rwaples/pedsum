@@ -68,13 +68,6 @@ pedigree:
             mother_only: 0
             father_only: 0
             none: 0
-      mean_distinct_ancestors:
-        '0': 0.0
-        '1': 2.0
-        '2': 6.0
-        '3': 13.48
-        '4': 25.3
-      mean_descendant_paths: null
   demography:
     offspring_sex_concordance:
       sibship:
@@ -149,16 +142,16 @@ offspring_sex_concordance	sibship	test.excess_concordance	0.0602
 offspring_sex_concordance	sibship	test.direction	over_concordant
 offspring_sex_concordance	sibship	test.z	1.0356
 offspring_sex_concordance	sibship	test.p_analytical	0.3004
-offspring_sex_concordance	sibship	test.p_analytical_holm	0.3004
 offspring_sex_concordance	sibship	test.p_source	permutation
-offspring_sex_concordance	sibship	test.p_holm	0.451
 offspring_sex_concordance	sibship	test.male_proportion_mean	0.5507
 offspring_sex_concordance	sibship	test.male_proportion_sd	0.3763
 offspring_sex_concordance	sibship	test.permutations.requested	50
 offspring_sex_concordance	sibship	test.permutations.completed	50
 offspring_sex_concordance	sibship	test.permutations.seed	3
 offspring_sex_concordance	sibship	test.permutations.p_raw	0.451
-offspring_sex_concordance	sibship	test.permutations.p_holm	0.451
+offspring_sex_concordance	sibship	holm.p_analytical_holm	0.3004
+offspring_sex_concordance	sibship	holm.p_holm	0.451
+offspring_sex_concordance	sibship	holm.permutations.p_holm	0.451
 offspring_sex_concordance	maternal_offspring_group	n_groups_eligible	59
 offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.status	intact
 offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.total	154
@@ -169,16 +162,16 @@ offspring_sex_concordance	maternal_offspring_group	test.excess_concordance	0.065
 offspring_sex_concordance	maternal_offspring_group	test.direction	over_concordant
 offspring_sex_concordance	maternal_offspring_group	test.z	1.6228
 offspring_sex_concordance	maternal_offspring_group	test.p_analytical	0.1046
-offspring_sex_concordance	maternal_offspring_group	test.p_analytical_holm	0.2499
 offspring_sex_concordance	maternal_offspring_group	test.p_source	permutation
-offspring_sex_concordance	maternal_offspring_group	test.p_holm	0.2941
 offspring_sex_concordance	maternal_offspring_group	test.male_proportion_mean	0.5463
 offspring_sex_concordance	maternal_offspring_group	test.male_proportion_sd	0.3575
 offspring_sex_concordance	maternal_offspring_group	test.permutations.requested	50
 offspring_sex_concordance	maternal_offspring_group	test.permutations.completed	50
 offspring_sex_concordance	maternal_offspring_group	test.permutations.seed	3
 offspring_sex_concordance	maternal_offspring_group	test.permutations.p_raw	0.098
-offspring_sex_concordance	maternal_offspring_group	test.permutations.p_holm	0.2941
+offspring_sex_concordance	maternal_offspring_group	holm.p_analytical_holm	0.2499
+offspring_sex_concordance	maternal_offspring_group	holm.p_holm	0.2941
+offspring_sex_concordance	maternal_offspring_group	holm.permutations.p_holm	0.2941
 offspring_sex_concordance	paternal_offspring_group	n_groups_eligible	64
 offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.status	intact
 offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.total	154
@@ -189,16 +182,16 @@ offspring_sex_concordance	paternal_offspring_group	test.excess_concordance	0.076
 offspring_sex_concordance	paternal_offspring_group	test.direction	over_concordant
 offspring_sex_concordance	paternal_offspring_group	test.z	1.7318
 offspring_sex_concordance	paternal_offspring_group	test.p_analytical	0.0833
-offspring_sex_concordance	paternal_offspring_group	test.p_analytical_holm	0.2499
 offspring_sex_concordance	paternal_offspring_group	test.p_source	permutation
-offspring_sex_concordance	paternal_offspring_group	test.p_holm	0.3529
 offspring_sex_concordance	paternal_offspring_group	test.male_proportion_mean	0.5547
 offspring_sex_concordance	paternal_offspring_group	test.male_proportion_sd	0.3589
 offspring_sex_concordance	paternal_offspring_group	test.permutations.requested	50
 offspring_sex_concordance	paternal_offspring_group	test.permutations.completed	50
 offspring_sex_concordance	paternal_offspring_group	test.permutations.seed	3
 offspring_sex_concordance	paternal_offspring_group	test.permutations.p_raw	0.1765
-offspring_sex_concordance	paternal_offspring_group	test.permutations.p_holm	0.3529
+offspring_sex_concordance	paternal_offspring_group	holm.p_analytical_holm	0.2499
+offspring_sex_concordance	paternal_offspring_group	holm.p_holm	0.3529
+offspring_sex_concordance	paternal_offspring_group	holm.permutations.p_holm	0.3529
 reproduction	by_status	status	blanked
 reproduction	by_status	total	200
 relationship_pairs	engine		rust_relatives_per_person
@@ -250,12 +243,6 @@ depth_summary	parents_recorded	cells.4.both	30
 depth_summary	parents_recorded	cells.4.mother_only	0
 depth_summary	parents_recorded	cells.4.father_only	0
 depth_summary	parents_recorded	cells.4.none	0
-depth_summary	mean_distinct_ancestors	0	0.0
-depth_summary	mean_distinct_ancestors	1	2.0
-depth_summary	mean_distinct_ancestors	2	6.0
-depth_summary	mean_distinct_ancestors	3	13.48
-depth_summary	mean_distinct_ancestors	4	25.3
-depth_summary	mean_descendant_paths		
 
 === summary.txt ===
 input: <input>
@@ -319,9 +306,7 @@ pedigree:
           direction: over_concordant
           z: 1.0356
           p_analytical: 0.3004
-          p_analytical_holm: 0.3004
           p_source: permutation
-          p_holm: 0.451
           male_proportion_mean: 0.5507
           male_proportion_sd: 0.3763
           permutations:
@@ -329,6 +314,10 @@ pedigree:
             completed: 50
             seed: 3
             p_raw: 0.451
+        holm:
+          p_analytical_holm: 0.3004
+          p_holm: 0.451
+          permutations:
             p_holm: 0.451
       maternal_offspring_group:
         n_groups_eligible: 59
@@ -338,9 +327,7 @@ pedigree:
           direction: over_concordant
           z: 1.6228
           p_analytical: 0.1046
-          p_analytical_holm: 0.2499
           p_source: permutation
-          p_holm: 0.2941
           male_proportion_mean: 0.5463
           male_proportion_sd: 0.3575
           permutations:
@@ -348,6 +335,10 @@ pedigree:
             completed: 50
             seed: 3
             p_raw: 0.098
+        holm:
+          p_analytical_holm: 0.2499
+          p_holm: 0.2941
+          permutations:
             p_holm: 0.2941
       paternal_offspring_group:
         n_groups_eligible: 64
@@ -357,9 +348,7 @@ pedigree:
           direction: over_concordant
           z: 1.7318
           p_analytical: 0.0833
-          p_analytical_holm: 0.2499
           p_source: permutation
-          p_holm: 0.3529
           male_proportion_mean: 0.5547
           male_proportion_sd: 0.3589
           permutations:
@@ -367,6 +356,10 @@ pedigree:
             completed: 50
             seed: 3
             p_raw: 0.1765
+        holm:
+          p_analytical_holm: 0.2499
+          p_holm: 0.3529
+          permutations:
             p_holm: 0.3529
   individuals:
     reproduction:

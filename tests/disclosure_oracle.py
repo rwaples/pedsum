@@ -171,15 +171,6 @@ def add_moments(
     )
 
 
-def add_mean(system: System, weights: Mapping[Hashable, int], n: int, mean: float, half_width: float) -> None:
-    """Add what a released mean over ``n`` individuals says about the cells whose weighted sum is its numerator.
-
-    The mean number of recorded parents at a depth is ``(2 * both +
-    mother_only + father_only) / n`` over that depth's cells.
-    """
-    system.add(weights, n * (mean - half_width), n * (mean + half_width))
-
-
 def add_nonlinear(
     system: System, cells: Sequence[Hashable], candidates: Iterable[Sequence[int]], consistent: Callable[..., bool]
 ) -> None:

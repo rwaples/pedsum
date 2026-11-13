@@ -26,8 +26,6 @@ pedigree:
       parents_recorded:
         status: blanked
         total: 15
-      mean_distinct_ancestors: null
-      mean_descendant_paths: null
   demography:
     offspring_sex_concordance:
       sibship:
@@ -70,14 +68,17 @@ offspring_sex_concordance	sibship	n_groups_eligible
 offspring_sex_concordance	sibship	eligible_by_sex.status	blanked
 offspring_sex_concordance	sibship	eligible_by_sex.total	
 offspring_sex_concordance	sibship	test	
+offspring_sex_concordance	sibship	holm	
 offspring_sex_concordance	maternal_offspring_group	n_groups_eligible	
 offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.status	blanked
 offspring_sex_concordance	maternal_offspring_group	eligible_by_sex.total	
 offspring_sex_concordance	maternal_offspring_group	test	
+offspring_sex_concordance	maternal_offspring_group	holm	
 offspring_sex_concordance	paternal_offspring_group	n_groups_eligible	
 offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.status	blanked
 offspring_sex_concordance	paternal_offspring_group	eligible_by_sex.total	
 offspring_sex_concordance	paternal_offspring_group	test	
+offspring_sex_concordance	paternal_offspring_group	holm	
 reproduction	by_status	status	blanked
 reproduction	by_status	total	15
 relationship_pairs	engine		rust_relatives_per_person
@@ -99,8 +100,6 @@ depth_summary	inbred	status	blanked
 depth_summary	inbred	total	15
 depth_summary	parents_recorded	status	blanked
 depth_summary	parents_recorded	total	15
-depth_summary	mean_distinct_ancestors		
-depth_summary	mean_descendant_paths		
 
 === summary.txt ===
 input: <input>
@@ -138,12 +137,15 @@ pedigree:
       sibship:
         n_groups_eligible: null
         test: null
+        holm: null
       maternal_offspring_group:
         n_groups_eligible: null
         test: null
+        holm: null
       paternal_offspring_group:
         n_groups_eligible: null
         test: null
+        holm: null
   individuals:
     reproduction:
       by_status:

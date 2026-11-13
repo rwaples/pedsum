@@ -27,6 +27,18 @@ def test_only_path_option_values_are_cut_to_a_base_name():
     )
 
 
+def test_an_absolute_path_is_cut_whatever_option_it_follows():
+    """A word or ``=`` value starting with ``/`` or ``~`` is a path even after an option not in ``PATH_OPTIONS``."""
+    cmd = (
+        "pedsum summarize --in ped.tsv --missing-parent-token /home/alice/proj707/token "
+        "--trait=~/proj707/bmi /srv/proj707/stray --trait-missing=n/a"
+    )
+    assert "--missing-parent-token" not in PATH_OPTIONS
+    assert recorded(cmd) == (
+        "pedsum summarize --in ped.tsv --missing-parent-token token --trait=bmi stray --trait-missing=n/a"
+    )
+
+
 def test_the_input_is_named_by_base_name():
     """The input and its ``--in`` word both lose their directory."""
     meta = safe_meta_block(Path("/home/alice/proj707/ped.tsv"), "pedsum summarize --in /home/alice/proj707/ped.tsv", 3)

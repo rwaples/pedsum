@@ -108,9 +108,15 @@ optional checks: `birth_year_dtype` (numeric parsing),
 --birth-year-max]`; defaults to `[1800, current_year + 1]`), and
 `birth_year_topology` (`child.birth_year - parent.birth_year >=
 --min-parent-age`, default 0, for every edge where both birth years are
-known and the two birth dates are not). `--min-parent-age N` flags a
-parent fewer than `N` years older than its child. Findings are written to
-`validate.log` like any other check.
+known and the two birth dates are not; a row with no year takes the year
+of its `--birth-date-col` date). `--min-parent-age N` flags a parent
+fewer than `N` years older than its child, and `--max-parent-age N` one
+more than `N` years older (default 0, off; 70 suits a human register,
+leave it off for animals). A year difference overstates the age by up to
+1, so on birth years `--max-parent-age` flags only a difference above
+`N + 1`. `birth_year_dtype` fails on a negative year
+other than `-1`, on `inf`, and on a year too large for int32. Findings are
+written to `validate.log` like any other check.
 
 When `--birth-date-col NAME` is passed, validate runs `birth_date_dtype`:
 every known date must be ISO `YYYY-MM-DD` (NA/blank for unknown), and an
@@ -118,7 +124,7 @@ unparsable date BLOCKs. `birth_date_range` flags a date whose year is
 outside `[--birth-year-min, --birth-year-max]`, and with `--birth-year-col`
 as well, `birth_date_year_consistency` flags each row whose date falls
 outside its birth year. `birth_date_topology` applies `--min-parent-age`
-to every edge where both birth dates are known, comparing the dates to the
+and `--max-parent-age` to every edge where both birth dates are known, comparing the dates to the
 day: a child born months before a parent in the same year is flagged, and
 the parent's age is in completed years. Each edge is checked once, on its
 dates when both are known, else on its birth years. All three are kept by
@@ -130,7 +136,9 @@ both parents known and shared, born at most `N` days apart into
 multiple-birth sets: siblings sorted by date join one set while each is
 born within `N` days of the one before, so triplets are one set. `N = 0`
 asks for the same date; `N = 1` also catches births either side of
-midnight. `validate.tsv.gz` gets a `multiple_birth_set` column holding each
+midnight. `N` above 7 is a usage error (exit 2): validating the output
+again with `--multiple-birth-col` clears a set whose adjacent births are
+more than 7 days apart. `validate.tsv.gz` gets a `multiple_birth_set` column holding each
 member's set number (`1`, `2`, ...; blank for everyone else, including
 synthesized founders), and a `multiple births:` line after the `wrote`
 line gives the number of sets and members. The sets are computed on the
@@ -207,7 +215,9 @@ With `--multiple-birth-col`, `summarize` adds `demography.multiple_births`:
 Under `--safe-attempt` the sets of two are written as a table by the
 sexes of the pair, protected at `--min-cell`, and larger sets are not
 written. Of `weinberg` only `mz_fraction_estimate` is written, and only
-when that table is intact (see [Safe output](#safe-output---safe-attempt)).
+when that table is intact. The table is withheld with its total when the
+full-sib or `MZ` pair counts less the twin pairs would leave 1 to
+`--min-cell` − 1 families or pairs (see [Safe output](#safe-output---safe-attempt)).
 
 Auto-fixes folded into `DIR/validate.tsv.gz`:
 - Synthesized founder rows for missing parent IDs.
@@ -612,16 +622,19 @@ No per-parent, per-Mating-Pair or per-Sibship record is ever emitted.
 Under `--safe-attempt` each grouping writes its count of eligible groups,
 its eligible offspring by sex as a table, and its test (the observed and
 excess concordance, direction, `z`, the p-values and the permutation
-record). The test is written only
-when the counts it rests on are intact at `--min-cell`. The groupings are
+record), with its Holm-adjusted p-values in a separate `holm` block. The
+test is written only when the counts it rests on are intact at `--min-cell`. The groupings are
 nested: the offspring of an eligible full sibship are eligible in both
 single-parent groupings, and every eligible offspring has the grouping's
 parent recorded and is among the individuals of its sex. A grouping's
 counts are withheld when its eligible offspring differ from the full
 sibships' offspring, from the parents-known counts, or from the sex table's
-count of their sex, by 1 to `--min-cell` − 1 individuals. Group counts are
-not compared across groupings, because one mother's two sibships are one
-maternal group. The largest
+count of their sex, by 1 to `--min-cell` − 1 individuals. The full
+sibships' counts are also withheld when the couples outnumber the eligible
+full sibships by 1 to `--min-cell` − 1, and a maternal or paternal
+grouping's when the reproductive females or males outnumber its eligible
+groups by as many. Group counts are not compared across
+groupings, because one mother's two sibships are one maternal group. The largest
 group's pair share, the `all_resolved` sensitivity, the distributions and
 the `by_group_size` rows are not written (see
 [Safe output](#safe-output---safe-attempt)).
@@ -1252,10 +1265,11 @@ a standard deviation can undo a merge. A statistic the data gives no value
 for is `null` too, so which keys a file holds depends on the options and
 the input's columns, never on the data. No mean or standard deviation of
 `F` is written by `summarize`: `F` takes few distinct values, so a mean
-beside a count can give back how many individuals hold each. The per-depth
-means of ancestor and descendant-path counts are written only when the
-depth-by-recorded-parents table is `intact` (for descendant paths, the
-depth-by-offspring table as well).
+beside a count can give back how many individuals hold each. For the same
+reason no per-depth mean of ancestor or descendant-path counts is written.
+A sex-concordance grouping's Holm-adjusted p-values depend on every
+grouping's p-value, so they are written only when every grouping's counts
+are, and are `null` otherwise.
 
 **Pair counts.** A count of pairs is not a count of people, so it is gated
 on the people behind it. A relationship code in `relationship_pairs.by_code`
@@ -1307,8 +1321,11 @@ A safe run writes no `.yaml`, `.tsv` or `.gz` file.
 | `effective-size` | `effective_size.yaml` | `effective_size.txt` |
 | `assortative-mating` | `assortative_mating.yaml` | `assortative_mating.txt` |
 
-The meta block names the input, and every path in the recorded command, by
-base name only. A directory name can identify a person or a project.
+The meta block names the input, the `--in` and `--out` values, and every
+absolute path in the recorded command (a word or `--opt=value` value that
+starts with `/` or `~`), by base name only. A directory name can identify a
+person or a project. Relative paths given to other options, column names and
+tokens are written as typed.
 
 **The `--out` directory.** A safe run refuses, with exit 1 and nothing
 written, a `--out` directory that holds any file other than the ones this

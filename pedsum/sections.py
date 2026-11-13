@@ -694,7 +694,7 @@ def build_individual_df(
     mating: MatingPairs,
     F: np.ndarray | None,
     n_distinct_ancestors: np.ndarray | None,
-    n_descendant_paths: np.ndarray,
+    n_descendant_paths: np.ndarray | None,
     component_labels: np.ndarray,
     sex_source: np.ndarray,
 ) -> pl.DataFrame:
@@ -710,7 +710,8 @@ def build_individual_df(
     ``n_distinct_ancestors`` is a distinct-individual count bounded by the
     row count, so it stays at the ``Int32`` pedigree-graph returns. Under
     ``--no-inbreeding`` both it and ``F`` are None, and the table has neither
-    column (``INBREEDING_COLUMNS``).
+    column (``INBREEDING_COLUMNS``). A None ``n_descendant_paths`` leaves its
+    column out too.
     """
     n = len(df)
     ids_arr = df["id"].to_numpy()
@@ -792,6 +793,6 @@ def build_individual_df(
         "n_uncles_aunts": n_ua,
         "n_first_cousins": n_fc,
         "n_distinct_ancestors": n_distinct_ancestors,
-        "n_descendant_paths": n_descendant_paths.astype(np.int64),
+        "n_descendant_paths": None if n_descendant_paths is None else n_descendant_paths.astype(np.int64),
     }
     return pl.DataFrame({name: values for name, values in columns.items() if values is not None})

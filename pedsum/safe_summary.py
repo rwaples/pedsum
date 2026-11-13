@@ -22,6 +22,9 @@ What the list leaves out, and why:
   number of founders, and the mean and sd of equivalent complete
   generations. Each narrows how the descendants are spread over the
   founders, and no count gate short of a dominance rule closes that.
+* Every per-depth mean of a per-individual count (distinct ancestors,
+  descendant paths). Such a count takes few values, so its mean times the
+  released depth size can give back how many individuals hold each value.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ from pedsum.disclosure import (
     build_release,
     shared_total,
 )
-from pedsum.multiple_births import SEX_MIX, multiple_birth_sets
+from pedsum.multiple_births import SEX_MIX, twin_pairs
 from pedsum.progress import relationship_progress
 from pedsum.sections import F_HIST_EDGES, numeric_distribution
 from pedsum.sex_concordance import GROUPINGS
@@ -84,6 +87,10 @@ _SCOPE: dict[tuple[str, ...], tuple[str, ...]] = {
 _BIRTHS: Path = ("pedigree", "demography", "multiple_births")
 _TWINS: Path = (*_BIRTHS, "twin_pairs_by_sex")
 _TWIN_DECADES: Path = (*_BIRTHS, "twin_pairs_by_birth_decade")
+_TWIN_GATES: Path = (_GATES, "multiple_births")
+_TWINS_SUPPORT: Path = (*_TWIN_GATES, "twin_pairs_support")
+_TWIN_DECADES_SUPPORT: Path = (*_TWIN_GATES, "twin_pairs_by_birth_decade_support")
+_COUPLES: Path = ("pedigree", "demography", "mating_pairs", "n_pairs")
 _STATUS: Path = ("pedigree", "individuals", "reproduction", "by_status")
 _PAIRS: Path = ("pedigree", "relatedness", "relationship_pairs")
 _INBREEDING: Path = ("pedigree", "relatedness", "inbreeding")
@@ -99,6 +106,11 @@ _SEXES = (("female", SEX_FEMALE), ("male", SEX_MALE), ("unknown", SEX_UNKNOWN))
 _PARENT_CODES = ("MO", "FO")
 _RECORDED = ("both", "mother_only", "father_only")
 _PARENT_CELLS = (*_RECORDED, "founder_with_descendants", "founder_without_descendants")
+# A single-parent grouping's parent sex, and its gate of reproductive individuals of that sex without an eligible group.
+_PARENT_SEX: dict[tuple[str, ...], tuple[str, str]] = {
+    ("mother",): ("female", "mothers_without_group"),
+    ("father",): ("male", "fathers_without_group"),
+}
 
 #: Names the pair counter of a safe run in its report.
 PAIR_ENGINE = "rust_relatives_per_person"
@@ -138,10 +150,11 @@ def family_ids(mother_rows: np.ndarray, father_rows: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PairCounts:
-    """The pairs of each relationship code and the distinct units behind them (:func:`pair_counts`)."""
+    """The pairs of each relationship code, the distinct units behind them, and each row's family (:func:`pair_counts`)."""
 
     counts: dict[str, int]
     support: dict[str, int]
+    family: np.ndarray
 
 
 def pair_counts(pg: PedigreeGraph, max_degree: int, mother_rows: np.ndarray, father_rows: np.ndarray) -> PairCounts:
@@ -172,7 +185,7 @@ def pair_counts(pg: PedigreeGraph, max_degree: int, mother_rows: np.ndarray, fat
         families = int(np.unique(family[credited]).size)
         ancestors = _ancestor_units(category, credited, mother_rows, father_rows)
         support[code] = families if ancestors is None else min(families, ancestors)
-    return PairCounts(counts, support)
+    return PairCounts(counts, support, family)
 
 
 def _ancestor_units(
@@ -243,10 +256,6 @@ def _yes_no(mask: np.ndarray, yes: str, no: str) -> dict[str, np.ndarray]:
     return {yes: mask, no: ~mask}
 
 
-def _mean_by(rows: Mapping[str, np.ndarray], values: np.ndarray) -> dict[str, float]:
-    return {r: float(values[mask].mean()) for r, mask in rows.items()}
-
-
 def build_source(
     *,
     meta: Mapping[str, Any],
@@ -277,7 +286,6 @@ def build_source(
     has_father = idf["father"].to_numpy() != -1
     founder = idf["is_founder"].to_numpy().astype(bool)
     reproductive = idf["n_offspring"].to_numpy() > 0
-    descendant_paths = idf["n_descendant_paths"].to_numpy()
 
     by_sex = {label: sex == code for label, code in _SEXES if (sex == code).any()}
     by_depth = {str(d): depth == d for d in range(int(depth.max(initial=-1)) + 1)}
@@ -308,10 +316,7 @@ def build_source(
         "sex": _cross(by_depth, by_sex),
         "reproductive": _cross(by_depth, status_cols),
         "parents_recorded": _cross(by_depth, recorded_cols),
-        "mean_descendant_paths": _mean_by(by_depth, descendant_paths),
     }
-    if "n_distinct_ancestors" in idf.columns:
-        depth_summary["mean_distinct_ancestors"] = _mean_by(by_depth, idf["n_distinct_ancestors"].to_numpy())
 
     relatedness: dict[str, Any] = {}
     if "F" in idf.columns:
@@ -339,9 +344,13 @@ def build_source(
     if sex_concordance is not None:
         concordance = _concordance_source(sex_concordance)
         demography["offspring_sex_concordance"] = concordance
-        gates["offspring_sex_concordance"] = _concordance_gates(concordance, size_structure)
+        gates["offspring_sex_concordance"] = _concordance_gates(
+            concordance, size_structure, sex_summary["reproductive"], len(mating.sizes)
+        )
     if "multiple_birth" in df.columns:
-        demography["multiple_births"] = _multiple_births_source(df)
+        births = _multiple_births_source(df)
+        demography["multiple_births"] = births
+        gates["multiple_births"] = _twin_gates(births, df, pairs)
 
     return {
         **{key: meta[key] for key in _META},
@@ -367,10 +376,9 @@ _TEST_KEYS = (
     "direction",
     "z",
     "p_analytical",
-    "p_analytical_holm",
     "p_source",
-    "p_holm",
 )
+_HOLM_KEYS = ("p_analytical_holm", "p_holm")
 
 
 def _concordance_source(section: Mapping[str, Any]) -> dict[str, Any]:
@@ -381,6 +389,7 @@ def _concordance_source(section: Mapping[str, Any]) -> dict[str, Any]:
         # The fraction is n_male / n_eligible, so the product is that integer to within float rounding.
         n_male = round((block["conditioning_male_fraction"] or 0.0) * n_eligible)
         test: Any = NOT_COMPUTED
+        holm: Any = NOT_COMPUTED
         if block["computed"]:
             proportion = block["male_proportion_distribution"]
             permutations = block["permutations"]
@@ -389,26 +398,38 @@ def _concordance_source(section: Mapping[str, Any]) -> dict[str, Any]:
                 "male_proportion_sd": proportion.std,
                 "permutations": None
                 if permutations is None
-                else {key: permutations[key] for key in ("requested", "completed", "seed", "p_raw", "p_holm")},
+                else {key: permutations[key] for key in ("requested", "completed", "seed", "p_raw")},
+            }
+            holm = {key: block[key] for key in _HOLM_KEYS} | {
+                "permutations": None if permutations is None else {"p_holm": permutations["p_holm"]}
             }
         out[name] = {
             "n_groups_eligible": block["n_groups_eligible"],
             "eligible_by_sex": {"male": n_male, "female": n_eligible - n_male},
             "test": test,
+            "holm": holm,
         }
     return out
 
 
-def _concordance_gates(concordance: Mapping[str, Any], size_structure: Mapping[str, Any]) -> dict[str, Any]:
+def _concordance_gates(
+    concordance: Mapping[str, Any],
+    size_structure: Mapping[str, Any],
+    reproductive_by_sex: Mapping[str, Mapping[str, int]],
+    n_couples: int,
+) -> dict[str, Any]:
     """What each grouping's eligible offspring differ by from the sets they are nested in, and the support that gives.
 
     A grouping's eligible offspring are among the individuals with its
     parent recorded and among the individuals of their sex, and include
-    the eligible offspring of the full sibships. Each difference is a
+    the eligible offspring of the full sibships. The eligible full
+    sibships are among the ``n_couples`` couples, and a single-parent
+    grouping's eligible groups among the reproductive individuals of the
+    parent's sex. Each difference is a
     count a reader gets by subtraction, so the smallest nonzero one is the
-    support of the grouping's counts. Group counts are not differenced:
-    one mother's two sibships are one maternal group, so the groups of
-    one grouping are not a subset of another's.
+    support of the grouping's counts. Group counts of two groupings are
+    not differenced: one mother's two sibships are one maternal group, so
+    the groups of one grouping are not a subset of another's.
     """
     parents_known, sex_table = size_structure["parents_known"], size_structure["sex"]
     narrow = concordance[_NARROWEST]
@@ -421,19 +442,29 @@ def _concordance_gates(concordance: Mapping[str, Any], size_structure: Mapping[s
             "outside_by_sex": {sex: sex_table[sex] - by_sex[sex] for sex in by_sex},
         }
         differences = [gate["not_eligible"], *gate["outside_by_sex"].values()]
-        if name != _NARROWEST:
+        if name == _NARROWEST:
+            gate["couples_without_group"] = n_couples - block["n_groups_eligible"]
+            differences.append(gate["couples_without_group"])
+        else:
             gate["beyond_sibship_by_sex"] = {sex: by_sex[sex] - narrow["eligible_by_sex"][sex] for sex in by_sex}
             differences += gate["beyond_sibship_by_sex"].values()
-        smallest = min((d for d in differences if d > 0), default=None)
-        gate["groups_support"] = block["n_groups_eligible"] if smallest is None else smallest
-        gate["by_sex_support"] = {sex: count if smallest is None else smallest for sex, count in by_sex.items()}
+            sex, key = _PARENT_SEX[parent_cols]
+            parents = reproductive_by_sex.get(sex, {}).get("reproductive", 0)
+            gate[key] = parents - block["n_groups_eligible"]
+            differences.append(gate[key])
+        gate["groups_support"] = _support(differences, block["n_groups_eligible"])
+        gate["by_sex_support"] = {sex: _support(differences, count) for sex, count in by_sex.items()}
         out[name] = gate
     return out
 
 
+def _support(differences: list[int], count: int) -> int:
+    """The support of a cell of ``count``: the smallest nonzero difference a reader subtracts, else the count itself."""
+    return min((d for d in differences if d > 0), default=count)
+
+
 def _multiple_births_source(df: pl.DataFrame) -> dict[str, Any]:
-    per_set = multiple_birth_sets(df)
-    twins = per_set.filter(pl.col("size") == 2)
+    twins = twin_pairs(df)
     by_sex = {mix: int(twins[mix].sum()) for mix in SEX_MIX}
     same, opposite = by_sex["male_male"] + by_sex["female_female"], by_sex["male_female"]
     out: dict[str, Any] = {
@@ -447,6 +478,60 @@ def _multiple_births_source(df: pl.DataFrame) -> dict[str, Any]:
             for row in decades.iter_rows(named=True)
         } or None
     return out
+
+
+def _twin_gates(births: dict[str, Any], df: pl.DataFrame, pairs: PairCounts) -> dict[str, Any]:
+    """How the twin pairs differ from the full-sib and ``MZ`` pairs, and the support that gives the twin tables.
+
+    A reader subtracts the released twin pairs from the released ``FS`` and
+    ``MZ`` pair counts. The full-sib pairs (``FS`` plus ``MZ``, since linked
+    co-twins leave ``FS``) are the twin pairs that are full sibs and the
+    full-sib pairs beyond them; the twin pairs are those that are full sibs
+    and those that are not sharing both recorded parents. With zygosity,
+    the same-sex twin pairs are those linked as ``MZ`` and the rest, and
+    ``MZ`` is those linked pairs and the ``MZ`` pairs elsewhere. The
+    smallest of these parts that is nonzero, the beyond-twin full-sib
+    pairs counted by their families, supports every twin cell, so a small
+    one withholds the twin tables with their totals.
+    """
+    by_sex = births["twin_pairs_by_sex"]
+    both = (df["mother"].to_numpy() != -1) & (df["father"].to_numpy() != -1)
+    family = pairs.family
+    twins = twin_pairs(df)
+    twin_rows, co_twins = twins["row"].to_numpy(), twins["co_twin"].to_numpy()
+    full_sib = both[twin_rows] & (family[twin_rows] == family[co_twins])
+    twin_full_sib = int(full_sib.sum())
+    gate: dict[str, Any] = {
+        "twin_pairs_full_sib": twin_full_sib,
+        "twin_pairs_not_full_sib": sum(by_sex.values()) - twin_full_sib,
+    }
+    differences = [gate["twin_pairs_not_full_sib"]]
+    if "twin" in df.columns and "MZ" in pairs.counts:
+        sex = df["sex"].to_numpy()
+        same_sex = (sex[twin_rows] == sex[co_twins]) & (sex[twin_rows] != SEX_UNKNOWN)
+        mz = int((same_sex & (df["twin"].to_numpy()[twin_rows] >= 0)).sum())
+        gate |= {
+            "same_sex_twin_pairs": by_sex["male_male"] + by_sex["female_female"],
+            "same_sex_twin_pairs_mz": mz,
+            "same_sex_twin_pairs_not_mz": by_sex["male_male"] + by_sex["female_female"] - mz,
+            "mz_pairs_not_twin_pairs": pairs.counts["MZ"] - mz,
+        }
+        differences += [gate["same_sex_twin_pairs_not_mz"], gate["mz_pairs_not_twin_pairs"]]
+    if "FS" in pairs.counts:
+        full_sib_pairs = pairs.counts["FS"] + pairs.counts.get("MZ", 0)
+        beyond = full_sib_pairs - twin_full_sib
+        sizes_by_family = np.bincount(family[both], minlength=len(family)).astype(np.int64)
+        twins_by_family = np.bincount(family[twin_rows[full_sib]], minlength=len(family))
+        families = int((sizes_by_family * (sizes_by_family - 1) // 2 > twins_by_family).sum())
+        gate |= {"full_sib_pairs": full_sib_pairs, "full_sib_pairs_beyond_twins": beyond}
+        differences.append(min(beyond, families) if beyond > 0 else 0)
+    gate["twin_pairs_support"] = {mix: _support(differences, count) for mix, count in by_sex.items()}
+    decades = births.get("twin_pairs_by_birth_decade")
+    if decades is not None:
+        gate["twin_pairs_by_birth_decade_support"] = {
+            decade: {mix: _support(differences, count) for mix, count in row.items()} for decade, row in decades.items()
+        }
+    return gate
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +578,7 @@ def _rules() -> tuple[Rule, ...]:
             "The number of connected components, withheld when 1 to 4; no component's size is released.",
         ),
         Count(
-            ("pedigree", "demography", "mating_pairs", "n_pairs"),
+            _COUPLES,
             "The number of mating pairs, each a distinct couple, withheld when below the minimum cell; "
             "the sizes of their sibships are not released.",
         ),
@@ -553,26 +638,10 @@ def _rules() -> tuple[Rule, ...]:
             )
         )
     rules += [
-        Derived(
-            (*_BY_DEPTH, "mean_distinct_ancestors"),
-            "Mean ancestor count per depth, released whole and only when the depth, parents-known and "
-            "depth-by-recorded-parents tables are intact: at depth 1 it is the mean number of recorded "
-            "parents, which with the depth's size gives the count of individuals with one.",
-            sources=(_DEPTH, _PARENTS, _DEPTH_PARENTS),
-        ),
-        Derived(
-            (*_BY_DEPTH, "mean_descendant_paths"),
-            "Mean descendant-path count per depth, on the same condition as the ancestor means and only when "
-            "the depth-by-offspring table is intact: over the parents of the deepest depth it is the mean "
-            "number of recorded children, a count of parent links.",
-            sources=(_DEPTH, _PARENTS, _DEPTH_PARENTS, _DEPTH_REPRODUCTIVE),
-        ),
-    ]
-    rules += [
         Plain((*_CONCORDANCE, "null_model", key), "A fixed description of the test, the same for every pedigree.")
         for key in _NULL_MODEL_KEYS
     ]
-    for name, _ in GROUPINGS:
+    for name, parent_cols in GROUPINGS:
         groups: Path = (*_CONCORDANCE, name, "n_groups_eligible")
         by_sex: Path = (*_CONCORDANCE, name, "eligible_by_sex")
         gate: Path = (*_CONCORDANCE_GATES, name)
@@ -602,14 +671,26 @@ def _rules() -> tuple[Rule, ...]:
                 ordered=False,
             ),
         ]
-        if name != _NARROWEST:
+        if name == _NARROWEST:
             rules.append(
+                Count(
+                    (*gate, "couples_without_group"),
+                    "Gate, never written: the couples whose offspring hold no eligible full sibship.",
+                )
+            )
+        else:
+            sex, key = _PARENT_SEX[parent_cols]
+            rules += [
                 Table(
                     (*gate, "beyond_sibship_by_sex"),
                     "Gate, never written: the offspring the grouping uses beyond those of the full sibships, by sex.",
                     ordered=False,
-                )
-            )
+                ),
+                Count(
+                    (*gate, key),
+                    f"Gate, never written: the reproductive individuals of {sex} sex who head no eligible group.",
+                ),
+            ]
         rules += [
             Derived(
                 (*_CONCORDANCE, name, "test"),
@@ -617,13 +698,40 @@ def _rules() -> tuple[Rule, ...]:
                 "sexes of their offspring reach the minimum cell; no per-group or per-size row is released.",
                 sources=(groups, by_sex),
             ),
+            Derived(
+                (*_CONCORDANCE, name, "holm"),
+                "The grouping's Holm-adjusted p-values, which depend on the p-values of every grouping, released "
+                "only when the groups and offspring by sex of every grouping are.",
+                sources=tuple(
+                    (*_CONCORDANCE, other, leaf)
+                    for other, _ in GROUPINGS
+                    for leaf in ("n_groups_eligible", "eligible_by_sex")
+                ),
+            ),
         ]
     rules += [
         Table(
             _TWINS,
             f"Multiple-birth sets of two, each a distinct family, by the sexes of the pair, every class {_GATE}; "
-            "Weinberg's counts are sums of these cells, and larger sets are not released.",
+            "Weinberg's counts are sums of these cells, and larger sets are not released. Withheld with its "
+            "total when the full-sib pairs beyond the twin pairs rest on 1 to 4 families, or the twin pairs "
+            "that are not full sibs or the same-sex twin pairs less MZ number 1 to 4: FS and MZ are released, "
+            "so each of those is a count by subtraction.",
             ordered=False,
+            support=_TWINS_SUPPORT,
+        ),
+        *(
+            Count((*_TWIN_GATES, name), f"Gate, never written: {what}.")
+            for name, what in (
+                ("full_sib_pairs", "the full-sib pairs, FS plus MZ, since linked co-twins leave FS"),
+                ("twin_pairs_full_sib", "the twin pairs whose members share both recorded parents"),
+                ("twin_pairs_not_full_sib", "the twin pairs whose members do not"),
+                ("full_sib_pairs_beyond_twins", "the full-sib pairs that are not twin pairs"),
+                ("same_sex_twin_pairs", "the twin pairs of one known sex"),
+                ("same_sex_twin_pairs_mz", "the same-sex twin pairs linked as MZ"),
+                ("same_sex_twin_pairs_not_mz", "the same-sex twin pairs not linked as MZ"),
+                ("mz_pairs_not_twin_pairs", "the MZ pairs that are not same-sex twin pairs"),
+            )
         ),
         Derived(
             (*_BIRTHS, "weinberg", "mz_fraction_estimate"),
@@ -632,7 +740,9 @@ def _rules() -> tuple[Rule, ...]:
         ),
         Contingency(
             _TWIN_DECADES,
-            "Sets of two by birth decade and sexes of the pair; released whole, and only when no cell is small.",
+            "Sets of two by birth decade and sexes of the pair; released whole, only when no cell is small, and "
+            "withheld with its total on the same condition as the table by sexes.",
+            support=_TWIN_DECADES_SUPPORT,
         ),
     ]
     return tuple(rules)
@@ -771,7 +881,24 @@ def summarize_spec(source: Mapping[str, Any]) -> ReleaseSpec:
                 )
                 for sex in ("male", "female")
             ]
-            if name != _NARROWEST:
+            if name == _NARROWEST:
+                links.append(
+                    Link(
+                        (_COUPLES, None),
+                        (((*_CONCORDANCE, name, "n_groups_eligible"), None), ((*gate, "couples_without_group"), None)),
+                        "Each eligible full sibship is the offspring of one couple.",
+                    )
+                )
+            else:
+                sex, key = _PARENT_SEX[parent_cols]
+                if sex in strata["sex_summary"]["reproductive"]:
+                    links.append(
+                        Link(
+                            ((*_BY_SEX, "reproductive"), (sex, "reproductive")),
+                            (((*_CONCORDANCE, name, "n_groups_eligible"), None), ((*gate, key), None)),
+                            "Each eligible group is the offspring of one reproductive parent of the grouping's sex.",
+                        )
+                    )
                 links += [
                     Link(
                         (by_sex, sex),
@@ -781,6 +908,49 @@ def summarize_spec(source: Mapping[str, Any]) -> ReleaseSpec:
                     )
                     for sex in ("male", "female")
                 ]
+    twin_gates = source[_GATES].get("multiple_births", {})
+    if "full_sib_pairs" in twin_gates:
+        by_code: Path = (*_PAIRS, "by_code")
+        present = source["pedigree"]["relatedness"]["relationship_pairs"]["by_code"]
+        links += [
+            Link(
+                ((*_TWIN_GATES, "full_sib_pairs"), None),
+                tuple((by_code, code) for code in ("FS", "MZ") if code in present),
+                "Linked co-twins leave FS for MZ, so the full-sib pairs are both.",
+            ),
+            Link(
+                ((*_TWIN_GATES, "full_sib_pairs"), None),
+                (
+                    ((*_TWIN_GATES, "twin_pairs_full_sib"), None),
+                    ((*_TWIN_GATES, "full_sib_pairs_beyond_twins"), None),
+                ),
+                "The full-sib pairs are the twin pairs that are full sibs and the rest.",
+            ),
+        ]
+    if twin_gates:
+        links += [
+            Link(
+                (_TWINS, None),
+                (((*_TWIN_GATES, "twin_pairs_full_sib"), None), ((*_TWIN_GATES, "twin_pairs_not_full_sib"), None)),
+                "A twin pair's members share both recorded parents or do not.",
+            ),
+        ]
+    if "same_sex_twin_pairs" in twin_gates:
+        same_sex: CellRef = ((*_TWIN_GATES, "same_sex_twin_pairs"), None)
+        mz: CellRef = ((*_TWIN_GATES, "same_sex_twin_pairs_mz"), None)
+        links += [
+            Link(same_sex, ((_TWINS, "male_male"), (_TWINS, "female_female")), "Same-sex pairs are two cells."),
+            Link(
+                same_sex,
+                (mz, ((*_TWIN_GATES, "same_sex_twin_pairs_not_mz"), None)),
+                "A same-sex twin pair is linked as MZ or is not.",
+            ),
+            Link(
+                ((*_PAIRS, "by_code"), "MZ"),
+                (mz, ((*_TWIN_GATES, "mz_pairs_not_twin_pairs"), None)),
+                "An MZ pair is a same-sex twin pair or is not.",
+            ),
+        ]
     decades = source["pedigree"]["demography"].get("multiple_births", {}).get("twin_pairs_by_birth_decade")
     if decades:
         links += _margins(_TWIN_DECADES, decades, None, {mix: (_TWINS, mix) for mix in SEX_MIX})

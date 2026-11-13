@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 import yaml
 from conftest import property_budget, run_pedsum, write_ped, written_output
-from disclosure_oracle import add_mean, add_moments, system_from_release
+from disclosure_oracle import add_moments, system_from_release
 from hypothesis import given
 from test_size_structure_properties import acyclic_pedigree_frames
 
@@ -182,14 +182,6 @@ def pinned_sensitive(source: dict[str, Any], min_cell: int, spec: ReleaseSpec | 
             n = sum(at(source, table_path).values())
             cells = {(table_path, label): int(label) for label in protected[table_path].labels}
             add_moments(system, cells, n, round(stats["mean"], 4), round(stats["std"], 4), HALF_WIDTH)
-    depths = at(source, DEPTH)
-    # Depth 1's ancestors are its recorded parents; with two depths, the founders' descendant paths are those links.
-    link_means = {"mean_distinct_ancestors": "1"} | ({"mean_descendant_paths": "0"} if len(depths) == 2 else {})
-    for name, depth in link_means.items():
-        means = at(release, (*BY_DEPTH, name))
-        if means and "1" in depths:
-            weights = {(DEPTH_PARENTS, ("1", col)): weight for col, weight in PARENT_LINKS.items()}
-            add_mean(system, weights, depths[depth], round(means[depth], 4), HALF_WIDTH)
     return system.pinned([cell for cell in hidden if sensitive(cell, source, spec, min_cell)])
 
 
@@ -284,6 +276,7 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
     inbred = (*pedigree, "relatedness", "inbreeding", "inbred")
     f_hist = (*pedigree, "relatedness", "inbreeding", "F_hist")
     births = (*pedigree, "demography", "multiple_births")
+    twin_gates = ("gates", "multiple_births")
     concordance = (*pedigree, "demography", "offspring_sex_concordance")
     by_sex, by_depth = (*pedigree, "strata", "sex_summary"), (*pedigree, "strata", "depth_summary")
     expected = {
@@ -291,6 +284,9 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
         (DEPTH, parents),
         (inbred, f_hist),
         ((*births, "twin_pairs_by_sex"), (*births, "twin_pairs_by_birth_decade")),
+        ((*twin_gates, "full_sib_pairs"), (*pedigree, "relatedness", "relationship_pairs", "by_code")),
+        ((*twin_gates, "full_sib_pairs"), (*twin_gates, "twin_pairs_full_sib")),
+        ((*births, "twin_pairs_by_sex"), (*twin_gates, "twin_pairs_full_sib")),
         *((margin, (*by_sex, name)) for name, margin in (("reproductive", status), ("inbred", inbred))),
         *((sex, (*by_sex, name)) for name in ("reproductive", "inbred")),
         *((margin, (*by_depth, name)) for name, margin in (("sex", sex), ("reproductive", status), ("inbred", inbred))),
@@ -303,6 +299,8 @@ def test_links_are_true_and_cover_every_shared_margin(safe):
             ((*concordance, name, "eligible_by_sex"), (*concordance, GROUPINGS[0], "eligible_by_sex"))
             for name in GROUPINGS[1:]
         ),
+        ((*pedigree, "demography", "mating_pairs", "n_pairs"), (*concordance, GROUPINGS[0], "n_groups_eligible")),
+        *(((*by_sex, "reproductive"), (*concordance, name, "n_groups_eligible")) for name in GROUPINGS[1:]),
     }
     assert {(link.whole[0], link.parts[0][0]) for link in spec.links if link.parts} == expected
 
@@ -561,20 +559,35 @@ def test_concordance_does_not_tell_one_group_from_a_few(tmp_path):
         assert concordance["n_groups_eligible"] == n_couples
         assert (concordance["test"] == NOT_COMPUTED) == (n_couples == 1)
         blocks.append(load(out_dir)["summary.yaml"]["pedigree"]["demography"]["offspring_sex_concordance"]["sibship"])
-    assert blocks[0] == blocks[1] == {"n_groups_eligible": None, "test": None}
+    assert blocks[0] == blocks[1] == {"n_groups_eligible": None, "test": None, "holm": None}
+
+
+def test_full_sib_pairs_beyond_the_twins_on_few_families_withhold_the_twin_tables(safe):
+    """The adversarial pedigree's 10 full-sib pairs beyond its twin pairs are in 3 families: FS less the twins is small."""
+    source, out_dir = safe
+    assert source["gates"]["multiple_births"]["full_sib_pairs_beyond_twins"] == 10
+    released = load(out_dir)
+    births = _pedigree(released)["demography"]["multiple_births"]
+    assert births["twin_pairs_by_sex"] == {"status": "blanked", "total": None}
+    assert births["weinberg"] == {"mz_fraction_estimate": None}
+    decades = released["summary.extra.yaml"]["pedigree"]["demography"]["multiple_births"]
+    assert decades["twin_pairs_by_birth_decade"] == {"status": "blanked", "total": None}
 
 
 def test_weinberg_follows_the_twin_pair_table(safe):
-    """A small twin-pair cell withholds the table, Weinberg's estimate and the decade table with it."""
-    source, out_dir = safe
-    births = _pedigree(load(out_dir))["demography"]["multiple_births"]
+    """A small twin-pair cell withholds the table and Weinberg's estimate with it."""
+    source, _ = safe
+    edited = copy.deepcopy(source)
+    table = edited["pedigree"]["demography"]["multiple_births"]["twin_pairs_by_sex"]
+    support = edited["gates"]["multiple_births"]["twin_pairs_support"]
+    support |= table
+    births = safe_outputs(edited, DEFAULT_MIN_CELL).slim["pedigree"]["demography"]["multiple_births"]
     assert births["twin_pairs_by_sex"]["status"] == "intact"
     assert births["weinberg"]["mz_fraction_estimate"] is not None
 
-    edited = copy.deepcopy(source)
-    table = edited["pedigree"]["demography"]["multiple_births"]["twin_pairs_by_sex"]
     table["male_male"] += table["male_female"] - 3
     table["male_female"] = 3
+    support |= table
     births = safe_outputs(edited, DEFAULT_MIN_CELL).slim["pedigree"]["demography"]["multiple_births"]
     assert births["twin_pairs_by_sex"] == {"status": "blanked", "total": 69}
     assert births["weinberg"] == {"mz_fraction_estimate": None}
@@ -806,12 +819,6 @@ def _without_requirements(spec: ReleaseSpec) -> ReleaseSpec:
     return ReleaseSpec(rules, spec.links)
 
 
-def _with_sources(spec: ReleaseSpec, name: str, sources: tuple) -> ReleaseSpec:
-    """``spec`` with the per-depth statistic ``name`` gated on ``sources`` only."""
-    rules = tuple(replace(rule, sources=sources) if rule.path == (*BY_DEPTH, name) else rule for rule in spec.rules)
-    return ReleaseSpec(rules, spec.links)
-
-
 def test_s1_reproductive_total_is_not_released_beside_a_blanked_depth_table(tmp_path):
     """Ten of twenty founders and one depth-1 individual reproduce; the deepest depth cannot.
 
@@ -829,7 +836,6 @@ def test_s1_reproductive_total_is_not_released_beside_a_blanked_depth_table(tmp_
     written = load(tmp_path / "out")
     strata = _extra(written)["strata"]["depth_summary"]
     assert strata["reproductive"] == {"status": "blanked", "total": 35}
-    assert strata["mean_descendant_paths"] is None
     assert _pedigree(written)["structure"]["size_structure"]["parents_known"]["bins"]["founder_with_descendants"] == 10
     assert _pedigree(written)["individuals"]["reproduction"]["by_status"] == {"status": "blanked", "total": 35}
     assert _pedigree(written)["strata"]["sex_summary"]["reproductive"] == {"status": "blanked", "total": 35}
@@ -866,47 +872,30 @@ def test_s1_inbred_total_is_not_released_beside_a_blanked_depth_table(tmp_path):
     assert outbred in pinned_sensitive(source, DEFAULT_MIN_CELL, _without_requirements(summarize_spec(source)))
 
 
-def _nine_with_both_parents_one_with_a_mother() -> list[dict[str, Any]]:
-    rows = _founders(20)
-    rows += [_person(21 + k, "F", 2 * (k % 5) + 2, 2 * (k % 5) + 1) for k in range(9)]
-    return [*rows, _person(30, "F", 12)]
+def test_d19_no_per_depth_mean_of_a_count_is_released(tmp_path):
+    """Ten depth-2 individuals have six distinct ancestors and one, a child of half sibs, has five.
 
-
-def test_s2_depth_means_follow_the_recorded_parents_table(tmp_path):
-    """Nine of ten depth-1 individuals have both parents and one has a mother only.
-
-    The mean ancestor count at depth 1 (1.9) times the depth's size (10)
-    is 19 parent links, so one individual has one parent.
+    The depth-2 mean (65/11) times the depth's size would leave one
+    individual short of six, the inbred cell of the blanked depth-by-inbred
+    table; the founders' mean descendant-path count is the same kind of sum.
     """
-    rows = _nine_with_both_parents_one_with_a_mother() + [_person(31 + k, "M", 21 + k) for k in range(5)]
+    rows = _founders(20)
+    rows += [_person(21 + k, "FM"[k % 2], 2 * k + 2, 2 * k + 1) for k in range(10)]
+    rows += [_person(31, "M", 2, 3)]
+    rows += [_person(40 + 2 * k + j, "MF"[j], 21 + 2 * k, 22 + 2 * k) for k in range(5) for j in range(2)]
+    rows += [_person(50, "F", 21, 31)]
     source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out")
     assert source is not None
-    assert at(source, DEPTH_PARENTS)["1"] == {"both": 9, "mother_only": 1, "father_only": 0, "none": 0}
-    assert at(source, (*BY_DEPTH, "mean_distinct_ancestors"))["1"] == pytest.approx(1.9)
+    assert at(source, DEPTH) == {"0": 20, "1": 11, "2": 11}
+    assert at(source, DEPTH_INBRED)["2"] == {"inbred": 1, "not_inbred": 10}
 
     strata = _extra(load(tmp_path / "out"))["strata"]["depth_summary"]
-    assert strata["parents_recorded"] == {"status": "blanked", "total": 35}
-    assert strata["mean_distinct_ancestors"] is None
-    assert strata["mean_descendant_paths"] is None
-
-    one_parent = (DEPTH_PARENTS, ("1", "mother_only"))
+    assert strata["inbred"] == {"status": "blanked", "total": 42}
+    assert strata["parents_recorded"]["status"] == "intact"
+    assert not {"mean_distinct_ancestors", "mean_descendant_paths"} & set(strata)
+    assert "mean_d" not in text(tmp_path / "out")
+    assert not {"mean_distinct_ancestors", "mean_descendant_paths"} & set(at(source, BY_DEPTH))
     assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
-    ungated = _with_sources(summarize_spec(source), "mean_distinct_ancestors", (DEPTH,))
-    assert one_parent in pinned_sensitive(source, DEFAULT_MIN_CELL, ungated)
-
-
-def test_s2_founders_descendant_paths_follow_the_recorded_parents_table(tmp_path):
-    """With two depths the founders' mean descendant-path count is the same count of parent links."""
-    source = summarize(write_ped(tmp_path / "p.tsv", _nine_with_both_parents_one_with_a_mother()), tmp_path / "out")
-    assert source is not None
-    assert at(source, (*BY_DEPTH, "mean_descendant_paths"))["0"] == pytest.approx(19 / 20)
-    assert _extra(load(tmp_path / "out"))["strata"]["depth_summary"]["mean_descendant_paths"] is None
-
-    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
-    ungated = _with_sources(summarize_spec(source), "mean_descendant_paths", (DEPTH,))
-    leaked = at(build_release(source, ungated, DEFAULT_MIN_CELL), (*BY_DEPTH, "mean_descendant_paths"))
-    depths = at(source, DEPTH)
-    assert 2 * depths["1"] - round(leaked["0"] * depths["0"]) == 1
 
 
 def _leaf_paths(out_dir: Path, spec: ReleaseSpec) -> set[tuple[str, ...]]:
@@ -1070,7 +1059,12 @@ def test_f2_one_family_between_nested_groupings_withholds_them(tmp_path):
     }
     assert at(source, (*SIZE, "parents_known"))["both"] == 122
 
-    withheld = {"n_groups_eligible": None, "eligible_by_sex": {"status": "blanked", "total": None}, "test": None}
+    withheld = {
+        "n_groups_eligible": None,
+        "eligible_by_sex": {"status": "blanked", "total": None},
+        "test": None,
+        "holm": None,
+    }
     assert _concordance_blocks(tmp_path / "out") == dict.fromkeys(GROUPINGS, withheld)
     assert all("gates" not in payload for payload in load(tmp_path / "out").values())
     assert "not_eligible" not in text(tmp_path / "out")
@@ -1122,7 +1116,12 @@ def test_r2_one_man_outside_the_eligible_offspring_withholds_them(tmp_path):
         "male": 6,
         "unknown": 0,
     }
-    withheld = {"n_groups_eligible": None, "eligible_by_sex": {"status": "blanked", "total": None}, "test": None}
+    withheld = {
+        "n_groups_eligible": None,
+        "eligible_by_sex": {"status": "blanked", "total": None},
+        "test": None,
+        "holm": None,
+    }
     assert _concordance_blocks(tmp_path / "out") == dict.fromkeys(GROUPINGS, withheld)
     assert "outside_by_sex" not in text(tmp_path / "out")
 
@@ -1166,3 +1165,218 @@ def test_r3_group_counts_of_two_groupings_are_not_differenced(tmp_path):
         "paternal_offspring_group": (100, by_sex),
     }
     assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+# ---------------------------------------------------------------------------
+# Residuals: Holm-adjusted p-values
+# ---------------------------------------------------------------------------
+
+
+def _forty_sibships_five_singletons(paternal_half_sibs: int) -> list[dict[str, Any]]:
+    """Forty full sibships of three, five only children, and fathers each of a son and a daughter by two mothers."""
+    rows = _couples(40, 3)
+    for k in range(5):
+        rows += [
+            _person(301 + 3 * k, "M"),
+            _person(302 + 3 * k, "F"),
+            _person(303 + 3 * k, "MF"[k % 2], 302 + 3 * k, 301 + 3 * k),
+        ]
+    for k in range(paternal_half_sibs):
+        father = 401 + 5 * k
+        rows += [_person(father, "M"), _person(father + 1, "F"), _person(father + 2, "F")]
+        rows += [_person(father + 3, "M", father + 1, father), _person(father + 4, "F", father + 2, father)]
+    return rows
+
+
+@pytest.mark.parametrize("paternal_half_sibs", [1, 5])
+def test_holm_p_values_need_every_grouping_released(tmp_path, paternal_half_sibs):
+    """One father of two half sibs withholds the paternal grouping; the others' tests stay but lose their Holm p-values.
+
+    Holm's adjustment of one grouping's p-value depends on the p-values of
+    the others, so it is written only when every grouping is released.
+    """
+    rows = _forty_sibships_five_singletons(paternal_half_sibs)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance-permutations", "20")
+    assert source is not None
+    concordance = at(source, ("pedigree", "demography", "offspring_sex_concordance"))
+    assert all(concordance[name]["holm"]["p_holm"] is not None for name in GROUPINGS)
+    blocks = _concordance_blocks(tmp_path / "out")
+    withheld = paternal_half_sibs == 1
+    assert (blocks["paternal_offspring_group"]["test"] is None) == withheld
+    for name in ("sibship", "maternal_offspring_group"):
+        test = blocks[name]["test"]
+        assert test["p_analytical"] is not None
+        assert test["permutations"]["p_raw"] is not None
+        assert "p_holm" not in test
+        assert "p_holm" not in test["permutations"]
+        holm = blocks[name]["holm"]
+        computed = concordance[name]["holm"]
+        expected = [computed["p_analytical_holm"], computed["p_holm"], computed["permutations"]["p_holm"]]
+        if withheld:
+            assert holm is None
+        else:
+            written = [holm["p_analytical_holm"], holm["p_holm"], holm["permutations"]["p_holm"]]
+            assert written == pytest.approx(expected, abs=HALF_WIDTH)
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+# ---------------------------------------------------------------------------
+# Residuals: sibship groups beside couples
+# ---------------------------------------------------------------------------
+
+
+def _couples_with_unsexed_children(n_couples: int) -> list[dict[str, Any]]:
+    """``n_couples`` couples, each with five children of unknown sex, so no eligible sibship."""
+    rows: list[dict[str, Any]] = []
+    for k in range(n_couples):
+        father = 301 + 7 * k
+        rows += [_person(father, "M"), _person(father + 1, "F")]
+        rows += [_person(father + 2 + c, "U", father + 1, father) for c in range(5)]
+    return rows
+
+
+def test_sibship_groups_less_than_the_couples_by_one_are_withheld(tmp_path):
+    """Forty couples hold an eligible sibship and one does not: 41 couples less 40 sibships would be that couple."""
+    rows = _couples(40, 3) + _couples_with_unsexed_children(1)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    assert at(source, ("pedigree", "demography", "mating_pairs", "n_pairs")) == 41
+    assert at(source, ("pedigree", "demography", "offspring_sex_concordance", "sibship", "n_groups_eligible")) == 40
+
+    assert load(tmp_path / "out")["summary.yaml"]["pedigree"]["demography"]["mating_pairs"] == {"n_pairs": 41}
+    assert _concordance_blocks(tmp_path / "out")["sibship"]["n_groups_eligible"] is None
+
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+    alone = pinned_sensitive(source, DEFAULT_MIN_CELL, _without_concordance_support(summarize_spec(source)))
+    assert ((*GATES, "sibship", "couples_without_group"), None) in alone
+
+
+def test_sibship_groups_less_than_the_couples_by_five_are_released(tmp_path):
+    """Five couples without an eligible sibship are enough to release the 40 sibships beside the 45 couples."""
+    rows = _couples(40, 3) + _couples_with_unsexed_children(5)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    assert load(tmp_path / "out")["summary.yaml"]["pedigree"]["demography"]["mating_pairs"] == {"n_pairs": 45}
+    assert _concordance_blocks(tmp_path / "out")["sibship"]["n_groups_eligible"] == 40
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+def test_parents_less_their_eligible_groups_by_one_are_withheld(tmp_path):
+    """Forty couples hold an eligible group and one couple has none: the parents less the groups are that couple.
+
+    The reproductive females and males are released, and the maternal and
+    paternal groups are nested in them. The couple's five children are of
+    unknown sex, so no other difference is small.
+    """
+    rows = _couples(40, 3) + _couples_with_unsexed_children(1)
+    source = summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--sex-concordance")
+    assert source is not None
+    written = _concordance_blocks(tmp_path / "out")
+    spec = _without_concordance_support(summarize_spec(source))
+    alone = pinned_sensitive(source, DEFAULT_MIN_CELL, spec)
+    for grouping, sex, key in (
+        ("maternal_offspring_group", "female", "mothers_without_group"),
+        ("paternal_offspring_group", "male", "fathers_without_group"),
+    ):
+        assert at(source, ("pedigree", "strata", "sex_summary", "reproductive", sex, "reproductive")) == 41
+        assert at(source, ("pedigree", "demography", "offspring_sex_concordance", grouping, "n_groups_eligible")) == 40
+        assert written[grouping]["n_groups_eligible"] is None
+        assert ((*GATES, grouping, key), None) in alone
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+# ---------------------------------------------------------------------------
+# Residuals: twin pairs beside full-sib pairs
+# ---------------------------------------------------------------------------
+
+
+def _twin_couples(tmp_path: Path, plain: int, dz: int = 0) -> dict[str, Any]:
+    """Ten couples of same-sex twins, ``dz`` of them marked DZ and the rest MZ, and ``plain`` couples of two non-twins."""
+    rows = []
+    for k in range(10 + plain):
+        father, mother = 10 * k + 1, 10 * k + 2
+        rows += [_person(father, "M") | {"set": "NA", "zyg": "NA"}, _person(mother, "F") | {"set": "NA", "zyg": "NA"}]
+        twin = k < 10
+        rows += [
+            _person(father + 2 + j, "MF"[k // 5 % 2], mother, father)
+            | {"set": f"t{k}" if twin else "NA", "zyg": ("DZ" if k < dz else "MZ") if twin else "NA"}
+            for j in range(2)
+        ]
+    flags = ("--multiple-birth-col", "set", "--zygosity-col", "zyg")
+    summarize(write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", *flags)
+    return load(tmp_path / "out")["summary.yaml"]["pedigree"]
+
+
+def test_full_sib_pairs_less_the_twin_pairs_are_not_one_family(tmp_path):
+    """Ten twin couples and one couple of two non-twin children: 11 full-sib pairs less 10 twin pairs is that family."""
+    pedigree = _twin_couples(tmp_path, plain=1)
+    by_code = pedigree["relatedness"]["relationship_pairs"]["by_code"]
+    full_sibs = by_code.get("bins", {}).get("FS")
+    mz = by_code.get("bins", {}).get("MZ", 0)
+    twins = pedigree["demography"]["multiple_births"]["twin_pairs_by_sex"]
+    assert full_sibs is None or twins["total"] is None or not 0 < full_sibs + mz - twins["total"] < DEFAULT_MIN_CELL
+    assert twins == {"status": "blanked", "total": None}
+
+
+def test_full_sib_pairs_beyond_the_twins_in_five_families_release_the_twin_table(tmp_path):
+    """Five couples of two non-twins put the full-sib pairs beyond the twin pairs at the minimum cell."""
+    twins = _twin_couples(tmp_path, plain=5)["demography"]["multiple_births"]["twin_pairs_by_sex"]
+    assert twins["status"] == "intact"
+    assert twins["total"] == 10
+
+
+def test_few_same_sex_twin_pairs_not_linked_as_mz_withhold_the_twin_table(tmp_path):
+    """Two DZ pairs among ten same-sex twin pairs are the same-sex pairs less MZ."""
+    twins = _twin_couples(tmp_path, plain=5, dz=2)["demography"]["multiple_births"]["twin_pairs_by_sex"]
+    assert twins == {"status": "blanked", "total": None}
+
+
+def test_full_sib_pairs_cite_only_the_codes_counted(tmp_path):
+    """Without MZ among the pair counts the full-sib link is FS alone, and the release holds."""
+
+    def drop_mz(source):
+        pairs = source["pedigree"]["relatedness"]["relationship_pairs"]
+        del pairs["by_code"]["MZ"], pairs["support"]["MZ"]
+
+    rows = []
+    for k in range(15):
+        father, mother = 10 * k + 1, 10 * k + 2
+        rows += [_person(father, "M") | {"set": "NA"}, _person(mother, "F") | {"set": "NA"}]
+        rows += [_person(father + 2 + j, "M", mother, father) | {"set": f"t{k}" if k < 10 else "NA"} for j in range(2)]
+    source = summarize(
+        write_ped(tmp_path / "p.tsv", rows), tmp_path / "out", "--multiple-birth-col", "set", edit=drop_mz
+    )
+    assert source is not None
+    by_code = ("pedigree", "relatedness", "relationship_pairs", "by_code")
+    [link] = [
+        link
+        for link in summarize_spec(source).links
+        if link.whole == (("gates", "multiple_births", "full_sib_pairs"), None) and link.parts[0][0] == by_code
+    ]
+    assert link.parts == ((by_code, "FS"),)
+    assert pinned_sensitive(source, DEFAULT_MIN_CELL) == []
+
+
+class _GraphWithoutCounts:
+    """A PedigreeGraph whose descendant path and distinct ancestor counts raise."""
+
+    def __init__(self, pg):
+        self._pg = pg
+
+    def __getattr__(self, name):
+        if name in ("descendant_path_counts", "distinct_ancestor_counts"):
+            raise AssertionError(f"a safe run called {name}")
+        return getattr(self._pg, name)
+
+
+def test_a_safe_run_skips_the_counts_no_safe_value_reads(tmp_path, monkeypatch):
+    """Descendant path and distinct ancestor counts are computed only by an ordinary run."""
+    from pedsum.cli import summarize as summarize_cli
+
+    build = summarize_cli.build_graph_or_fail
+    monkeypatch.setattr(summarize_cli, "build_graph_or_fail", lambda *a: _GraphWithoutCounts(build(*a)))
+    args = ["summarize", "--in", str(ADVERSARIAL), "--inbreeding"]
+    res = run_pedsum([*args, "--out", str(tmp_path / "safe"), "--safe-attempt"])
+    assert res.returncode == 0, res.stderr
+    with pytest.raises(AssertionError, match="descendant_path_counts"):
+        run_pedsum([*args, "--out", str(tmp_path / "plain")])

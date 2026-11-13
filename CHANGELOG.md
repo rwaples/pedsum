@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **`summarize --safe-attempt` closes residual leaks.** The per-depth
+  means `mean_distinct_ancestors` and `mean_descendant_paths` are no longer
+  written: a mean of a count that takes few values, times the depth size,
+  gave back how many individuals hold each value. The full sibships'
+  `n_groups_eligible` and offspring by sex are withheld when the couples
+  outnumber them by 1 to `--min-cell` − 1, and the maternal and paternal
+  groupings' when the reproductive females or males (`sex_summary`)
+  outnumber their eligible groups by as many. A grouping's Holm-adjusted
+  p-values move out of `test` into their own block, `holm`
+  (`p_analytical_holm`, `p_holm`, `permutations.p_holm`), which is `null`
+  unless every grouping's counts are released. The
+  recorded command now also cuts every absolute path (`/…` or `~…`) to its
+  base name, whatever option it follows.
+  The twin pairs by sex and by birth decade are withheld with their totals
+  when the `FS` and `MZ` pair counts less the twin pairs would leave 1 to
+  `--min-cell` − 1 families or pairs: full-sib pairs beyond the twins,
+  twin pairs that are not full sibs, or, with `--zygosity-col`, same-sex
+  twin pairs not linked as MZ and MZ pairs outside the twin table.
+
+- **`validate` closes five gaps in its birth checks.** `--max-parent-age N`
+  (default 0, off) flags a parent more than `N` years older than the child,
+  in `birth_year_topology` and `birth_date_topology`, on every command that
+  takes `--min-parent-age`. `birth_year_topology` takes a missing year from
+  the birth date, so a parent known only by date and a child only by year
+  are compared. `birth_year_dtype` blocks on a negative year other than
+  `-1` (`-1.5` used to read as unknown), on `inf`, and on a year too large
+  for int32. On birth years `--max-parent-age` flags only a difference
+  above `N + 1`, since a year difference overstates the age by up to 1.
+  `multiple_birth_sets` clears a set whose full sibs were born apart, and
+  with it their MZ marks: sorted birth dates with a gap of more than 7
+  days, or, with a date unknown, birth years spanning more than 1.
+  `--twin-max-days` above 7 is a usage error (exit 2), since such a set
+  would be cleared by a later validate. `birth_year_topology`'s label is now "parent age at birth within
+  limits". A `--min-parent-age` above a nonzero `--max-parent-age` is a
+  usage error (exit 2), since no parent could pass both.
 - **`--safe-attempt` is rebuilt around a release list, and its output
   shape changes** (breaking for anything that reads safe output). A safe
   run no longer nulls cells of the ordinary summary. Each command writes
