@@ -10,7 +10,7 @@ import time
 
 import pytest
 import yaml
-from conftest import EXAMPLE, REPO, run_pedsum, write_ped, write_stripped_pedigree
+from conftest import EXAMPLE, REPO, requires_statm, run_pedsum, write_ped, write_stripped_pedigree
 from pedigree_graph.effective_size import ALL_EFFECTIVE_SIZE_ESTIMATORS
 
 from pedsum.cli import effective_size
@@ -201,6 +201,7 @@ def _breach_in_subprocess(tmp_path, *estimators):
     return res, out_dir / "effective_size.yaml"
 
 
+@requires_statm
 def test_breach_while_estimating_marks_every_requested_estimator(tmp_path):
     """A stop in the estimator step publishes every requested estimator as memory_limit."""
     res, path = _breach_in_subprocess(tmp_path, "all")
@@ -216,6 +217,7 @@ def test_breach_while_estimating_marks_every_requested_estimator(tmp_path):
     assert not [p for p in path.parent.iterdir() if ".partial-" in p.name]
 
 
+@requires_statm
 def test_breach_with_a_single_estimator(tmp_path):
     """Only the requested estimator is memory_limit; the other seven stay not_requested."""
     res, path = _breach_in_subprocess(tmp_path, "ne_coancestry")
@@ -246,6 +248,7 @@ sys.exit(main([*sys.argv[1:], "--max-memory", str(limit)]))
 """
 
 
+@requires_statm
 def test_breach_while_loading_replaces_an_earlier_complete_file(tmp_path):
     """A stop before the graph exists still writes this run's file, not a stale complete one."""
     res, path = _run_es(tmp_path)

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
+import pytest
 from hypothesis import settings
 
 from pedsum.cli import main
@@ -22,6 +23,9 @@ from pedsum.validate import ValidationConfig, ValidationContext, run_checks
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
+
+#: For tests that need the memory watchdog, which samples /proc/self/statm (Linux only).
+requires_statm = pytest.mark.skipif(not Path("/proc/self/statm").exists(), reason="no /proc/self/statm (not Linux)")
 
 if TYPE_CHECKING:
     import numpy as np

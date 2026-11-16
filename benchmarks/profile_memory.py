@@ -50,19 +50,11 @@ import threading
 import time
 from pathlib import Path
 
-_PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
 _MiB = 1024 * 1024
 _SAMPLE_INTERVAL_S = 0.02
 _UNPROFILED = "(unprofiled)"
 #: ``--compare`` fails above this ratio of the baseline's median.
 GATE_RATIO = 1.05
-
-
-def _read_rss_bytes() -> int:
-    """Resident set size of this process in bytes, from ``/proc/self/statm``."""
-    with open("/proc/self/statm") as fh:
-        resident_pages = int(fh.read().split()[1])
-    return resident_pages * _PAGE_SIZE
 
 
 class _Sampler:
@@ -73,8 +65,9 @@ class _Sampler:
     measurement it is taking.
     """
 
-    def __init__(self, phase, interval: float = _SAMPLE_INTERVAL_S) -> None:
+    def __init__(self, phase, read_rss, interval: float = _SAMPLE_INTERVAL_S) -> None:
         self._phase = phase
+        self._read_rss = read_rss
         self._interval = interval
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="rss-sampler", daemon=True)
@@ -94,7 +87,7 @@ class _Sampler:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._record(time.perf_counter(), self._phase(), _read_rss_bytes())
+            self._record(time.perf_counter(), self._phase(), self._read_rss())
             self._stop.wait(self._interval)
 
     def __enter__(self) -> _Sampler:
@@ -109,9 +102,10 @@ class _Sampler:
 def _child(timing_out: Path, argv: list[str]) -> int:
     """Run ``pedsum <argv>`` in this process under the phase sampler; write its time and phases to ``timing_out``."""
     from pedsum.cli import main
+    from pedsum.memory import read_rss_bytes
     from pedsum.progress import current_profile_phase
 
-    with _Sampler(current_profile_phase) as sampler:
+    with _Sampler(current_profile_phase, read_rss_bytes) as sampler:
         t0 = time.perf_counter()
         rc = main(argv)
         cmd_s = time.perf_counter() - t0

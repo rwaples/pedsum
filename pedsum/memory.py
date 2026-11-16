@@ -10,6 +10,7 @@ the kernel OOM killer; it does not close it.
 from __future__ import annotations
 
 import argparse
+import functools
 import logging
 import math
 import os
@@ -33,8 +34,8 @@ DEFAULT_LIMIT_FRACTION = 0.8
 
 GiB = 2**30
 
-#: Where the watchdog samples RSS. Linux only: elsewhere, Windows included, there
-#: is no watchdog.
+#: Where the watchdog samples RSS. Linux only: elsewhere, Windows and macOS
+#: included, there is no watchdog, even under an explicit --max-memory.
 _STATM = Path("/proc/self/statm")
 _SIZE_UNITS = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
 
@@ -54,9 +55,20 @@ def parse_size(text: str) -> int:
     return int(size)
 
 
+def rss_readable() -> bool:
+    """Whether this platform has the ``/proc/self/statm`` the watchdog samples."""
+    return _STATM.exists()
+
+
+@functools.cache
+def _page_size() -> int:
+    # Read on first use, not at import: Windows has no os.sysconf.
+    return os.sysconf("SC_PAGE_SIZE")
+
+
 def read_rss_bytes() -> int:
     """Resident set size of this process in bytes, from ``/proc/self/statm``."""
-    return int(_STATM.read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    return int(_STATM.read_text().split()[1]) * _page_size()
 
 
 def _read_int(path: Path) -> int | None:
@@ -132,11 +144,14 @@ def memory_headroom_bytes(
 
 def resolve_limit(max_memory: int | None) -> int | None:
     """The limit in bytes for ``--max-memory`` (None = default, 0 = off); None means no watchdog."""
-    if not _STATM.exists():
-        logger.info("memory limit inactive: this platform has no /proc/self/statm to sample RSS from")
-        return None
     if max_memory == 0:
         logger.info("memory limit off (--max-memory 0)")
+        return None
+    if not rss_readable():
+        if max_memory is not None:
+            logger.warning("--max-memory ignored: this platform has no /proc/self/statm to sample RSS from")
+        else:
+            logger.info("memory limit inactive: this platform has no /proc/self/statm to sample RSS from")
         return None
     if max_memory is not None:
         logger.info("memory limit %.1f GiB (--max-memory)", Public(max_memory / GiB))
@@ -189,7 +204,10 @@ class MemoryWatchdog:
         self._thread: threading.Thread | None = None
 
     def __enter__(self) -> MemoryWatchdog:
-        """Start sampling when a limit is set."""
+        """Start sampling when a limit is set and RSS can be read."""
+        if self.limit_bytes is not None and self._rss_reader is read_rss_bytes and not rss_readable():
+            logger.warning("memory limit not enforced: this platform has no /proc/self/statm to sample RSS from")
+            self.limit_bytes = None
         if self.limit_bytes is not None:
             self._thread = threading.Thread(target=self._watch, name="pedsum-memory-watchdog", daemon=True)
             self._thread.start()

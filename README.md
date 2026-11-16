@@ -1616,6 +1616,9 @@ held, then exits with code 3.
   pedsum logs the limit it chose when it starts.
 - `--max-memory SIZE` sets the limit, e.g. `--max-memory 12G` or
   `--max-memory 500M`. `--max-memory 0` turns it off.
+- The limit is Linux only: the thread reads `/proc/self/statm`. On
+  Windows and macOS pedsum runs without one, logs that the limit is
+  inactive, and warns that `--max-memory SIZE` is ignored.
 - The limit narrows the window for the kernel's OOM killer; it does not
   close it. Memory is sampled once a second, so a fast enough allocation
   can still cross it before pedsum notices. To make a limit binding, run

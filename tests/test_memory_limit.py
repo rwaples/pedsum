@@ -13,7 +13,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 import yaml
-from conftest import EXAMPLE, run_pedsum
+from conftest import EXAMPLE, requires_statm, run_pedsum
 
 from pedsum import memory, report
 from pedsum.memory import EXIT_MEMORY_LIMIT, MemoryWatchdog, memory_headroom_bytes, parse_size, resolve_limit
@@ -104,6 +104,7 @@ def test_headroom_none_when_nothing_readable(tmp_path):
     assert memory_headroom_bytes(tmp_path / "no-proc", tmp_path / "no-cgroup") is None
 
 
+@requires_statm
 def test_resolve_limit():
     """0 turns the limit off, an explicit size is used as given."""
     assert resolve_limit(0) is None
@@ -112,11 +113,47 @@ def test_resolve_limit():
     assert default is None or default > 0
 
 
-@pytest.mark.parametrize("max_memory", [None, 0, 5 * GiB])
-def test_no_watchdog_without_proc_statm(tmp_path, monkeypatch, max_memory):
-    """Where RSS can't be sampled (Windows), no limit is set, even an explicit one."""
+@pytest.mark.parametrize(
+    ("max_memory", "level", "message"),
+    [
+        (None, logging.INFO, "memory limit inactive"),
+        (0, logging.INFO, "memory limit off (--max-memory 0)"),
+        (5 * GiB, logging.WARNING, "--max-memory ignored"),
+    ],
+)
+def test_no_limit_without_proc_statm(tmp_path, monkeypatch, caplog, max_memory, level, message):
+    """Where RSS can't be sampled (Windows), no limit is set, and an explicit one is a warning."""
     monkeypatch.setattr(memory, "_STATM", tmp_path / "missing")
-    assert resolve_limit(max_memory) is None
+    with caplog.at_level(logging.INFO):
+        assert resolve_limit(max_memory) is None
+    assert [(r.levelno, r.getMessage().startswith(message)) for r in caplog.records] == [(level, True)]
+
+
+def test_watchdog_without_proc_statm_starts_no_thread(tmp_path, monkeypatch, caplog):
+    """A limit given straight to the watchdog warns and samples nothing where RSS can't be read."""
+    monkeypatch.setattr(memory, "_STATM", tmp_path / "missing")
+    with caplog.at_level(logging.WARNING), MemoryWatchdog(5 * GiB) as wd:
+        assert wd._thread is None
+    assert any("memory limit not enforced" in r.getMessage() for r in caplog.records)
+
+
+_SYSCONF_AT_IMPORT = """
+import os, sys
+real, callers = os.sysconf, []
+def recording(name):
+    callers.append(sys._getframe(1).f_globals.get("__name__", ""))
+    return real(name)
+os.sysconf = recording
+import pedsum.cli, pedsum.memory
+print(" ".join(c for c in callers if c.split(".")[0] == "pedsum"))
+"""
+
+
+def test_import_calls_no_os_sysconf():
+    """Importing pedsum calls no os.sysconf, which Windows lacks (the stdlib's own calls are Linux-only)."""
+    proc = subprocess.run([sys.executable, "-c", _SYSCONF_AT_IMPORT], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == ""
 
 
 def test_disabled_limit_starts_no_thread():

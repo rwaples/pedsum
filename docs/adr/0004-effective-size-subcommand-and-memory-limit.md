@@ -46,5 +46,5 @@ On the 783,029-row horse pedigree, `summarize` ran for 30 minutes and was then O
   - The unreleased 0.14.x change that gated Ne_GC behind `--ne-coancestry` is superseded before it ships.
 - **F is computed twice** when a user runs both commands. That takes 0.74 s on horse, and minutes at 10M+ rows.
 - **New exit code 3** means pedsum stopped itself at the memory limit. Codes 1 (validation) and 2 (usage or file errors) keep their meanings.
-- **The watchdog reads `/proc`.** Where `/proc` is missing, pedsum logs that the limit is inactive and runs without it.
+- **The watchdog reads `/proc`.** Where `/proc` is missing, pedsum logs that the limit is inactive and runs without it. Where `/proc/self/statm` is missing (Windows, macOS), an explicit `--max-memory SIZE` is ignored with a warning (2026-11-16).
 - **Progress reporting is out of scope.** It waits on pedigree-graph's `progress=` argument (pedigree-graph#37).
