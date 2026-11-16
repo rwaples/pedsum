@@ -15,7 +15,7 @@ import pytest
 import yaml
 from conftest import EXAMPLE, run_pedsum
 
-from pedsum import report
+from pedsum import memory, report
 from pedsum.memory import EXIT_MEMORY_LIMIT, MemoryWatchdog, memory_headroom_bytes, parse_size, resolve_limit
 from pedsum.report import atomic_output, to_csv_gz, write_long_tsv, write_yaml
 
@@ -110,6 +110,13 @@ def test_resolve_limit():
     assert resolve_limit(5 * GiB) == 5 * GiB
     default = resolve_limit(None)
     assert default is None or default > 0
+
+
+@pytest.mark.parametrize("max_memory", [None, 0, 5 * GiB])
+def test_no_watchdog_without_proc_statm(tmp_path, monkeypatch, max_memory):
+    """Where RSS can't be sampled (Windows), no limit is set, even an explicit one."""
+    monkeypatch.setattr(memory, "_STATM", tmp_path / "missing")
+    assert resolve_limit(max_memory) is None
 
 
 def test_disabled_limit_starts_no_thread():

@@ -33,7 +33,9 @@ DEFAULT_LIMIT_FRACTION = 0.8
 
 GiB = 2**30
 
-_PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+#: Where the watchdog samples RSS. Linux only: elsewhere, Windows included, there
+#: is no watchdog.
+_STATM = Path("/proc/self/statm")
 _SIZE_UNITS = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
 
 
@@ -54,8 +56,7 @@ def parse_size(text: str) -> int:
 
 def read_rss_bytes() -> int:
     """Resident set size of this process in bytes, from ``/proc/self/statm``."""
-    with open("/proc/self/statm") as fh:
-        return int(fh.read().split()[1]) * _PAGE_SIZE
+    return int(_STATM.read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
 
 
 def _read_int(path: Path) -> int | None:
@@ -131,6 +132,9 @@ def memory_headroom_bytes(
 
 def resolve_limit(max_memory: int | None) -> int | None:
     """The limit in bytes for ``--max-memory`` (None = default, 0 = off); None means no watchdog."""
+    if not _STATM.exists():
+        logger.info("memory limit inactive: this platform has no /proc/self/statm to sample RSS from")
+        return None
     if max_memory == 0:
         logger.info("memory limit off (--max-memory 0)")
         return None
