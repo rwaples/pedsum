@@ -17,6 +17,7 @@ import pytest
 from hypothesis import settings
 
 from pedsum.cli import main
+from pedsum.memory import rss_readable
 from pedsum.pedigree_ops import IdIndex, rows_of_parents
 from pedsum.report import output_name
 from pedsum.validate import ValidationConfig, ValidationContext, run_checks
@@ -25,7 +26,7 @@ REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
 
 #: For tests that need the memory watchdog, which samples /proc/self/statm (Linux only).
-requires_statm = pytest.mark.skipif(not Path("/proc/self/statm").exists(), reason="no /proc/self/statm (not Linux)")
+requires_statm = pytest.mark.skipif(not rss_readable(), reason="no /proc/self/statm (not Linux)")
 
 if TYPE_CHECKING:
     import numpy as np

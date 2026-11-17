@@ -126,7 +126,8 @@ def test_no_limit_without_proc_statm(tmp_path, monkeypatch, caplog, max_memory, 
     monkeypatch.setattr(memory, "_STATM", tmp_path / "missing")
     with caplog.at_level(logging.INFO):
         assert resolve_limit(max_memory) is None
-    assert [(r.levelno, r.getMessage().startswith(message)) for r in caplog.records] == [(level, True)]
+    records = [r for r in caplog.records if r.name == memory.logger.name]
+    assert [(r.levelno, r.getMessage().startswith(message)) for r in records] == [(level, True)]
 
 
 def test_watchdog_without_proc_statm_starts_no_thread(tmp_path, monkeypatch, caplog):
@@ -250,6 +251,7 @@ def test_breach_after_disarm_warns_and_does_not_exit(caplog):
     assert any("after its output was published" in m for m in warnings)
 
 
+@requires_statm
 def test_real_breach_in_subprocess_exits_3():
     """A real allocation past the limit stops the process with exit 3 and an ERROR line."""
     code = (
