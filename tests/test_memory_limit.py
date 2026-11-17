@@ -153,7 +153,10 @@ print(" ".join(c for c in callers if c.split(".")[0] == "pedsum"))
 
 
 def test_import_calls_no_os_sysconf():
-    """Importing pedsum calls no os.sysconf, which Windows lacks (the stdlib's own calls are Linux-only)."""
+    """Importing pedsum calls no os.sysconf, which Windows lacks (the stdlib's own calls are Linux-only).
+
+    Linux records each pedsum caller; where os.sysconf is missing, the import succeeding is all it checks.
+    """
     proc = subprocess.run([sys.executable, "-c", _SYSCONF_AT_IMPORT], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == ""

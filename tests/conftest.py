@@ -26,7 +26,9 @@ REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "example_pedigree.tsv"
 
 #: For tests that need the memory watchdog, which samples /proc/self/statm (Linux only).
-requires_statm = pytest.mark.skipif(not rss_readable(), reason="no /proc/self/statm (not Linux)")
+requires_statm = pytest.mark.skipif(
+    not rss_readable(), reason="no readable /proc/self/statm (not Linux, or no /proc mount)"
+)
 
 if TYPE_CHECKING:
     import numpy as np
