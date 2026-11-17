@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Requires pedigree-graph 0.16** (`>=0.16,<0.17`). A parent id that two
+  or more rows name but that has no row of its own is now a founder of the
+  kinship recurrence, so kinship, `F` and the Ne estimators rise on
+  pedigrees with such ids, and equivalent complete generations count
+  external parents. A pedigree whose every parent has a row is unchanged.
+  pedsum's own `ecg` column still counts represented parents only, so on
+  pedigrees with external parent ids it now differs from pedigree-graph's
+  value (pedigree-graph#67).
+
 - **`summarize --safe-attempt` closes residual leaks.** The per-depth
   means `mean_distinct_ancestors` and `mean_descendant_paths` are no longer
   written: a mean of a count that takes few values, times the depth size,
