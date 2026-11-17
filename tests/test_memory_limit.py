@@ -126,7 +126,8 @@ def test_no_limit_without_proc_statm(tmp_path, monkeypatch, caplog, max_memory, 
     monkeypatch.setattr(memory, "_STATM", tmp_path / "missing")
     with caplog.at_level(logging.INFO):
         assert resolve_limit(max_memory) is None
-    records = [r for r in caplog.records if r.name == memory.logger.name]
+    ours = memory.logger.name
+    records = [r for r in caplog.records if r.name == ours or r.name.startswith(ours + ".")]
     assert [(r.levelno, r.getMessage().startswith(message)) for r in records] == [(level, True)]
 
 
@@ -139,12 +140,21 @@ def test_watchdog_without_proc_statm_starts_no_thread(tmp_path, monkeypatch, cap
 
 
 _SYSCONF_AT_IMPORT = """
-import os, sys
+import os, sys, sysconfig
 # Windows has no os.sysconf: there the imports succeeding is the test.
 real, callers = getattr(os, "sysconf", None), []
+stdlib = os.path.normcase(sysconfig.get_paths()["stdlib"])
 if real is not None:
     def recording(name):
-        callers.append(sys._getframe(1).f_globals.get("__name__", ""))
+        # The innermost caller past import machinery and stdlib helper functions, so a call
+        # pedsum makes through functools.partial names pedsum, while a stdlib module's own
+        # Linux-only call at import (asyncio's selector_events) names that module.
+        frame = sys._getframe(1)
+        while frame is not None and frame.f_code.co_name != "<module>" and (
+                frame.f_code.co_filename.startswith("<frozen")
+                or os.path.normcase(frame.f_code.co_filename).startswith(stdlib)):
+            frame = frame.f_back
+        callers.append("" if frame is None else frame.f_globals.get("__name__", ""))
         return real(name)
     os.sysconf = recording
 import pedsum.cli, pedsum.memory
@@ -252,6 +262,22 @@ def test_breach_after_disarm_warns_and_does_not_exit(caplog):
     assert exits == []
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("after its output was published" in m for m in warnings)
+
+
+def test_real_watchdog_without_statm_warns_and_runs_on():
+    """Where RSS can't be sampled, a real process given a limit warns, starts no thread and exits 0."""
+    code = (
+        "import logging, threading\n"
+        "from pathlib import Path\n"
+        "import pedsum.memory as memory\n"
+        "logging.basicConfig(level=logging.INFO)\n"
+        "memory._STATM = Path('no-such-statm')\n"
+        "with memory.MemoryWatchdog(200 * 2**20, poll_s=0.05):\n"
+        "    assert not any(t.name == 'pedsum-memory-watchdog' for t in threading.enumerate())\n"
+    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False)
+    assert res.returncode == 0, res.stderr
+    assert "memory limit not enforced" in res.stderr
 
 
 @requires_statm
