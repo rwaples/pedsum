@@ -139,11 +139,13 @@ def test_watchdog_without_proc_statm_starts_no_thread(tmp_path, monkeypatch, cap
 
 _SYSCONF_AT_IMPORT = """
 import os, sys
-real, callers = os.sysconf, []
-def recording(name):
-    callers.append(sys._getframe(1).f_globals.get("__name__", ""))
-    return real(name)
-os.sysconf = recording
+# Windows has no os.sysconf: there the imports succeeding is the test.
+real, callers = getattr(os, "sysconf", None), []
+if real is not None:
+    def recording(name):
+        callers.append(sys._getframe(1).f_globals.get("__name__", ""))
+        return real(name)
+    os.sysconf = recording
 import pedsum.cli, pedsum.memory
 print(" ".join(c for c in callers if c.split(".")[0] == "pedsum"))
 """
