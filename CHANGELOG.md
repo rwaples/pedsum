@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 — 2026-11-18 — pedigree-graph 0.16, --safe-attempt release list, Windows
 
 - **Requires pedigree-graph 0.16** (`>=0.16,<0.17`). A parent id that two
   or more rows name but that has no row of its own is now a founder of the
