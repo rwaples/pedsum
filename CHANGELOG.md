@@ -11,6 +11,13 @@
   pedigrees with external parent ids it now differs from pedigree-graph's
   value (pedigree-graph#67).
 
+- **pedsum runs on Windows** (and macOS). Importing it called
+  `os.sysconf`, which Windows lacks, so every command failed there. The
+  memory limit (`--max-memory`) samples RSS from `/proc/self/statm` and
+  stays Linux-only: elsewhere the default limit is off with an INFO line,
+  and an explicit `--max-memory` size is ignored with a WARNING. Linux runs
+  are unchanged.
+
 - **`summarize --safe-attempt` closes residual leaks.** The per-depth
   means `mean_distinct_ancestors` and `mean_descendant_paths` are no longer
   written: a mean of a count that takes few values, times the depth size,
