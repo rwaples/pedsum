@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Quartiles of integer columns are no longer truncated.** A median, `q1` or
+  `q3` that falls between two values is now written as a float (a depth
+  median of 2.5 used to read 2); one on a whole number is still an int.
+  This affects every integer distribution in `summary.yaml` and
+  `summary.extra.yaml` (count sections, `individual.distributions`), the
+  matching rows of `summary.pedigree.tsv` and `summary.individual.tsv`, and
+  `depth_stats` under `--safe-attempt`. Float columns are unchanged.
+
 ## 0.18.0 — 2026-11-18 — pedigree-graph 0.16, --safe-attempt release list, Windows
 
 - **Requires pedigree-graph 0.16** (`>=0.16,<0.17`). A parent id that two

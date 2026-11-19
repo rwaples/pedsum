@@ -55,9 +55,22 @@ def test_numeric_distribution_float(vals: list[float]) -> None:
 
 @given(vals=st.lists(st.integers(min_value=-10_000, max_value=10_000), max_size=50))
 def test_numeric_distribution_int(vals: list[int]) -> None:
-    """Integer distributions keep the quantile ordering despite truncating casts."""
+    """Integer quartiles equal NumPy's, and are ints when they fall on a whole number."""
     arr = np.array(vals, dtype=np.int64)
-    _assert_distribution_invariants(numeric_distribution(arr), len(vals))
+    d = numeric_distribution(arr)
+    _assert_distribution_invariants(d, len(vals))
+    if not vals:
+        return
+    for got, want in ((d.q1, np.quantile(arr, 0.25)), (d.median, np.median(arr)), (d.q3, np.quantile(arr, 0.75))):
+        assert got == want
+        assert isinstance(got, int) == float(want).is_integer()
+
+
+def test_numeric_distribution_int_median_between_values() -> None:
+    """An even count of integers has its median halfway between the middle two."""
+    d = numeric_distribution(np.repeat(np.arange(6), 1000))
+    assert d.median == 2.5
+    assert (d.q1, d.q3) == (1, 4)
 
 
 @given(weights=st.lists(_NONNEG_FLOATS, max_size=50))

@@ -35,7 +35,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -44,7 +44,7 @@ pedigree:
           mean: 0.7143
           std: 0.488
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 1
           max: 1
@@ -55,7 +55,7 @@ pedigree:
           min: 0
           q1: 0
           median: 1
-          q3: 1
+          q3: 1.5
           max: 2
           nz: 4
       male:
@@ -65,7 +65,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -74,7 +74,7 @@ pedigree:
           mean: 0.7143
           std: 0.488
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 1
           max: 1
@@ -83,7 +83,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -99,9 +99,9 @@ pedigree:
         mean: 1.3333
         std: 1.3663
         min: 0
-        q1: 0
+        q1: 0.25
         median: 1
-        q3: 2
+        q3: 2.5
         max: 3
         nz: 4
       offspring_count_hist:
@@ -114,7 +114,7 @@ pedigree:
         mean: 0.6667
         std: 0.5164
         min: 0
-        q1: 0
+        q1: 0.25
         median: 1
         q3: 1
         max: 1
@@ -164,7 +164,7 @@ pedigree:
         std: 0.5774
         min: 0
         q1: 0
-        median: 0
+        median: 0.5
         q3: 1
         max: 1
         nz: 2
@@ -179,7 +179,7 @@ pedigree:
         std: 0.5774
         min: 0
         q1: 0
-        median: 0
+        median: 0.5
         q3: 1
         max: 1
         nz: 2
@@ -275,7 +275,7 @@ individual:
       min: 0
       q1: 0
       median: 1
-      q3: 1
+      q3: 1.5
       max: 4
       nz: 8
     n_uncles_aunts:
@@ -320,7 +320,7 @@ individual:
       min: 0
       q1: 0
       median: 3
-      q3: 3
+      q3: 3.5
       max: 12
       nz: 10
 
@@ -383,7 +383,7 @@ distributions	n_grandchildren	std	1.387
 distributions	n_grandchildren	min	0
 distributions	n_grandchildren	q1	0
 distributions	n_grandchildren	median	1
-distributions	n_grandchildren	q3	1
+distributions	n_grandchildren	q3	1.5
 distributions	n_grandchildren	max	4
 distributions	n_grandchildren	nz	8
 distributions	n_uncles_aunts	mean	0.9333
@@ -423,7 +423,7 @@ distributions	n_descendant_paths	std	3.9364
 distributions	n_descendant_paths	min	0
 distributions	n_descendant_paths	q1	0
 distributions	n_descendant_paths	median	3
-distributions	n_descendant_paths	q3	3
+distributions	n_descendant_paths	q3	3.5
 distributions	n_descendant_paths	max	12
 distributions	n_descendant_paths	nz	10
 
@@ -523,7 +523,7 @@ reproduction	mate_count	nz	10
 reproduction	mate_count_male	mean	0.7143
 reproduction	mate_count_male	std	0.488
 reproduction	mate_count_male	min	0
-reproduction	mate_count_male	q1	0
+reproduction	mate_count_male	q1	0.5
 reproduction	mate_count_male	median	1
 reproduction	mate_count_male	q3	1
 reproduction	mate_count_male	max	1
@@ -531,7 +531,7 @@ reproduction	mate_count_male	nz	5
 reproduction	mate_count_female	mean	0.7143
 reproduction	mate_count_female	std	0.488
 reproduction	mate_count_female	min	0
-reproduction	mate_count_female	q1	0
+reproduction	mate_count_female	q1	0.5
 reproduction	mate_count_female	median	1
 reproduction	mate_count_female	q3	1
 reproduction	mate_count_female	max	1
@@ -541,7 +541,7 @@ genealogy	descendant_paths	std	3.9364
 genealogy	descendant_paths	min	0
 genealogy	descendant_paths	q1	0
 genealogy	descendant_paths	median	3
-genealogy	descendant_paths	q3	3
+genealogy	descendant_paths	q3	3.5
 genealogy	descendant_paths	max	12
 genealogy	descendant_paths	nz	10
 genealogy	distinct_ancestors		
@@ -640,7 +640,7 @@ sex_summary	female	n_terminal	2
 sex_summary	female	offspring_count.mean	1.2857
 sex_summary	female	offspring_count.std	1.1127
 sex_summary	female	offspring_count.min	0
-sex_summary	female	offspring_count.q1	0
+sex_summary	female	offspring_count.q1	0.5
 sex_summary	female	offspring_count.median	1
 sex_summary	female	offspring_count.q3	2
 sex_summary	female	offspring_count.max	3
@@ -648,7 +648,7 @@ sex_summary	female	offspring_count.nz	5
 sex_summary	female	mate_count.mean	0.7143
 sex_summary	female	mate_count.std	0.488
 sex_summary	female	mate_count.min	0
-sex_summary	female	mate_count.q1	0
+sex_summary	female	mate_count.q1	0.5
 sex_summary	female	mate_count.median	1
 sex_summary	female	mate_count.q3	1
 sex_summary	female	mate_count.max	1
@@ -658,7 +658,7 @@ sex_summary	female	depth.std	0.8997
 sex_summary	female	depth.min	0
 sex_summary	female	depth.q1	0
 sex_summary	female	depth.median	1
-sex_summary	female	depth.q3	1
+sex_summary	female	depth.q3	1.5
 sex_summary	female	depth.max	2
 sex_summary	female	depth.nz	4
 sex_summary	male	n	7
@@ -669,7 +669,7 @@ sex_summary	male	n_terminal	2
 sex_summary	male	offspring_count.mean	1.2857
 sex_summary	male	offspring_count.std	1.1127
 sex_summary	male	offspring_count.min	0
-sex_summary	male	offspring_count.q1	0
+sex_summary	male	offspring_count.q1	0.5
 sex_summary	male	offspring_count.median	1
 sex_summary	male	offspring_count.q3	2
 sex_summary	male	offspring_count.max	3
@@ -677,7 +677,7 @@ sex_summary	male	offspring_count.nz	5
 sex_summary	male	mate_count.mean	0.7143
 sex_summary	male	mate_count.std	0.488
 sex_summary	male	mate_count.min	0
-sex_summary	male	mate_count.q1	0
+sex_summary	male	mate_count.q1	0.5
 sex_summary	male	mate_count.median	1
 sex_summary	male	mate_count.q3	1
 sex_summary	male	mate_count.max	1
@@ -685,7 +685,7 @@ sex_summary	male	mate_count.nz	5
 sex_summary	male	depth.mean	1.2857
 sex_summary	male	depth.std	1.1127
 sex_summary	male	depth.min	0
-sex_summary	male	depth.q1	0
+sex_summary	male	depth.q1	0.5
 sex_summary	male	depth.median	1
 sex_summary	male	depth.q3	2
 sex_summary	male	depth.max	3
@@ -701,9 +701,9 @@ depth_summary	0	n_terminal	2
 depth_summary	0	offspring_count.mean	1.3333
 depth_summary	0	offspring_count.std	1.3663
 depth_summary	0	offspring_count.min	0
-depth_summary	0	offspring_count.q1	0
+depth_summary	0	offspring_count.q1	0.25
 depth_summary	0	offspring_count.median	1
-depth_summary	0	offspring_count.q3	2
+depth_summary	0	offspring_count.q3	2.5
 depth_summary	0	offspring_count.max	3
 depth_summary	0	offspring_count.nz	4
 depth_summary	0	offspring_count_hist.0	0.3333
@@ -714,7 +714,7 @@ depth_summary	0	offspring_count_hist.4+	0.0
 depth_summary	0	mate_count.mean	0.6667
 depth_summary	0	mate_count.std	0.5164
 depth_summary	0	mate_count.min	0
-depth_summary	0	mate_count.q1	0
+depth_summary	0	mate_count.q1	0.25
 depth_summary	0	mate_count.median	1
 depth_summary	0	mate_count.q3	1
 depth_summary	0	mate_count.max	1
@@ -764,7 +764,7 @@ depth_summary	2	offspring_count.mean	0.5
 depth_summary	2	offspring_count.std	0.5774
 depth_summary	2	offspring_count.min	0
 depth_summary	2	offspring_count.q1	0
-depth_summary	2	offspring_count.median	0
+depth_summary	2	offspring_count.median	0.5
 depth_summary	2	offspring_count.q3	1
 depth_summary	2	offspring_count.max	1
 depth_summary	2	offspring_count.nz	2
@@ -777,7 +777,7 @@ depth_summary	2	mate_count.mean	0.5
 depth_summary	2	mate_count.std	0.5774
 depth_summary	2	mate_count.min	0
 depth_summary	2	mate_count.q1	0
-depth_summary	2	mate_count.median	0
+depth_summary	2	mate_count.median	0.5
 depth_summary	2	mate_count.q3	1
 depth_summary	2	mate_count.max	1
 depth_summary	2	mate_count.nz	2
@@ -974,7 +974,7 @@ pedigree:
         mean: 0.7143
         std: 0.488
         min: 0
-        q1: 0
+        q1: 0.5
         median: 1
         q3: 1
         max: 1
@@ -983,7 +983,7 @@ pedigree:
         mean: 0.7143
         std: 0.488
         min: 0
-        q1: 0
+        q1: 0.5
         median: 1
         q3: 1
         max: 1
@@ -995,7 +995,7 @@ pedigree:
         min: 0
         q1: 0
         median: 3
-        q3: 3
+        q3: 3.5
         max: 12
         nz: 10
       distinct_ancestors: null

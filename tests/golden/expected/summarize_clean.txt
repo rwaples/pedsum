@@ -1279,8 +1279,8 @@ relationship_summary	relatives_by_degree	4.mean	23.48
 relationship_summary	relatives_by_degree	4.std	11.5871
 relationship_summary	relatives_by_degree	4.min	0
 relationship_summary	relatives_by_degree	4.q1	15
-relationship_summary	relatives_by_degree	4.median	22
-relationship_summary	relatives_by_degree	4.q3	32
+relationship_summary	relatives_by_degree	4.median	22.5
+relationship_summary	relatives_by_degree	4.q3	32.25
 relationship_summary	relatives_by_degree	4.max	56
 relationship_summary	relatives_by_degree	4.nz	198
 relationship_summary	relatives_by_degree	3.mean	17.01
@@ -1302,7 +1302,7 @@ relationship_summary	relatives_by_degree	2.nz	200
 relationship_summary	relatives_by_degree	1.mean	4.13
 relationship_summary	relatives_by_degree	1.std	1.5476
 relationship_summary	relatives_by_degree	1.min	2
-relationship_summary	relatives_by_degree	1.q1	2
+relationship_summary	relatives_by_degree	1.q1	2.75
 relationship_summary	relatives_by_degree	1.median	4
 relationship_summary	relatives_by_degree	1.q3	5
 relationship_summary	relatives_by_degree	1.max	8
@@ -1312,7 +1312,7 @@ relationship_summary	relatives_total	std	29.9263
 relationship_summary	relatives_total	min	14
 relationship_summary	relatives_total	q1	56
 relationship_summary	relatives_total	median	78
-relationship_summary	relatives_total	q3	99
+relationship_summary	relatives_total	q3	99.25
 relationship_summary	relatives_total	max	126
 relationship_summary	relatives_total	nz	200
 relationship_summary	related_pair_density_by_depth	0.depth	0
@@ -1419,9 +1419,9 @@ founder_contribution	frac_founders_with_descendants		1.0
 founder_contribution	descendant_paths_per_founder	mean	38.6667
 founder_contribution	descendant_paths_per_founder	std	18.6424
 founder_contribution	descendant_paths_per_founder	min	15
-founder_contribution	descendant_paths_per_founder	q1	22
+founder_contribution	descendant_paths_per_founder	q1	22.25
 founder_contribution	descendant_paths_per_founder	median	35
-founder_contribution	descendant_paths_per_founder	q3	50
+founder_contribution	descendant_paths_per_founder	q3	50.5
 founder_contribution	descendant_paths_per_founder	max	74
 founder_contribution	descendant_paths_per_founder	nz	30
 founder_contribution	effective_founders_by_descendant_paths		24.4957
@@ -2012,9 +2012,9 @@ pedigree:
         mean: 38.6667
         std: 18.6424
         min: 15
-        q1: 22
+        q1: 22.25
         median: 35
-        q3: 50
+        q3: 50.5
         max: 74
         nz: 30
       effective_founders_by_descendant_paths: 24.4957
@@ -2165,8 +2165,8 @@ pedigree:
           std: 11.5871
           min: 0
           q1: 15
-          median: 22
-          q3: 32
+          median: 22.5
+          q3: 32.25
           max: 56
           nz: 198
         '3':
@@ -2191,7 +2191,7 @@ pedigree:
           mean: 4.13
           std: 1.5476
           min: 2
-          q1: 2
+          q1: 2.75
           median: 4
           q3: 5
           max: 8
@@ -2202,7 +2202,7 @@ pedigree:
         min: 14
         q1: 56
         median: 78
-        q3: 99
+        q3: 99.25
         max: 126
         nz: 200
       related_pair_density_by_depth:

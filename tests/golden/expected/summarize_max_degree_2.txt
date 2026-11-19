@@ -755,9 +755,9 @@ pedigree:
         mean: 38.6667
         std: 18.6424
         min: 15
-        q1: 22
+        q1: 22.25
         median: 35
-        q3: 50
+        q3: 50.5
         max: 74
         nz: 30
       effective_founders_by_descendant_paths: 24.4957

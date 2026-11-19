@@ -98,8 +98,9 @@ class Distribution:
     """One numeric column summarised: mean, std, quartiles, extrema, the count of nonzero values and of all values.
 
     ``as_dict`` renders the mapping the outputs write, in field order.
-    Quartiles and extrema are ints for an integer column. ``n`` gates what
-    ``pedsum.disclosure`` releases and is not written.
+    Extrema are ints for an integer column, and so is a quartile that falls
+    on a whole number; one between two values (a median of 2.5) is a float.
+    ``n`` gates what ``pedsum.disclosure`` releases and is not written.
     """
 
     mean: float
@@ -123,13 +124,18 @@ def numeric_distribution(values: pl.Series | np.ndarray) -> Distribution:
     n = len(arr)
     is_float = np.issubdtype(arr.dtype, np.floating)
     cast = float if is_float else int
+
+    def quantile(q: float) -> float:
+        value = float(np.median(arr) if q == 0.5 else np.quantile(arr, q))
+        return int(value) if not is_float and value.is_integer() else value
+
     return Distribution(
         mean=float(arr.mean()) if n else 0.0,
         std=float(arr.std(ddof=1)) if n > 1 else 0.0,
         min=cast(arr.min()) if n else 0,
-        q1=cast(np.quantile(arr, 0.25)) if n else 0,
-        median=cast(np.median(arr)) if n else 0,
-        q3=cast(np.quantile(arr, 0.75)) if n else 0,
+        q1=quantile(0.25) if n else 0,
+        median=quantile(0.5) if n else 0,
+        q3=quantile(0.75) if n else 0,
         max=cast(arr.max()) if n else 0,
         nz=int((arr != 0).sum()) if n else 0,
         n=n,

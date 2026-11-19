@@ -35,7 +35,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -44,7 +44,7 @@ pedigree:
           mean: 0.7143
           std: 0.488
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 1
           max: 1
@@ -55,7 +55,7 @@ pedigree:
           min: 0
           q1: 0
           median: 1
-          q3: 1
+          q3: 1.5
           max: 2
           nz: 4
       male:
@@ -65,7 +65,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -74,7 +74,7 @@ pedigree:
           mean: 0.7143
           std: 0.488
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 1
           max: 1
@@ -83,7 +83,7 @@ pedigree:
           mean: 1.2857
           std: 1.1127
           min: 0
-          q1: 0
+          q1: 0.5
           median: 1
           q3: 2
           max: 3
@@ -99,9 +99,9 @@ pedigree:
         mean: 1.3333
         std: 1.3663
         min: 0
-        q1: 0
+        q1: 0.25
         median: 1
-        q3: 2
+        q3: 2.5
         max: 3
         nz: 4
       offspring_count_hist:
@@ -114,7 +114,7 @@ pedigree:
         mean: 0.6667
         std: 0.5164
         min: 0
-        q1: 0
+        q1: 0.25
         median: 1
         q3: 1
         max: 1
@@ -164,7 +164,7 @@ pedigree:
         std: 0.5774
         min: 0
         q1: 0
-        median: 0
+        median: 0.5
         q3: 1
         max: 1
         nz: 2
@@ -179,7 +179,7 @@ pedigree:
         std: 0.5774
         min: 0
         q1: 0
-        median: 0
+        median: 0.5
         q3: 1
         max: 1
         nz: 2
@@ -275,7 +275,7 @@ individual:
       min: 0
       q1: 0
       median: 1
-      q3: 1
+      q3: 1.5
       max: 4
       nz: 8
     n_uncles_aunts:
@@ -320,7 +320,7 @@ individual:
       min: 0
       q1: 0
       median: 3
-      q3: 3
+      q3: 3.5
       max: 12
       nz: 10
 
@@ -456,7 +456,7 @@ pedigree:
         mean: 0.7143
         std: 0.488
         min: 0
-        q1: 0
+        q1: 0.5
         median: 1
         q3: 1
         max: 1
@@ -465,7 +465,7 @@ pedigree:
         mean: 0.7143
         std: 0.488
         min: 0
-        q1: 0
+        q1: 0.5
         median: 1
         q3: 1
         max: 1
@@ -477,7 +477,7 @@ pedigree:
         min: 0
         q1: 0
         median: 3
-        q3: 3
+        q3: 3.5
         max: 12
         nz: 10
       distinct_ancestors: null

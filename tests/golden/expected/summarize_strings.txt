@@ -29,8 +29,8 @@ pedigree:
           mean: 1.25
           std: 0.9574
           min: 0
-          q1: 0
-          median: 1
+          q1: 0.75
+          median: 1.5
           q3: 2
           max: 2
           nz: 3
@@ -38,7 +38,7 @@ pedigree:
           mean: 0.75
           std: 0.5
           min: 0
-          q1: 0
+          q1: 0.75
           median: 1
           q3: 1
           max: 1
@@ -47,8 +47,8 @@ pedigree:
           mean: 1.25
           std: 0.9574
           min: 0
-          q1: 0
-          median: 1
+          q1: 0.75
+          median: 1.5
           q3: 2
           max: 2
           nz: 3
@@ -183,7 +183,7 @@ pedigree:
         min: 0
         q1: 0
         median: 0
-        q3: 0
+        q3: 0.5
         max: 1
         nz: 1
       offspring_count_hist:
@@ -198,7 +198,7 @@ pedigree:
         min: 0
         q1: 0
         median: 0
-        q3: 0
+        q3: 0.5
         max: 1
         nz: 1
       mean_distinct_ancestors: 3.6667
@@ -525,7 +525,7 @@ mating_pairs	frac_pairs_with_multiple_children		0.6667
 mating_pairs	children_per_pair	mean	1.6667
 mating_pairs	children_per_pair	std	0.5774
 mating_pairs	children_per_pair	min	1
-mating_pairs	children_per_pair	q1	1
+mating_pairs	children_per_pair	q1	1.5
 mating_pairs	children_per_pair	median	2
 mating_pairs	children_per_pair	q3	2
 mating_pairs	children_per_pair	max	2
@@ -582,7 +582,7 @@ reproduction	mate_count_male	nz	3
 reproduction	mate_count_female	mean	0.75
 reproduction	mate_count_female	std	0.5
 reproduction	mate_count_female	min	0
-reproduction	mate_count_female	q1	0
+reproduction	mate_count_female	q1	0.75
 reproduction	mate_count_female	median	1
 reproduction	mate_count_female	q3	1
 reproduction	mate_count_female	max	1
@@ -650,7 +650,7 @@ founder_summary	by_depth	2.effective_founders_by_descendants	2.9091
 founder_summary	by_depth	2.founder_ancestors.mean	2.6667
 founder_summary	by_depth	2.founder_ancestors.std	0.5774
 founder_summary	by_depth	2.founder_ancestors.min	2
-founder_summary	by_depth	2.founder_ancestors.q1	2
+founder_summary	by_depth	2.founder_ancestors.q1	2.5
 founder_summary	by_depth	2.founder_ancestors.median	3
 founder_summary	by_depth	2.founder_ancestors.q3	3
 founder_summary	by_depth	2.founder_ancestors.max	3
@@ -696,15 +696,15 @@ sex_summary	female	n_terminal	1
 sex_summary	female	offspring_count.mean	1.25
 sex_summary	female	offspring_count.std	0.9574
 sex_summary	female	offspring_count.min	0
-sex_summary	female	offspring_count.q1	0
-sex_summary	female	offspring_count.median	1
+sex_summary	female	offspring_count.q1	0.75
+sex_summary	female	offspring_count.median	1.5
 sex_summary	female	offspring_count.q3	2
 sex_summary	female	offspring_count.max	2
 sex_summary	female	offspring_count.nz	3
 sex_summary	female	mate_count.mean	0.75
 sex_summary	female	mate_count.std	0.5
 sex_summary	female	mate_count.min	0
-sex_summary	female	mate_count.q1	0
+sex_summary	female	mate_count.q1	0.75
 sex_summary	female	mate_count.median	1
 sex_summary	female	mate_count.q3	1
 sex_summary	female	mate_count.max	1
@@ -712,8 +712,8 @@ sex_summary	female	mate_count.nz	3
 sex_summary	female	depth.mean	1.25
 sex_summary	female	depth.std	0.9574
 sex_summary	female	depth.min	0
-sex_summary	female	depth.q1	0
-sex_summary	female	depth.median	1
+sex_summary	female	depth.q1	0.75
+sex_summary	female	depth.median	1.5
 sex_summary	female	depth.q3	2
 sex_summary	female	depth.max	2
 sex_summary	female	depth.nz	3
@@ -845,7 +845,7 @@ depth_summary	2	offspring_count.std	0.5774
 depth_summary	2	offspring_count.min	0
 depth_summary	2	offspring_count.q1	0
 depth_summary	2	offspring_count.median	0
-depth_summary	2	offspring_count.q3	0
+depth_summary	2	offspring_count.q3	0.5
 depth_summary	2	offspring_count.max	1
 depth_summary	2	offspring_count.nz	1
 depth_summary	2	offspring_count_hist.0	0.6667
@@ -858,7 +858,7 @@ depth_summary	2	mate_count.std	0.5774
 depth_summary	2	mate_count.min	0
 depth_summary	2	mate_count.q1	0
 depth_summary	2	mate_count.median	0
-depth_summary	2	mate_count.q3	0
+depth_summary	2	mate_count.q3	0.5
 depth_summary	2	mate_count.max	1
 depth_summary	2	mate_count.nz	1
 depth_summary	2	mean_distinct_ancestors	3.6667
@@ -1013,7 +1013,7 @@ pedigree:
         mean: 1.6667
         std: 0.5774
         min: 1
-        q1: 1
+        q1: 1.5
         median: 2
         q3: 2
         max: 2
@@ -1075,7 +1075,7 @@ pedigree:
         mean: 0.75
         std: 0.5
         min: 0
-        q1: 0
+        q1: 0.75
         median: 1
         q3: 1
         max: 1
@@ -1154,7 +1154,7 @@ pedigree:
           mean: 2.6667
           std: 0.5774
           min: 2
-          q1: 2
+          q1: 2.5
           median: 3
           q3: 3
           max: 3
